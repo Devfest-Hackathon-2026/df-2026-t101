@@ -2,7 +2,7 @@
 
 > **このドキュメントで決めたこと**
 > 1. 生成APIは、Cloud Run（asia-northeast1）上のHTTP JSON API（`/v1`）とする。認証は、FirebaseのIDトークンを `Authorization: Bearer` で送る方式にする。Firebase Hostingの転送（rewrite）は使わず、ブラウザから直接呼ぶ。Hosting経由だと60秒で打ち切られ、生成が間に合わないため。
-> 2. Firestoreへの書き込みはすべてこのAPIが行う。ブラウザはFirestoreを読む（変更を待ち受ける）だけにする。生成は1回のリクエストの中で終わらせ、途中経過はFirestoreに書く。
+> 2. ケース・会話・版への書き込みはこのAPIが行う（`hand-mesh` は利用回数と費用だけを書く）。ブラウザはFirestoreを読むだけにする。生成は1回のリクエスト内で行い、途中経過と期限付きの処理権をFirestoreに書く。
 > 3. エラーは `{"error": {"code", "message", "details", "retryable", "request_id"}}` の形にそろえる。`message` は画面にそのまま出せる日本語にする。
 
 関連：[generation-pipeline.md](generation-pipeline.md)、[data-model.md](data-model.md)、[measurement.md](measurement.md)
@@ -22,7 +22,24 @@
 | リクエストID | すべての応答に `X-Request-Id` を付ける。ログと突き合わせるため |
 | タイムアウト | Cloud Runのリクエストのタイムアウトは300秒。生成APIの中では280秒で打ち切る |
 | 回数の制限 | 1人1日あたり：生成10回、微調整30回、聞き取り60回。全体で1日あたり生成100回。上限は環境変数で変えられる。超えたら `RATE_LIMITED` |
-| 生成の停止スイッチ | 環境変数 `GENERATION_ENABLED=false` にすると、Geminiを呼ぶAPIはすべて `GENERATION_DISABLED` を返す（予算を使い切りそうなときに使う） |
+| 生成の停止スイッチ | Geminiを呼ぶ処理と `hand-mesh` は、毎回共通の `settings/runtime.generation_enabled` を読む。`false`、設定なし、読み取り失敗なら `GENERATION_DISABLED`。両サービスの `GENERATION_ENABLED=false` でも停止する。全体を止める操作はFirestoreの共通設定を `false` にする（片方の環境変数だけでは他方は止まらない） |
+
+### 1.1 生成の重複防止と異常終了からの復旧（MVP）
+
+3日で作り切れる範囲に絞る。全部入りの形（`Idempotency-Key`、リースの更新、費用の予約と精算）は拡張機能とし、§1.2に残す。
+
+- 生成・微調整・OTへの依頼・承認を始めるとき、Firestoreのトランザクションで、ケースに処理中の印 `active_operation = { operation_id, kind, started_at, expires_at }` を書く。`expires_at` は開始から300秒（Cloud Runのタイムアウトと同じ）
+- 有効な印（`expires_at` が未来）があるあいだ、同じケースの生成・微調整・依頼・承認と、採寸・聞き取りの保存は `409 CONFLICT`。画面は送信中ボタンを押せなくし、二重の送信を防ぐ
+- 処理の中では280秒で打ち切る（Geminiの呼び出しとOpenSCADの子プロセスを止め、`GENERATION_TIMEOUT` を記録する）
+- 結果（進み具合、版の状態、ファイルの参照）を書くときは、トランザクションで `active_operation.operation_id` が自分のものかを確かめる。違えば（期限切れで回収されたあとなら）書かずに終える。終わったら印を消す
+- 期限切れの回収：新しい処理を始めるとき、または `POST /recover` を呼んだときに、`expires_at` を過ぎた印があれば、その版を `failed`（`GENERATION_INTERRUPTED`）にし、印を消す。生成・微調整ならケースを `previewing` に戻す。承認中なら `approval.status=requested` のままにする
+- 通信が切れたときは、画面はまずFirestoreの版の状態を読む。処理が続いていれば待ち、`failed` になっていれば「もう一度作る」を出す（勝手に再送しない）
+
+### 1.2 拡張機能（時間があれば）
+
+- `Idempotency-Key` による再送の重複防止（同じキーなら同じ結果を返す）
+- 処理権のリースを15秒ごとに更新し、プロセスが落ちたことを早く見つける
+- GPUとGeminiの費用を、開始前に最大額で予約し、終わったあとで精算する
 
 ## 2. エンドポイント一覧
 
@@ -37,6 +54,7 @@
 | POST | `/v1/cases/{case_id}/designs/{design_id}/refine` | 言葉や数値、色・模様で直す（新しい版を作る） | 持ち主 |
 | POST | `/v1/cases/{case_id}/review-request` | OTに確認を頼む | 持ち主 |
 | POST | `/v1/cases/{case_id}/designs/{design_id}/approval` | OTが「確認済み」にするか、差し戻す | 依頼されたOT |
+| POST | `/v1/cases/{case_id}/recover` | 期限切れの処理中の印を回収し、最新状態を返す（AI・GPU処理なし） | 持ち主、依頼されたOT |
 
 STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロードする。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
 
@@ -135,9 +153,9 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 ```
 
 - `hand_model` は手の座標系（[measurement.md §8.1](measurement.md#81-手の座標系)）の値。S5の3D表示に使う。握りの座標系に直したカプセル（`grip_body.capsules`）は、`POST designs` の中で計算し、版に記録する
-- 同じケースに何度送ってもよい（最後に保存した値が使われる）
+- 同じケースに何度送ってもよい（最後に保存した値が使われる）。ただし、§1.1の処理中の印が有効な間の保存は `409 CONFLICT`。`dry_run` は保存しないので処理権を取らない
 
-- スキーマに合わなければ `422 MEASUREMENT_INVALID`。どの項目がどの制約に違反したかを `details` に入れる
+- スキーマおよび [measurement.md §12](measurement.md#12-出力するjsonmeasurement20) の項目間の制約に合わなければ `422 MEASUREMENT_INVALID`。どの項目がどの制約に違反したかを `details` に入れる。手のモデルの計算前に検証し、負の長さ・半径や欠けた付け根の位置を計算に渡さない
 - 採寸をやり直して保存した場合、それまでの形（designs）は残す。ただし、ケースの `current_design_id` は空に戻す
 
 ### 3.4 `POST /v1/cases/{case_id}/designs`
@@ -150,7 +168,7 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 - 処理には最大で約150秒かかる（[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、`cases/{case_id}/designs/{design_id}` の `progress` を読んで進み具合を出す
 - `design_id` は処理を始めた直後に作るので、Firestoreの `cases/{case_id}.current_design_id` を見れば、応答が返る前から追いかけられる
-- 同じケースで生成中のものがあれば `409 CONFLICT`
+- 同じケースに有効な処理中の印があれば `409 CONFLICT`。期限切れの回収は§1.1に従う
 
 応答 `200 OK`
 
@@ -227,6 +245,10 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 ```
 
 - `reviewer_email` が `therapists` の許可リストにない場合は `422 REVIEWER_NOT_ALLOWED`
+- 対象が最新の `ready`／`needs_attention` の版であることを確かめる
+- **この時点で印刷用STLを作る**：その版の引数で `mode=print`・`quality=print` を描き、R6を通す。できたファイルは、まだ誰も読めない場所（`internal/`）に置き、ファイルのSHA-256（`print_sha256`）と、引数・カプセルから作った `geometry_hash` を版に記録する。R6が不合格なら `RENDER_FAILED` を返し、依頼しない（持ち主が `refine` で直してから頼み直す）
+- こうすると、OTが見る画像と印刷用STLは同じ引数から作られ、承認のときに描き直さずに済む。デプロイで描画のコンテナが新しくなっても、確認待ちの版はそのまま承認できる
+- 処理には20〜60秒かかる。画面は「印刷用のデータを準備しています」と出す
 - ケースの `reviewer_email` と `status = in_review` を書き込み、その版の `approval.status` を `requested` にする
 
 応答 `200 OK`
@@ -246,6 +268,7 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 ```json
 {
   "decision": "approve",
+  "geometry_hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "comment_ja": "くぼみの位置は良いです。最初は短時間から試してください。",
   "checklist": {
     "dimensions_reviewed": true,
@@ -258,8 +281,9 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 ```
 
 - `decision` は `approve` か `reject`。`approve` のときは、`checklist` がすべて `true` でないと `422 CHECKLIST_INCOMPLETE`
-- 確認を頼まれた版より新しい版が作られていたら `409 STALE_DESIGN`（古い版を確認済みにしないため）
-- `approve` のとき、サーバーは `mode=print` で印刷用STLを作り、範囲チェックR6を通してから、`approval.status = approved` にする
+- `geometry_hash` は、OT画面が表示した版の値を送る。最新の版でない、`approval.status` が `requested` でない、またはハッシュが一致しなければ `409 STALE_DESIGN`
+- `approve` のとき、サーバーは描き直さない。依頼のときに作った `internal/` の印刷用STLの `print_sha256` を確かめてから、読める場所（`print.stl`）にコピーし、トランザクションで `approval.status=approved` にする
+- 形を変えたい場合は、OTは差し戻し（`reject`）を選ぶ。持ち主が `refine` で新しい版を作り、OTに頼み直す
 
 応答 `200 OK`
 
@@ -280,6 +304,10 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 `scad/catalog.json` のうち、部品ID・種類・引数・単位・範囲・説明を返す。画面のスライダーの範囲と、OT画面の表に使う。
 
+### 3.9 `POST /v1/cases/{case_id}/recover`
+
+本文は空。§1.1の規則で期限切れだけを回収し、`200` で `{ case_status, current_design_id, active_operation, recovered }` を返す。有効な処理は中断しない。S6と承認処理の待機画面は15秒ごと、およびケースを開き直したときに呼ぶ。回収後はFirestoreの失敗状態と「もう一度試す」を表示する。
+
 ## 4. 手のメッシュ復元サービス `hand-mesh`
 
 生成APIとは別のCloud Runサービス（asia-southeast1、L4）。ブラウザの採寸エンジンから直接呼ぶ。認証・CORS・エラーの形は、生成APIと同じ。
@@ -288,11 +316,16 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 - 呼べるのは、ログインしていて、撮影の前に同意した人だけ。採寸を使う人は全員が同意している（同意したかは、リクエストの `consent: true` と、ブラウザの画面で確かめる。サーバーは画像を保存しないので、同意の記録はケースの `measurement.capture.mesh_consent` に残る）
 - 本文は `multipart/form-data`：`meta`（JSON）と、`frame_0` 〜 `frame_7`（JPEG、長い辺512px、1枚200KBまで）
+- `meta.case_id` を必須とし、サーバーが持ち主であることを確かめる。直接HTTPで呼んでも同じ制限をかける
+- 推論の前に、Firestoreのトランザクションで次を確かめ、回数を1つ増やす：共通の停止設定、1人1日20回・全体1日100回の上限、その日の概算費用（`usage/{日付}.estimated_cost_usd`）が `DAILY_COST_LIMIT_USD` 未満であること。だめなら推論を始めず `RATE_LIMITED`／`GENERATION_DISABLED`
+- 費用は、1回あたりの固定の見積もり額 `MESH_COST_PER_CALL_USD`（既定 $0.03＝60秒×約$1.26/時の切り上げ）を、回数を増やすときに一緒に足す。成否・実行時間にかかわらず同じ額にする（精算はしない）。自動再試行も1回に数える
+- 1回の推論は `MESH_MAX_EXECUTION_SECONDS`（既定60秒）で打ち切る
+- 画像はFirestoreにもログにも書かない。記録するのは回数と費用だけ
 
 `meta` の例
 
 ```json
-{ "consent": true, "hand_side": "right", "frames": [ { "name": "frame_0", "view": "thumb_side" }, { "name": "frame_1", "view": "top" } ] }
+{ "case_id": "c_8f3k2m", "consent": true, "hand_side": "right", "frames": [ { "name": "frame_0", "view": "thumb_side" }, { "name": "frame_1", "view": "top" } ] }
 ```
 
 応答 `200 OK`
@@ -309,7 +342,8 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 ```
 
 - 画像は応答を返したらすぐ捨てる。ログには、件数・処理時間・エラーコードだけを書く
-- エラー：`CONSENT_REQUIRED`（422、同意がない）、`NO_HAND_DETECTED`（422、どのフレームでも手の姿勢が出なかった）、`MESH_UNAVAILABLE`（503、起動中・混雑。ブラウザは自動で最大3回やり直す。MediaPipeの角度では代わりにしない）
+- エラー：`CONSENT_REQUIRED`（422、同意がない）、`NO_HAND_DETECTED`（422、どのフレームでも手の姿勢が出なかった）、`MESH_UNAVAILABLE`（503、起動中・混雑・推論の60秒超過。ブラウザは自動で最大3回やり直す。MediaPipeの角度では代わりにしない）
+- 停止設定は `503 GENERATION_DISABLED`、回数・予算超過は `429 RATE_LIMITED`。この2つは自動再試行しない。`MESH_UNAVAILABLE` の自動再試行も待ち時間を含めて合計5分で終え、予算を超えて続けない
 
 ## 5. エラー
 
@@ -348,6 +382,8 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 | 503 | `AI_UNAVAILABLE` | Geminiが混雑している、または一時的なエラー（再試行したあと） | true |
 | 503 | `GENERATION_DISABLED` | 停止スイッチが入っている | false |
 | 504 | `RENDER_TIMEOUT` | OpenSCADが60秒を超えた | true |
+| 504 | `GENERATION_TIMEOUT` | 生成・微調整・承認の処理が280秒を超えた | true |
+| 503 | `GENERATION_INTERRUPTED` | 処理中の印が期限切れになり、異常終了した処理を回収した | true |
 | 500 | `INTERNAL` | その他 | true |
 
 - `retryable` が `true` のエラーでは、画面に「もう一度試す」ボタンを出す

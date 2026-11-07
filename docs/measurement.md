@@ -270,19 +270,20 @@ J4 = J3 + L3 · R(a, θmcp + θpip + θdip) d0
 
 ### 8.3 握りを置く場所（指ごとのすき間）
 
-道具は、指の付け根の並び（x軸）に沿った向きで握る。そこで、指 f の曲がる面（d0 と z が張る面）の中で、次の条件を満たす一番大きい円を探す。
+道具は、指の付け根の並び（x軸）に沿った向きで握る。指 f の曲がる面（d0 と z が張る面）に投影し、手首の原点 W、付け根 J1、各関節 J2・J3、指先 J4 を使う。まず W→J1→J2→J3→J4→W の閉じた単純多角形 P を作る。自己交差や面積0の場合は、有効なすき間を計算できないものとする。
 
 ```
-手のひら側の皮膚：z = t_palm（既定12mm）の線（手首から付け根まで）
-円の中心 c（その面の中の点）を 0.5mm 間隔で調べ、
-  ρ(c) = min( c から手のひら側の皮膚までの距離,
-              c から各カプセルの中心線までの距離 − そのカプセルの半径,
-              c から「指先と手のひらを結ぶ線分」までの距離 )
-すき間の直径 D_f = 2 × max ρ(c)、そのときの中心を c_f とする
+手のひら側の皮膚：z = t_palm（既定12mm）
+Ω = P の内部 ∩ { z > t_palm } から、指のカプセルの断面を除いた領域
+探索範囲：P の外接長方形の中だけ（有限）。0.5mm 間隔の格子を使う
+円の中心 c は Ω の内部にある点だけを候補にする（境界・外側は除く）
+  ρ(c) = distance(c, Ω の境界)       … 内側から境界までの最短距離
+すき間の直径 D_f = min(55, 2 × max ρ(c))、そのときの中心を c_f とする
 ```
 
-- 「指先と手のひらを結ぶ線分」を入れるのは、円が指先と手のひらのすき間からはみ出さないようにするため
-- 指がほとんど伸びていて、すき間が閉じない場合は、`D_f` を55mmで打ち切り、`CAVITY_OPEN` の警告を出す
+- Ω の境界には、手のひら側の皮膚、カプセルの表面、指先と手首を結ぶ閉鎖線が含まれる。距離だけを最大化すると手の外側を選んでしまうため、内部判定を必ず先に行う
+- P が不正、Ω が空、または正の半径を持つ格子点がない場合は、`diameter_mm` と `center_mm` を `null` にして `CAVITY_OPEN` を記録する。直径55mmや外側の中心を代入して成功扱いにはしない
+- 55mmで打ち切った場合も `CAVITY_OPEN` を記録する。いずれの `CAVITY_OPEN` でも `fitted` は選べず、`round`／`oval` にする。有効なすき間の径がない指は、基準径32mmを仮の値として使い、ユーザーとOTに警告を示す
 - 握りの軸は、人差し指のすき間の中心 `c_index` と、小指のすき間の中心 `c_pinky` を結ぶ線にする。人差し指側の太さは `D_index`、小指側の太さは `D_pinky` を基準にする（[parts-library.md §4.1](parts-library.md#41-握り本体-grip_body必須)）
 - 中指と薬指は、この握りの面とカプセルが重なった所が、くり抜きでくぼみになる
 
@@ -364,13 +365,22 @@ sequenceDiagram
   "type": "object",
   "required": ["schema_version", "hand_side", "capture", "scale", "fingers", "palm", "calibration", "quality"],
   "$defs": {
-    "triple": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "lengths": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 }, "minItems": 3, "maxItems": 3 },
+    "radii": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 }, "minItems": 3, "maxItems": 3 },
+    "mcp_position": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "prefixItems": [
+        { "type": "number", "minimum": -150, "maximum": 150 },
+        { "type": "number", "minimum": 0, "maximum": 200 }
+      ],
+      "items": false
+    },
     "finger": {
       "type": "object",
       "required": ["lengths_mm", "radii_mm", "flexion_deg", "abduction_deg", "angle_method"],
       "properties": {
-        "lengths_mm": { "$ref": "#/$defs/triple", "description": "基節・中節・末節（関節の中心どうし）" },
-        "radii_mm": { "$ref": "#/$defs/triple" },
+        "lengths_mm": { "$ref": "#/$defs/lengths", "description": "基節・中節・末節（関節の中心どうし）" },
+        "radii_mm": { "$ref": "#/$defs/radii" },
         "flexion_deg": {
           "type": "object",
           "required": ["mcp", "pip", "dip"],
@@ -392,14 +402,14 @@ sequenceDiagram
     "hand_side": { "enum": ["right", "left"] },
     "capture": {
       "type": "object",
-      "required": ["mode", "frames_used"],
+      "required": ["mode", "frames_used", "mesh_consent", "mesh_frames_sent"],
       "properties": {
         "mode": { "enum": ["video", "photos"] },
-        "duration_s": { "type": "number" },
-        "frames_sampled": { "type": "integer" },
-        "frames_used": { "type": "integer", "minimum": 1 },
+        "duration_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 15, "description": "撮影の目安は5〜10秒。少しはみ出しても受け付ける" },
+        "frames_sampled": { "type": "integer", "minimum": 1, "maximum": 90, "description": "1秒に6枚×最大15秒" },
+        "frames_used": { "type": "integer", "minimum": 1, "maximum": 30 },
         "mesh_consent": { "const": true, "description": "メッシュ復元のために切り抜いたフレームを送ることに同意した（同意しないと採寸に進めない）" },
-        "mesh_frames_sent": { "type": "integer", "minimum": 0, "maximum": 8 }
+        "mesh_frames_sent": { "type": "integer", "minimum": 1, "maximum": 8 }
       }
     },
     "scale": {
@@ -409,8 +419,8 @@ sequenceDiagram
         "reference": { "const": "jp_1yen" },
         "diameter_mm": { "const": 20.0 },
         "method": { "enum": ["coin_tracked", "coin_manual"] },
-        "px_per_mm_median": { "type": "number" },
-        "px_per_mm_iqr": { "type": "number" }
+        "px_per_mm_median": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 },
+        "px_per_mm_iqr": { "type": "number", "minimum": 0, "maximum": 20 }
       }
     },
     "fingers": {
@@ -426,20 +436,21 @@ sequenceDiagram
     },
     "palm": {
       "type": "object",
-      "required": ["mcp_positions_mm", "palm_thickness_mm"],
+      "required": ["mcp_positions_mm", "hand_width_mcp_mm", "wrist_to_middle_mcp_mm", "palm_thickness_mm"],
       "properties": {
         "mcp_positions_mm": {
           "type": "object",
           "description": "手の座標系（§8.1）の x, y",
+          "required": ["index", "middle", "ring", "pinky"],
           "properties": {
-            "index":  { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
-            "middle": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
-            "ring":   { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
-            "pinky":  { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+            "index":  { "$ref": "#/$defs/mcp_position" },
+            "middle": { "$ref": "#/$defs/mcp_position" },
+            "ring":   { "$ref": "#/$defs/mcp_position" },
+            "pinky":  { "$ref": "#/$defs/mcp_position" }
           }
         },
         "hand_width_mcp_mm": { "type": "number", "minimum": 40, "maximum": 110 },
-        "wrist_to_middle_mcp_mm": { "type": "number" },
+        "wrist_to_middle_mcp_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 200 },
         "palm_thickness_mm": { "type": "number", "minimum": 5, "maximum": 25 }
       }
     },
@@ -475,6 +486,10 @@ sequenceDiagram
   }
 }
 ```
+
+スキーマの上限は、計算量と不正入力を制限するための入力制約で、採寸の精度を保証する値ではない。対象の手が範囲外なら、自動で丸めずに `MEASUREMENT_INVALID` として、手動測定を含めて確認を求める。
+
+サーバーはJSON Schemaの検証後、全数値が有限（NaN・Infinityを含まない）であること、各指の長さの合計が180mm以下であること、付け根が人差し指から小指へx座標の増加順に並ぶことを確かめる。`frames_sampled` がある場合は `frames_used ≤ frames_sampled`、写真モードは `frames_used ≤ 2`、`mesh_frames_sent ≤ frames_used` も検証する。`overrides` を適用した最終値にも同じ検証を行い、違反したフィールドを422の `details` に返す。デプロイ版の `angle_method` は `mesh_recovery`、またはメッシュ復元後の値を理由付きで直した `manual` だけを受け付ける。
 
 ## 13. 確認と修正（S5）
 

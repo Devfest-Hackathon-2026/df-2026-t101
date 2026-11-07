@@ -3,7 +3,7 @@
 > **このドキュメントで決めたこと**
 > 1. 構成は3つに分ける。ブラウザ（Flutter Web。撮影・採寸・プレビュー）、生成API（Cloud Run。Gemini・範囲チェック・OpenSCAD）、Firebase（認証・データ・ファイル・配信）。手の写真を扱うのはブラウザだけにする。
 > 2. 生成APIは、OpenSCADとPythonを1つのコンテナに入れ、東京（asia-northeast1）に置く。Geminiは `global` で呼ぶ。Firestore・Storageも東京に置く。
-> 3. Firestoreへの書き込みは生成APIだけが行い、ブラウザは読むだけにする。生成の進み具合は、ブラウザがFirestoreの変更を待ち受けて表示する。
+> 3. ケース・会話・版は生成APIだけが書き、`hand-mesh` は利用回数と費用だけを書く。ブラウザはFirestoreを読むだけで、進み具合を待ち受ける。生成には期限付きの処理権と重複防止キーを使う。
 
 関連：[api.md](api.md)、[data-model.md](data-model.md)、[generation-pipeline.md](generation-pipeline.md)、[adr/0002-frontend-flutter-web.md](adr/0002-frontend-flutter-web.md)、[adr/0003-why-google-technologies.md](adr/0003-why-google-technologies.md)
 
@@ -54,6 +54,7 @@ flowchart LR
   PIPE -- "構造化出力 / 画像入力" --> GEM
   PIPE -- "書く（Admin SDK）" --> FS
   SCAD -- "書く（Admin SDK）" --> ST
+  GPU -- "利用回数と費用だけ" --> FS
 ```
 
 生成APIへ進むのは、`GEO` が集計した数値だけで、生成APIへの矢印に映像は乗らない。映像が端末の外に出るのは点線の1か所だけで、手を切り抜いたフレーム（最大8枚）を、同意を得て `hand-mesh` に送り、角度だけを受け取る（[ADR-0008](adr/0008-hand-model-capsules.md)）。
@@ -67,7 +68,7 @@ flowchart LR
 | MediaPipe（Hand Landmarker、Interactive Segmenter） | ブラウザ（WebAssembly） | フレームから21点を返す（`numHands: 2`。2つ以上見つかったら、そのフレームを捨てる）。1円玉の領域を返す | 寸法の計算 |
 | three.js ビューア（`app/web/js/stl_viewer.js`） | ブラウザ | STLの表示、手のカプセルモデルの表示（S5）、回転・拡大、色の変更 | 形を変えること |
 | 生成API（`api/`） | Cloud Run | IDトークンの検証、回数制限、聞き取り、手のモデルの組み立て（`handmodel`：カプセル・すき間・握りの座標系への変換）、基準値の計算、Geminiの呼び出し、範囲チェック、OpenSCADの実行、メッシュの確認、Firestore・Storageへの書き込み、OTの確認の受け付け | 映像を受け取ること（受け取る口を作らない） |
-| `hand-mesh`（手のメッシュ復元、`hand_mesh/`） | Cloud Run GPU（asia-southeast1、L4） | 切り抜いたフレームからSAM 3D Bodyで関節の角度を出し、中央値を返す（`AngleEstimator` の方法C）。IDトークンの検証。[ADR-0009](adr/0009-gpu-placement.md) | 画像の保存、ログへの記録 |
+| `hand-mesh`（手のメッシュ復元、`hand_mesh/`） | Cloud Run GPU（asia-southeast1、L4） | 切り抜いたフレームからSAM 3D Bodyで関節の角度を出し、中央値を返す（`AngleEstimator` の方法C）。IDトークンとケースの持ち主の検証、共通の停止設定、GPUの回数・時間・予算の上限と費用予約。[ADR-0009](adr/0009-gpu-placement.md) | 画像の保存、画像のログへの記録、ケース・会話・版への書き込み |
 | 部品ライブラリ（`scad/`） | 生成APIのコンテナに同梱 | 部品の形。引数の定義（`catalog.json`） | 引数の妥当性の判断（範囲チェックが行う） |
 | Gemini 4 Argon | Agent Platform（`global`） | 聞き取り、部品選び、寸法の調整と理由、画像での確認、言葉での微調整 | 形を作ること、数値の最終判断 |
 | Firestore | asia-northeast1 | ケース・会話・版・回数の記録。生成の進み具合をブラウザへ伝える | — |
@@ -143,6 +144,7 @@ sequenceDiagram
   OT->>App: 確認項目をチェックして「確認済み」
   App->>API: POST /approval
   API->>API: mode=print で印刷用STLを作る、R6
+  Note over API: 依頼時の形と描画環境を固定。R6不合格なら変更せずエラー
   API->>ST: print.stl を保存
   API->>FS: approval.status=approved
   App->>ST: print.stl をダウンロード（承認済みならルールが許可）
@@ -169,13 +171,18 @@ sequenceDiagram
 | `GEMINI_LOCATION` | `global` | モデルのロケーション |
 | `GEMINI_MODE` | `live` ／ `mock` | `mock` なら保存した応答を返す |
 | `GENERATION_ENABLED` | `true` | 停止スイッチ |
-| `DAILY_COST_LIMIT_USD` | `4` | その日の概算コストがこれを超えたら止める |
+| `DAILY_COST_LIMIT_USD` | `4` | GeminiとGPU推論のその日の概算費用を合算し、この値に達したら新しい処理を始めない |
 | `RATE_LIMIT_DESIGNS_PER_USER_DAY` | `10` | 1人1日あたりの生成の上限 |
+| `RATE_LIMIT_MESH_PER_USER_DAY` / `RATE_LIMIT_MESH_GLOBAL_DAY` | `20` / `100` | `hand-mesh` 側の1人・全体のGPU推論回数の上限。再試行も含む |
+| `MESH_MAX_EXECUTION_SECONDS` | `60` | `hand-mesh` 側の1回の推論の実行時間上限 |
+| `MESH_COST_PER_CALL_USD` | `0.03`（仮） | `hand-mesh` の1回あたりの固定の見積もり額（60秒×約$1.26/時の切り上げ）。回数×この額を、その日の費用に足す |
 | `ALLOWED_ORIGINS` | `https://jijogu-gen.web.app,...` | CORSで許可するオリジン |
 | `STORAGE_BUCKET` | `jijogu-gen.firebasestorage.app` | 保存先 |
 | `OPENSCAD_DISPLAY` | `egl` ／ `xvfb` | 画像を描く方式（[generation-pipeline.md §6.1](generation-pipeline.md#61-実行環境)） |
 
 秘密の値は1つもない（Geminiはサービスアカウントで呼ぶため、APIキーが要らない）。
+
+GPU用の4項目は `hand-mesh` に設定する。`DAILY_COST_LIMIT_USD` は両サービスで同じ値を使い、共通の `usage` を判定する。全体の停止はFirestoreの `settings/runtime.generation_enabled=false` で行う。各サービスの環境変数 `GENERATION_ENABLED=false` は、そのサービスを追加で止めるためのもの。
 
 ### 4.2 サービスアカウントと権限
 
@@ -189,6 +196,8 @@ sequenceDiagram
 | `roles/logging.logWriter` | ログを書く |
 
 IDトークンの検証は公開鍵で行うので、追加のロールは要らない。
+
+`hand-mesh` にも別の専用サービスアカウントを作る。`roles/datastore.user`（停止設定の読み取り、利用回数と費用の更新）、重みのバケットだけの `roles/storage.objectViewer`、`roles/logging.logWriter` を付ける。STL用バケットへの書き込みやGeminiの呼び出し権限は付けない。Admin SDKではFirestoreのルールが適用されないため、ケース・会話・版を書かないことはサービスの実装と検証で守る。
 
 ### 4.3 開発環境
 

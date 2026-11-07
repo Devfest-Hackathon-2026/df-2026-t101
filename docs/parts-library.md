@@ -83,6 +83,8 @@
 - `fitted`（標準）：人差し指側と小指側のすき間の円を結んだ、先細りの筒（`hull()`）から、指のカプセルをくり抜く。軸はすき間の中心どうしを結ぶ線（[measurement.md §8.3](measurement.md#83-握りを置く場所指ごとのすき間)）
 - `round`（断面が円）／`oval`（断面が楕円。手の中で回りにくい）：リング状のくぼみを付ける。手のモデルの警告が多いとき（`FEW_FRAMES`・`LENGTH_UNSTABLE`・`CAVITY_OPEN` など）や、写真モードで中指〜小指の角度が取れないときに使う
 
+`CAVITY_OPEN` がある場合は `fitted` を使わない。有効なすき間の径がない指の基準径は、仮の値32mmと警告を使う（[measurement.md §8.3](measurement.md#83-握りを置く場所指ごとのすき間)）。
+
 `fitted` だけの引数：
 
 | 引数 | 単位 | 既定値 | 範囲 | 決め方 | AIが変えてよい幅 |
@@ -113,7 +115,8 @@
 
 組み合わせのルール（範囲チェックで確かめる）：
 
-- 穴のまわりの厚さ：`(min(d_top_mm, d_bottom_mm) − 2×groove_depth_mm − bore_d) / 2 ≥ 3.0`。`bore_d` は `collet.tool_d_max_mm + 0.5`
+- `d_top_mm`・`d_bottom_mm` は断面の長径。穴のまわりの厚さは短径で判定する：`(min(d_top_mm, d_bottom_mm) × ovality − 2×groove_depth_mm − bore_d) / 2 ≥ MIN_WALL_AROUND_BORE_MM`。`round` は `ovality=1.0`、`bore_d` は `collet.tool_d_max_mm + 0.5`
+- 例：長径18mm、`ovality=0.7`、溝深さ2mm、穴径7.1mmでは、短径側の肉厚は `(18×0.7 − 4 − 7.1)/2 = 0.75mm`。3mm未満なのでR4で不合格にする。楕円率を無視した3.45mmという判定は使わない
 - 太さの差：`|d_top_mm − d_bottom_mm| ≤ 15`
 - `fitted` の穴のまわりの厚さ：`(min(d_top_mm, d_bottom_mm)/2 − press_depth_mm − CAPSULE_CLEARANCE_MM) − bore_d/2 ≥ 3.0`
 - `fitted` の張り出し：カプセルの向きが軸に垂直でないと、上の式より張り出しが大きくなる。そのため、描いたあとにメッシュの面の向きでも確かめる（[generation-pipeline.md](generation-pipeline.md) のR6）

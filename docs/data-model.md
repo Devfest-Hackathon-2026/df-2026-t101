@@ -1,7 +1,7 @@
 # データモデル
 
 > **このドキュメントで決めたこと**
-> 1. Firestoreは「ケース（1つの道具づくり）」を中心に、`cases/{caseId}` の下に会話（messages）と版（designs）を持たせる。ブラウザは読むだけで、書き込みはすべて生成APIが行う。
+> 1. Firestoreは「ケース（1つの道具づくり）」を中心に、`cases/{caseId}` の下に会話（messages）と版（designs）を持たせる。ブラウザは読むだけ。ケース・会話・版は生成APIだけが書き、`hand-mesh` は利用回数と費用だけを書く。
 > 2. Cloud Storageには、生成APIが作ったSTLと確認用画像だけを置く。ブラウザからのアップロード経路は作らない。手の映像はどこにも保存しない（メッシュ復元に送るフレームも、`hand-mesh` のメモリの中だけで処理する）。
 > 3. 印刷用STLは、OTが「確認済み」にした版だけ読めるようにする。StorageのルールからFirestoreを参照して判定する。
 
@@ -27,6 +27,7 @@ cases/{caseId}/messages/{messageId}
 cases/{caseId}/designs/{designId}
 usage/{yyyymmdd}
 usage/{yyyymmdd}/users/{uid}
+settings/runtime
 ```
 
 ### 2.1 `users/{uid}`
@@ -63,6 +64,7 @@ usage/{yyyymmdd}/users/{uid}
 | `hand_model` | map | 生成APIが組み立てた手のカプセルモデルと、指ごとのすき間（[api.md §3.3](api.md#33-put-v1casescase_idmeasurement)） |
 | `measured_at` | timestamp | 採寸を保存した日時 |
 | `current_design_id` | string | 最新の版 |
+| `active_operation` | map / null | `{ operation_id, kind, started_at, expires_at }`。生成・微調整・依頼・承認の処理中の印。`expires_at` は開始から300秒。[api.md §1.1](api.md#11-生成の重複防止と異常終了からの復旧mvp) |
 | `reviewer_email` | string | 確認を頼んだOT（小文字） |
 | `created_at` / `updated_at` | timestamp | — |
 
@@ -90,7 +92,9 @@ usage/{yyyymmdd}/users/{uid}
 | `warnings` | array<string> | 範囲チェックと採寸の警告 |
 | `style` | map | `{ color, pattern }` |
 | `files` | map | Storageのパス（§3） |
-| `approval` | map | `{ status: none ／ requested ／ approved ／ rejected, reviewer_email, requested_at, decided_at, comment_ja, checklist }` |
+| `approval` | map | `{ status: none ／ requested ／ approved ／ rejected, reviewer_email, requested_at, decided_at, comment_ja, checklist, geometry_hash, print_sha256 }`。確認対象のハッシュと印刷ファイルのハッシュを承認に結び付ける |
+| `geometry_hash` | string | OTに頼んだときに記録する。部品・引数・カプセルを正規化したJSONのSHA-256（表示色は除く）。承認のときに、OT画面が見ていた版と同じかを確かめる |
+| `input_snapshot` | map | その版の採寸・要件・手のモデル。ケースの現在値が変わっても書き換えない |
 | `model` | map | `{ id, location }` |
 | `prompt_versions` | map | 例：`{ select: "v3", dimension: "v5", review: "v2" }` |
 | `usage` | map | `{ input_tokens, output_tokens, gemini_calls, openscad_ms }` |
@@ -99,15 +103,24 @@ usage/{yyyymmdd}/users/{uid}
 
 確認済みにしたあとで形を直すと、新しい版ができる。前の版の `approval` はそのまま残るが、`current_design_id` は新しい版に移る。ダウンロード画面は `current_design_id` の版を見るので、直した版はもう一度OTの確認を受けるまで印刷用STLが出ない。
 
+`review-request` を受けた版の形・スナップショット・描画環境は不変とする。承認処理ではR6が不合格でも形を変更しない。形の変更は新しい版に記録し、`approval.status=none` から確認をやり直す。
+
 ### 2.6 `usage/{yyyymmdd}` と `usage/{yyyymmdd}/users/{uid}`
 
 | フィールド | 型 | 内容 |
 |---|---|---|
 | `designs` / `refines` / `interviews` | number | その日の回数 |
+| `mesh_requests` / `gpu_execution_seconds` | number | GPU推論の開始回数と実行秒数。失敗・自動再試行も数える |
 | `input_tokens` / `output_tokens` | number | その日の合計 |
-| `estimated_cost_usd` | number | トークン数×定価で出した概算 |
+| `gemini_cost_usd` / `gpu_cost_usd` | number | GeminiとGPU推論それぞれの概算費用。Geminiはトークン数×定価、GPUは回数×`MESH_COST_PER_CALL_USD` |
+| `estimated_cost_usd` | number | `gemini_cost_usd + gpu_cost_usd` |
 
-生成APIが、回数の上限を確かめるときと、呼び終えたときに更新する。日付は日本時間で区切る。
+生成APIと `hand-mesh` が、開始前の上限の確認と回数・費用の加算を、1つのトランザクションで行う。日付は日本時間で区切る。
+
+### 2.7 `settings/runtime`（共通の停止設定）
+
+`generation_enabled`（boolean）を管理者がコンソールから設定する。生成APIと `hand-mesh` が各有料処理の開始前に読み、`false`・設定なし・取得失敗では開始しない。ブラウザからは読み書きできない。
+
 
 ## 3. Cloud Storageのパス
 
@@ -137,6 +150,7 @@ cases/{caseId}/designs/{designId}/print.stl        … 印刷用（mode=print、
 | `cases/{caseId}/messages/*` | 親のケースを読める人 | 不可 |
 | `cases/{caseId}/designs/*` | 親のケースを読める人 | 不可 |
 | `usage/**` | 不可 | 不可 |
+| `settings/**` | 不可 | 不可 |
 
 - 「親のケースを読める人」かどうかは、`get()` で親のケースを読んで判定する（1回の評価で読み取り1回分の料金がかかる）
 - クライアントからの書き込みをすべて禁止することで、ステータスや確認済みの印を、ブラウザから書き換えられないようにする
@@ -151,6 +165,7 @@ cases/{caseId}/designs/{designId}/print.stl        … 印刷用（mode=print、
 
 - StorageのルールからFirestoreを読めるのは、1回の評価で2件まで。そのため、OTの許可リスト（`therapists`）はStorageのルールでは見ない。そのかわり、`reviewer_email` を書き込むAPI（[api.md §3.6](api.md#36-post-v1casescase_idreview-request)）で、許可リストにあるかを確かめておく
 - StorageのルールからFirestoreを参照するには、初回にコンソールで権限の付与を求められる（要確認：デプロイのときに確かめる）
+- OTに頼むときに作った印刷用STLは `internal/cases/{caseId}/designs/{designId}/print.stl` に置き、上の「それ以外」でだれも読めないようにする。承認のときに `print_sha256` を確かめてから、読める場所（`print.stl`）にコピーする
 - 制限の目的は「普通の手順なら必ずOTの確認を通る」ことを保証すること。プレビュー用STLも同じ形なので、技術的に抜き出すことはできる。この点はピッチの質疑で正直に説明する
 
 ### 4.3 ルールのテスト
