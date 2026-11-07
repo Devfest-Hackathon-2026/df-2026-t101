@@ -77,9 +77,19 @@ async def _validation_error(_: Request, e: RequestValidationError):
     return _err(400, "INVALID_ARGUMENT", "リクエストの形が正しくありません。", False)
 
 
-@app.get("/healthz")
+@app.get("/health")
+@app.get("/healthz")  # 手元用。Cloud Run では /healthz が予約されていて届かない
 async def healthz(request: Request):
     return request.app.state.backends.health()
+
+
+@app.get("/ready")
+async def ready(request: Request):
+    # Cloud Run の起動の確認（startup probe）。モデルを読み終わるまで 503 を返すので、
+    # 0台から起きたときの最初のリクエストは、503 で返されずに読み込みが終わるまで待つ
+    if request.app.state.backends.settled():
+        return {"ready": True}
+    return JSONResponse(status_code=503, content={"ready": False})
 
 
 @app.post("/v1/angles")

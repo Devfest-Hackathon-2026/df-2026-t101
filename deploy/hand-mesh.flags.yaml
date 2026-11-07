@@ -1,0 +1,30 @@
+# hand-mesh を Cloud Run GPU に載せるときの設定（ADR-0009）。リポジトリの直下から：
+#   gcloud run deploy hand-mesh --flags-file deploy/hand-mesh.flags.yaml
+# 重みは非公開のバケットを /weights につないで読む（Hugging Face は見ない）
+--project: jijogu-hackathon-2026
+--region: asia-southeast1
+--image: asia-northeast1-docker.pkg.dev/jijogu-hackathon-2026/jijogu/hand-mesh:latest
+--service-account: hand-mesh@jijogu-hackathon-2026.iam.gserviceaccount.com
+--execution-environment: gen2
+--gpu: 1
+--gpu-type: nvidia-l4
+--no-gpu-zonal-redundancy: true
+--cpu: 4
+--memory: 16Gi
+--no-cpu-throttling: true
+# 最小0台が普段の状態。1のまま放置すると1日約$30（デモの前後だけ1にする）
+--min-instances: 0
+--max-instances: 1
+--concurrency: 1
+--timeout: 300
+--add-volume: name=weights,type=cloud-storage,bucket=jijogu-hackathon-2026-weights,readonly=true
+--add-volume-mount: volume=weights,mount-path=/weights
+# モデルを読み終わるまで /ready は 503。最大 10 分待つ
+--startup-probe: httpGet.path=/ready,httpGet.port=8080,periodSeconds=5,failureThreshold=120,timeoutSeconds=3
+--set-secrets:
+  MESH_RESULT_HMAC_KEY: mesh-result-hmac-key:latest
+--set-env-vars:
+  GOOGLE_CLOUD_PROJECT: jijogu-hackathon-2026
+  STORAGE_BUCKET: jijogu-hackathon-2026-data
+  HAND_MESH_CHECKPOINT_DIR: /weights/sam-3d-body-vith
+  HAND_MESH_CORS_ORIGINS: https://jijogu-hackathon-2026.web.app,https://jijogu-hackathon-2026.firebaseapp.com

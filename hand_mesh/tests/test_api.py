@@ -65,6 +65,22 @@ META = {"case_id": CASE, "hand_side": "right",
 def test_healthz(client):
     body = client.get("/healthz").json()
     assert body["ok"] is True and body["backend"] == "mock" and body["model_loaded"] is True
+    assert client.get("/health").json() == body
+    assert client.get("/ready").status_code == 200
+
+
+def test_ready_waits_for_loading(client):
+    from backends import BackendManager
+
+    mgr = BackendManager("sam3d")  # start() を呼ばない＝読み込み中のまま
+    old = client.app.state.backends
+    client.app.state.backends = mgr
+    try:
+        assert client.get("/ready").status_code == 503
+        mgr.sam3d._status = "failed"  # 失敗したら起動待ちはやめる（エラーは /v1/hand で返す）
+        assert client.get("/ready").status_code == 200
+    finally:
+        client.app.state.backends = old
 
 
 def test_angles_endpoint_gone(client):

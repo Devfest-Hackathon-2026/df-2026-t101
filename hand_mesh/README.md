@@ -58,9 +58,37 @@ curl http://localhost:8081/healthz
 
 ## Cloud Run GPU（`Dockerfile`）
 
-- 重みはイメージに入れない（SAM License・大きさ）。起動のたびに Hugging Face から取るか（Secret Manager の HF トークンを `HF_TOKEN` に渡す）、GCS に置いた重みを起動時に `HAND_MESH_CHECKPOINT_DIR` へコピーする（どちらにするか要確認。GCS の方が起動が速く、HF の障害に左右されない）
-- 起動から使えるまで：コンテナ＋重みの読み込みで1〜3分の見込み（要確認。手元では読み込み10〜48秒）
-- 設定は [ADR-0009](../docs/adr/0009-gpu-placement.md)（asia-southeast1、L4、最小0台・最大1台、同時1件）
+- 重みはイメージに入れない（SAM License・大きさ）。非公開のバケット `gs://jijogu-hackathon-2026-weights/sam-3d-body-vith/`（asia-southeast1、2.2GiB）に置き、Cloud Run でこのバケットを `/weights` に読み取り専用でつなぐ。`HAND_MESH_CHECKPOINT_DIR=/weights/sam-3d-body-vith` なので Hugging Face は見ない（HF トークンは要らない）
+- ドライバは Cloud Run が入れる（L4 は 580 系＝CUDA 13.0）。torch は cu130 版。ベースは素の Ubuntu 24.04
+- 起動の確認（startup probe）は `GET /ready`。モデルを読み終わるまで 503 なので、0台から起きたときの最初のリクエストはエラーにならず、読み込みが終わるまで待つ。読み込みに失敗したときは 200 にして、エラーは `/v1/hand` の `503 MESH_UNAVAILABLE` で返す
+- Cloud Run では `/healthz` が予約されていて届かないので、動作確認は `GET /health`
+- 設定は [ADR-0009](../docs/adr/0009-gpu-placement.md)（asia-southeast1、L4、ゾーン冗長なし、最小0台・最大1台、同時1件）
+
+```
+# リポジトリの直下から。イメージを作る（約20分）
+gcloud builds submit hand_mesh --config deploy/cloudbuild.hand_mesh.yaml --project jijogu-hackathon-2026
+
+# デプロイ（設定は deploy/hand-mesh.flags.yaml にまとめてある。GPU・重みのバケット・起動の確認・環境変数）
+gcloud run deploy hand-mesh --flags-file deploy/hand-mesh.flags.yaml
+```
+
+URL は https://hand-mesh-312211346578.asia-southeast1.run.app 。Web 版は `env/prod.json` の `HAND_MESH_BASE` でここを指す。
+
+11/7 の実測：重みの読み込み約84秒（GCS をつないだフォルダから）、0台から起きて最初の応答まで約70〜90秒。
+
+最初の1回だけ、持ち主が権限を付ける（重みのバケットを読む権限と、ブラウザから直接呼べるようにする設定）：
+
+```
+gcloud storage buckets add-iam-policy-binding gs://jijogu-hackathon-2026-weights --member=serviceAccount:hand-mesh@jijogu-hackathon-2026.iam.gserviceaccount.com --role=roles/storage.objectViewer
+gcloud run services update hand-mesh --project jijogu-hackathon-2026 --region asia-southeast1 --no-invoker-iam-check
+```
+
+デモ・審査の前だけ温める（終わったらすぐ 0 に戻す。1 のままだと1日約 $30）：
+
+```
+gcloud run services update hand-mesh --project jijogu-hackathon-2026 --region asia-southeast1 --min-instances 1
+gcloud run services update hand-mesh --project jijogu-hackathon-2026 --region asia-southeast1 --min-instances 0
+```
 
 ## 11/7 に手元で確かめたこと（RTX 4070 Ti SUPER）
 

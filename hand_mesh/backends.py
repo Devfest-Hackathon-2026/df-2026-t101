@@ -379,6 +379,13 @@ class BackendManager:
             raise BackendUnavailable(s.reason or "SAM 3D Body failed to load")
         raise BackendUnavailable(f"SAM 3D Body is {s.status}")
 
+    def settled(self) -> bool:
+        """読み込みが終わったか（成功でも失敗でも）。Cloud Run の起動の確認に使う。
+        失敗も「終わった」に数える。そうしないと起動をくり返し、利用者にエラーの中身が届かない。"""
+        if self.active is not None:
+            return True
+        return self.sam3d is not None and self.sam3d.status == "failed"
+
     def health(self) -> dict:
         b = self.active
         s = self.sam3d
