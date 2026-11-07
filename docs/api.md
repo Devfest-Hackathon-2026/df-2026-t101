@@ -286,7 +286,7 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 ### `POST /v1/angles`
 
-- 呼べるのは、ログインしていて、撮影の前に同意した人だけ（同意したかは、リクエストの `consent: true` と、ブラウザの画面で確かめる。サーバーは画像を保存しないので、同意の記録はケースの `measurement.capture.mesh_consent` に残る）
+- 呼べるのは、ログインしていて、撮影の前に同意した人だけ。採寸を使う人は全員が同意している（同意したかは、リクエストの `consent: true` と、ブラウザの画面で確かめる。サーバーは画像を保存しないので、同意の記録はケースの `measurement.capture.mesh_consent` に残る）
 - 本文は `multipart/form-data`：`meta`（JSON）と、`frame_0` 〜 `frame_7`（JPEG、長い辺512px、1枚200KBまで）
 
 `meta` の例
@@ -309,7 +309,7 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 ```
 
 - 画像は応答を返したらすぐ捨てる。ログには、件数・処理時間・エラーコードだけを書く
-- エラー：`CONSENT_REQUIRED`（422、同意がない）、`NO_HAND_DETECTED`（422、どのフレームでも手の姿勢が出なかった）、`MESH_UNAVAILABLE`（503、起動中・混雑。ブラウザはMediaPipeの角度で進める）
+- エラー：`CONSENT_REQUIRED`（422、同意がない）、`NO_HAND_DETECTED`（422、どのフレームでも手の姿勢が出なかった）、`MESH_UNAVAILABLE`（503、起動中・混雑。ブラウザは自動で最大3回やり直す。MediaPipeの角度では代わりにしない）
 
 ## 5. エラー
 

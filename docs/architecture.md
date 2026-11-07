@@ -44,7 +44,7 @@ flowchart LR
 
   GEM["Gemini 4 Argon<br/>Agent Platform（global）"]
   GPU["hand-mesh<br/>手のメッシュ復元（SAM 3D Body）<br/>Cloud Run GPU（asia-southeast1）"]
-  GEO -. "同意した人だけ：切り抜いたフレーム最大8枚<br/>→ 角度だけ返す（保存しない）" .-> GPU
+  GEO -. "同意を得て全員：切り抜いたフレーム最大8枚<br/>→ 角度だけ返す（保存しない）" .-> GPU
 
   HOST -. 配信 .-> UI
   UI -- ログイン --> AUTH
@@ -56,7 +56,7 @@ flowchart LR
   SCAD -- "書く（Admin SDK）" --> ST
 ```
 
-生成APIへ進むのは、`GEO` が集計した数値だけで、生成APIへの矢印に映像は乗らない。映像が端末の外に出るのは点線の1か所だけで、同意した人の、手を切り抜いたフレーム（最大8枚）を `hand-mesh` に送り、角度だけを受け取る（[ADR-0008](adr/0008-hand-model-capsules.md)）。
+生成APIへ進むのは、`GEO` が集計した数値だけで、生成APIへの矢印に映像は乗らない。映像が端末の外に出るのは点線の1か所だけで、手を切り抜いたフレーム（最大8枚）を、同意を得て `hand-mesh` に送り、角度だけを受け取る（[ADR-0008](adr/0008-hand-model-capsules.md)）。
 
 ## 2. コンポーネントの責務
 
