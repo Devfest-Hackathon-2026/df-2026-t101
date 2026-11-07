@@ -42,7 +42,10 @@ class _CaptureScreenState extends State<CaptureScreen> {
             c['mesh_consent_at'] != null &&
             c['consent_text_version'] == consentVersion;
       });
-      if (_consented == true) unawaited(MeasureEngine.instance.init());
+      if (_consented == true) {
+        unawaited(MeasureEngine.instance.init());
+        MeasureEngine.instance.warmHandMesh(); // 撮っている間に GPU の起動を終わらせる
+      }
     } catch (e) {
       setState(() {
         _consented = false;
@@ -60,6 +63,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
       });
       setState(() => _consented = true);
       unawaited(MeasureEngine.instance.init()); // 裏で MediaPipe を読み込んでおく
+      MeasureEngine.instance.warmHandMesh();
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {

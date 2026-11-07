@@ -62,7 +62,8 @@ curl http://localhost:8081/healthz
 - ドライバは Cloud Run が入れる（L4 は 580 系＝CUDA 13.0）。torch は cu130 版。ベースは素の Ubuntu 24.04
 - 起動の確認（startup probe）は `GET /ready`。モデルを読み終わるまで 503 なので、0台から起きたときの最初のリクエストはエラーにならず、読み込みが終わるまで待つ。読み込みに失敗したときは 200 にして、エラーは `/v1/hand` の `503 MESH_UNAVAILABLE` で返す
 - Cloud Run では `/healthz` が予約されていて届かないので、動作確認は `GET /health`
-- 設定は [ADR-0009](../docs/adr/0009-gpu-placement.md)（asia-southeast1、L4、ゾーン冗長なし、最小0台・最大1台、同時1件）
+- 設定は [ADR-0009](../docs/adr/0009-gpu-placement.md)（asia-southeast1、L4、ゾーン冗長なし、最小0台・最大1台）。同時に受けるのは4件（推論は GPU のロックで1件ずつ）。1件だと、起動待ちの間に事前確認（OPTIONS）で枠が埋まり、やり直しが Cloud Run の 429 で断られた
+- アプリは、撮影の画面で同意が済んだ時点で `GET /health` を送って GPU を起こしておく（`MeasureEngine.warmHandMesh`。5分に1回まで、画像は送らない）。撮っている間に起動が終わる
 
 ```
 # リポジトリの直下から。イメージを作る（約20分）

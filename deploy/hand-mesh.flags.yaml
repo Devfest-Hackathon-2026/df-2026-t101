@@ -15,7 +15,9 @@
 # 最小0台が普段の状態。1のまま放置すると1日約$30（デモの前後だけ1にする）
 --min-instances: 0
 --max-instances: 1
---concurrency: 1
+# 推論は中で1件ずつ（GPU のロック）なので、同時に受けても GPU は取り合わない。
+# 1 だと、起動待ちの間に届いた事前確認（OPTIONS）や起こし用の /health で枠が埋まり、やり直しが 429 で断られた（11/8）
+--concurrency: 4
 --timeout: 300
 --add-volume: name=weights,type=cloud-storage,bucket=jijogu-hackathon-2026-weights,readonly=true
 --add-volume-mount: volume=weights,mount-path=/weights

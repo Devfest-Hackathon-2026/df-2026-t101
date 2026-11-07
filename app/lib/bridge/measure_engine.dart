@@ -106,6 +106,25 @@ class MeasureEngine {
   Future<Map<String, dynamic>> analyze([Progress? p]) async =>
       _parse(await (await _e()).analyze(_cb(p)).toDart);
 
+  static DateTime? _lastWarm;
+
+  /// hand-mesh（Cloud Run GPU、普段は0台）を先に起こしておく。起動に1〜1分半かかるので、
+  /// 撮影の前に呼ぶと、撮っている間に起動が終わる。画像は送らない（GET /health だけ）。
+  /// 5分以内に呼んでいれば送らない（使われなければ約15分で0台に戻る）
+  void warmHandMesh() {
+    if (Config.mockApi) return;
+    final now = DateTime.now();
+    if (_lastWarm != null && now.difference(_lastWarm!).inMinutes < 5) return;
+    _lastWarm = now;
+    web.window
+        .fetch(
+          '${Config.handMeshBase.replaceAll(RegExp(r'/$'), '')}/health'.toJS,
+          web.RequestInit(mode: 'no-cors'),
+        )
+        .toDart
+        .ignore();
+  }
+
   /// hand-mesh（POST /v1/hand）を呼ぶ。モックのときは見本の応答を入れる
   Future<Map<String, dynamic>> callHandMesh(
     String caseId,
