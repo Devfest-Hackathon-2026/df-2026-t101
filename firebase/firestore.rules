@@ -1,0 +1,48 @@
+rules_version = '2';
+// docs/data-model.md §4.1。ブラウザからの書き込みはすべて禁止（書くのは生成APIと hand-mesh だけ）
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function verifiedEmail() {
+      return signedIn() && request.auth.token.email != null && request.auth.token.email_verified == true;
+    }
+    function isOwner(c) { return signedIn() && c.owner_uid == request.auth.uid; }
+    function isAssignedOt(c) {
+      return verifiedEmail()
+        && c.reviewer_email == request.auth.token.email.lower()
+        && exists(/databases/$(database)/documents/therapists/$(request.auth.token.email.lower()));
+    }
+    function canReadCase(caseId) {
+      let c = get(/databases/$(database)/documents/cases/$(caseId)).data;
+      return isOwner(c) || isAssignedOt(c);
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /therapists/{email} {
+      allow read: if verifiedEmail() && request.auth.token.email.lower() == email;
+      allow write: if false;
+    }
+    match /cases/{caseId} {
+      allow read: if isOwner(resource.data) || isAssignedOt(resource.data);
+      allow write: if false;
+      match /messages/{messageId} {
+        allow read: if canReadCase(caseId);
+        allow write: if false;
+      }
+      match /designs/{designId} {
+        allow read: if canReadCase(caseId);
+        allow write: if false;
+      }
+    }
+    match /settings/filaments {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

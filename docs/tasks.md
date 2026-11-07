@@ -5,7 +5,7 @@
 > 2. 作り方を変えた（2026-11-07夜、チームの決定）：手は3Dメッシュで表し（[ADR-0010](adr/0010-hand-mesh-fusion.md)）、道具は**こぶしの外側にかぶせるカバー**と、道具の太さに合わせた**C字クリップ**（アリ溝のレールに差し込む。角度違いを差し替える）にする（[ADR-0011](adr/0011-dorsal-cover.md)〜[ADR-0013](adr/0013-clip-angle-variants.md)）。11/8は、dev から切った `impl` ブランチで、設計書どおりの構成（Cloud Run・Gemini・Firebaseの認証と保存）で中心の流れ（撮影→手の3D→カバーとクリップ→STL→プレビュー→ダウンロード）を作り直し、20:00に本番のURLで通す。プロトタイプ（proto ブランチ）で確かめた部品は移す。
 > 3. 残り3日なので、MVPは「カバー本体＋ベルトのスリット＋筆のC字クリップ（角度1種類以上）」に絞り、OT確認画面と回数・コストの上限は最小限にする（デモのケースで最後まで見せられることを優先する）。分担は、A＝採寸、B＝3Dモデルと部品、C＝生成APIとAI、D＝画面と提出物、E1＝`hand-mesh`。毎日21:00に打ち合わせる。コミットとpushは人が手で行い、main には上げない。
 
-関連：[README.md](README.md)、[architecture.md](architecture.md)、[adr/0010-hand-mesh-fusion.md](adr/0010-hand-mesh-fusion.md)、[adr/0011-dorsal-cover.md](adr/0011-dorsal-cover.md)、[notes/2026-11-07-cover-shape.md](notes/2026-11-07-cover-shape.md)、[../PROTOTYPE.md](../PROTOTYPE.md)
+関連：[README.md](README.md)、[architecture.md](architecture.md)、[adr/0010-hand-mesh-fusion.md](adr/0010-hand-mesh-fusion.md)、[adr/0011-dorsal-cover.md](adr/0011-dorsal-cover.md)、[notes/2026-11-07-cover-shape.md](notes/2026-11-07-cover-shape.md)、[../PROTOTYPE.md](notes/prototype-lessons.md)
 
 ---
 
@@ -88,7 +88,7 @@
 
 | 項目 | 結果 |
 |---|---|
-| プロトタイプ（proto ブランチ） | 選択式の質問 → アプリの中のカメラ → 1円玉の自動検出（OpenCV.js）→ 解析 → 手のカプセル → Gemini（モック・本物）→ OpenSCAD → プレビュー → ダウンロードまで、手元で通した（[PROTOTYPE.md](../PROTOTYPE.md)） |
+| プロトタイプ（proto ブランチ） | 選択式の質問 → アプリの中のカメラ → 1円玉の自動検出（OpenCV.js）→ 解析 → 手のカプセル → Gemini（モック・本物）→ OpenSCAD → プレビュー → ダウンロードまで、手元で通した（[PROTOTYPE.md](notes/prototype-lessons.md)） |
 | SAM 3D Bodyのスパイク | 重みの利用が承認され、手元の RTX 4070 Ti SUPER で動いた。複数の画像のパラメータの中央値で1つの手を作り直し、手首で切って閉じた面にし、距離場で手の面を広げた立体を作れた（[ADR-0010](adr/0010-hand-mesh-fusion.md) の「11/7のスパイクで確かめたこと」）。同じ仕組みでカバーの殻を作る |
 | 形の決定 | チームのメモ（[notes/2026-11-07-cover-shape.md](notes/2026-11-07-cover-shape.md)）で、握りをやめてカバー＋C字クリップ＋アリ溝にした。メモと変えた3点（殻は手の3Dメッシュから、試し刷りは11/9の朝、点の修正は手首と指の付け根の5点だけ）もチームで決めた |
 | 設計書 | ADR-0010〜0013 を足し、関係する章を直した |

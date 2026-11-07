@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="こぶしの形に合わせて、筆やペンを付けるカバーを作る">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="自助具ジェネレーター">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <title>自助具ジェネレーター</title>
+  <link rel="manifest" href="manifest.json">
+  <!-- three.js（プロトタイプではCDNから。本番は自前で配る：docs/architecture.md §4） -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/viewer.js"></script>
+  <!-- 採寸エンジン（MediaPipe。動画はこの端末の外に出さない） -->
+  <script type="module" src="js/measure_engine.js"></script>
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

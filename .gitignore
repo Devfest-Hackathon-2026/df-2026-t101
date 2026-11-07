@@ -32,3 +32,22 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# プロトタイプ（proto）で追加
+api/.data/
+.pytest_cache/
+app/.dart_tool/
+app/.flutter-plugins-dependencies
+app/*.iml
+env/*.json
+!env/example.json
+
+# MediaPipe の本体とモデル（scripts/fetch_mediapipe.sh で取得）
+app/web/mediapipe/
+app/web/opencv/
+app/web/js/*.map
+
+# 開発用のデータ（Firestore と Storage の代わり。api と hand_mesh で共有）
+.localstore/
+# 作り直しの途中で退避したプロトタイプのファイル（あとで消す）
+.trash_proto_api/

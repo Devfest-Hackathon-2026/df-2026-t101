@@ -102,7 +102,7 @@ settings/filaments
 | `hand_measurement_id` | string | この版が使った採寸のID。実寸の手のメッシュ `cases/{caseId}/hand/{hand_measurement_id}.glb` を指す |
 | `scale_factor` | number | この版が使った倍率 k（未補正のメッシュ → 実寸） |
 | `hand_clearance_mm` | number | この版のカバーとこぶしのすき間（`HAND_CLEARANCE_MM`。フェルトの厚みを含む。11/9に値を変えても、前の版を同じ形で描き直せるよう記録する） |
-| `cover_shell_sha256` | string | カバーの殻（`cover_shell.stl`）のSHA-256。ファイルは `internal/cases/{caseId}/cover/{cover_shell_sha256}.stl`（内側を守る立体と距離場は、採寸の版ごとの `{measurementId}.keepout.stl`・`{measurementId}.sdf.npz`）。採寸の版と、殻を決める引数が同じ版では同じ値になる |
+| `cover_shell_sha256` | string | カバーの殻（`cover_shell.stl`）のSHA-256。ファイルは採寸の版ごとのフォルダ `internal/cases/{caseId}/cover/{measurementId}/` の下（殻は `shell/<殻の引数のハッシュ24桁>`、内側を守る立体は `keepout/c{c}`、距離場は `sdf`）。採寸の版と、殻を決める引数が同じ版では同じ値になる |
 | `clip_angle_deg` | number | C字クリップの角度（0／20／40）。角度だけを変えた版は、カバーのファイルを前の版と共有する |
 | `print_prepared_at` / `print_sha256` | timestamp / map | 印刷用STLを作った日時と、部品ごとのファイルのSHA-256 |
 | `input_snapshot` | map | その版の採寸・要件・手のモデル。ケースの現在値が変わっても書き換えない |
@@ -158,8 +158,8 @@ cases/{caseId}/hand/{measurementId}.glb            … 実寸の手のメッシ�
 cases/{caseId}/hand/raw/{meshId}.glb               … 未補正の手のメッシュ（hand-mesh が書く。関節の位置を extras.joints_mm に入れる）。だれも読めない
 internal/cases/{caseId}/designs/{designId}/print/*.stl … OTに頼むときに作る部品ごとの印刷用STL。承認まで、だれも読めない
 internal/cases/{caseId}/cover/{coverShellSha256}.stl       … カバーの殻。同じ採寸の版・同じ殻の引数の版で使い回す。だれも読めない
-internal/cases/{caseId}/cover/{measurementId}.keepout.stl … 内側を守る立体（手を HAND_CLEARANCE_MM だけ広げたもの。レールの土台が内側へ出ないよう、最後に引く）。採寸の版ごとに1つ。だれも読めない
-internal/cases/{caseId}/cover/{measurementId}.sdf.npz     … 手のメッシュの符号付き距離場（圧縮して数MBの見込み。要確認）。殻を組み立て直すときに使い回す。採寸の版ごとに1つ。だれも読めない
+internal/cases/{caseId}/cover/{measurementId}/keepout/c{c}.stl … 内側を守る立体（手を HAND_CLEARANCE_MM だけ広げたもの。レールの土台が内側へ出ないよう、最後に引く）。採寸の版ごとに1つ。だれも読めない
+internal/cases/{caseId}/cover/{measurementId}/sdf             … 手のメッシュの符号付き距離場（圧縮して数MBの見込み。要確認）。殻を組み立て直すときに使い回す。採寸の版ごとに1つ。だれも読めない
 ```
 
 - 前の版の `internal/cases/{caseId}/cavity/`（握りからくり抜く立体）はなくした。握りをやめ、カバー方式にしたため（[ADR-0011](adr/0011-dorsal-cover.md)）。手を広げた立体を作る仕組みは、内側を守る立体（`.guard.stl`）として残る

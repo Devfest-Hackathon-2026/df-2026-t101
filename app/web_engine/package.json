@@ -1,0 +1,22 @@
+{
+  "name": "web_engine",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "build": "esbuild src/engine.ts --bundle --format=esm --target=es2022 --minify --sourcemap --outfile=../web/js/measure_engine.js && esbuild src/coin_worker.ts --bundle --format=iife --target=es2022 --minify --sourcemap --outfile=../web/js/coin_worker.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11",
+    "typescript": "^5.9.3"
+  },
+  "private": true
+}

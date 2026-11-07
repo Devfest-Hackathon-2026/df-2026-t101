@@ -1,0 +1,41 @@
+rules_version = '2';
+// docs/data-model.md §4.2。書き込みはすべて禁止。Firestore の読み取りは1回の評価で2件まで
+service firebase.storage {
+  match /b/{bucket}/o {
+    function caseDoc(caseId) {
+      return firestore.get(/databases/(default)/documents/cases/$(caseId)).data;
+    }
+    function canRead(c) {
+      // Storage のルールでは therapists は見ない（2件までのため）。reviewer_email は API が許可リストで確かめて書く
+      return request.auth != null && (
+        c.owner_uid == request.auth.uid ||
+        (request.auth.token.email_verified == true && c.reviewer_email == request.auth.token.email.lower()));
+    }
+
+    // プレビュー用のSTLと確認用画像
+    match /cases/{caseId}/designs/{designId}/{file} {
+      allow read: if file.matches('.*[.]preview[.]stl') && canRead(caseDoc(caseId));
+      allow write: if false;
+    }
+    match /cases/{caseId}/designs/{designId}/views/{file} {
+      allow read: if canRead(caseDoc(caseId));
+      allow write: if false;
+    }
+    // 印刷用のSTL：承認済み、またはデモのケースで印刷用データを作ったあとだけ
+    match /cases/{caseId}/designs/{designId}/print/{file} {
+      allow read: if canRead(caseDoc(caseId)) && (
+        firestore.get(/databases/(default)/documents/cases/$(caseId)/designs/$(designId)).data.approval.status == 'approved' ||
+        (caseDoc(caseId).demo == true &&
+         firestore.get(/databases/(default)/documents/cases/$(caseId)/designs/$(designId)).data.print_prepared_at != null));
+      allow write: if false;
+    }
+    // 実寸の手のメッシュ（未補正の raw/ は下の「それ以外」で誰も読めない）
+    match /cases/{caseId}/hand/{file} {
+      allow read: if file.matches('m_[a-z0-9]+[.]glb') && canRead(caseDoc(caseId));
+      allow write: if false;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

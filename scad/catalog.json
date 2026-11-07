@@ -1,0 +1,132 @@
+{
+  "version": "2026-11-07.1",
+  "units": { "length": "mm", "angle": "deg" },
+  "fixed": {
+    "NOZZLE_MM": 0.4,
+    "MIN_WALL_MM": 2.0,
+    "MIN_EDGE_RADIUS_MM": 1.5,
+    "MAX_OVERHANG_DEG": 45,
+    "HAND_CLEARANCE_MM": 1.5,
+    "FELT_THICKNESS_MM": 1.0,
+    "DOVETAIL_CLEARANCE_MM": 0.25,
+    "CLIP_INTERFERENCE_MM": 0.3,
+    "CLIP_ENTRY_CHAMFER_DEG": 30,
+    "CLIP_ROOT_NOTCH_MM": 0.6,
+    "CLIP_GROOVE_W": 1.0,
+    "CLIP_GROOVE_D": 0.4,
+    "CLIP_GROOVE_PITCH": 3.0,
+    "TPU_SLEEVE_WALL_MM": 1.2,
+    "WRIST_FREE_MM": 25,
+    "THUMB_EXTRA_MM": 2.0,
+    "CAVITY_VOXEL_MM": 0.5,
+    "CAVITY_SMOOTH_SIGMA": 0.7,
+    "MESH_SUBDIVIDE": 1,
+    "BED_MM": [180, 180, 180],
+    "FN_PREVIEW": 48,
+    "FN_PRINT": 128,
+    "RAIL_WIDTH_MM": 10,
+    "RAIL_DEPTH_MM": 4,
+    "RAIL_LENGTH_MM": 24,
+    "RAIL_DOVETAIL_DEG": 60,
+    "RAIL_DETENT_MM": 0.6
+  },
+  "fixed_notes_ja": {
+    "HAND_CLEARANCE_MM": "仮。フェルトの厚みを含む。11/9の朝の clearance_test で 1.0／1.5／2.0 を比べて決める",
+    "DOVETAIL_CLEARANCE_MM": "仮。11/9の朝の dovetail_test で 0.2／0.25／0.3 を比べて決める",
+    "CLIP_INTERFERENCE_MM": "仮。11/9の朝の clip_test で 0.2／0.3／0.4 を比べて決める",
+    "FELT_THICKNESS_MM": "要確認。買う品が決まったら直す",
+    "TPU_SLEEVE_WALL_MM": "仮"
+  },
+  "parts": [
+    {
+      "id": "cover",
+      "required": true,
+      "variants": ["standard"],
+      "description_ja": "こぶしの外側（手の甲・指の背・関節）にかぶせるカバー。手の3Dメッシュの面から すき間 c 〜 c＋厚み t の殻。手のひら側・手首・親指は開けておく",
+      "params": [
+        { "name": "cover_thickness_mm", "unit": "mm", "type": "number", "default": 2.5, "min": 2.0, "max": 3.5, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": true, "description_ja": "カバーの厚み t。薄いと軽いが割れやすい" },
+        { "name": "palm_cut_offset_mm", "unit": "mm", "type": "number", "default": 0.0, "min": -8.0, "max": 8.0, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": true, "description_ja": "手のひら側を切る面の位置（PIP関節の中心の高さからのずれ）。負にすると手の甲の側へ寄り、カバーが小さくなる。正にしても、手のひら・指の腹を向いた面と中節より先は必ず捨てる" },
+        { "name": "wrist_cut_mm", "unit": "mm", "type": "number", "default": 37.0, "min": 25.0, "max": 120.0, "choices": null, "decided_by": "measured", "ai_delta": 10.0, "shell": true, "description_ja": "手首の関節から、カバーが始まるまでの距離。基準は手首→中指の付け根の長さの40%。25mm 以上（手首を覆わない）、かつ 手首→中指の付け根の長さ − 15 以下" },
+        { "name": "edge_radius_mm", "unit": "mm", "type": "number", "default": 2.0, "min": 1.5, "max": 4.0, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": true, "description_ja": "ふちと切り口の丸み。1.5 未満は不可。厚みの1.5倍以下" },
+        { "name": "shell_file", "unit": "path", "type": "string", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "殻のSTL（生成APIが作る）" },
+        { "name": "keepout_file", "unit": "path", "type": "string", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "手を c だけ広げた立体（内側の面を守る。生成APIが作る）" },
+        { "name": "print_matrix", "unit": "matrix", "type": "matrix", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "刷る向きへの変換（手のひら側の切り口を下）" }
+      ]
+    },
+    {
+      "id": "air_holes",
+      "required": true,
+      "variants": ["standard"],
+      "description_ja": "手の甲の空気穴。関節の山・スリット・レールを避けて並べ、縁を面取りする",
+      "params": [
+        { "name": "count", "unit": "count", "type": "integer", "default": 6, "min": 0, "max": 10, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "穴の数" },
+        { "name": "diameter_mm", "unit": "mm", "type": "number", "default": 6.0, "min": 4.0, "max": 8.0, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "穴の直径" },
+        { "name": "centers", "unit": "mm", "type": "array", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "穴の中心（生成APIが手のメッシュから計算）" },
+        { "name": "normals", "unit": "unit", "type": "array", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "穴の向き（カバーの外面の法線）" }
+      ]
+    },
+    {
+      "id": "strap_slits",
+      "required": true,
+      "variants": ["single", "double"],
+      "description_ja": "面ファスナーのベルトを通すスリット。親指側と小指側に1つずつ（2本なら2つずつ）。ベルトは手のひら側を通る",
+      "params": [
+        { "name": "strap_width_mm", "unit": "mm", "type": "enum", "default": 25, "min": null, "max": null, "choices": [20, 25, 38], "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "ベルトの幅（市販の面ファスナーの幅）" },
+        { "name": "strap_count", "unit": "count", "type": "integer", "default": 1, "min": 1, "max": 2, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "ベルトの本数。カバーが手の上で回るなら2本（未決）" },
+        { "name": "strap_thickness_mm", "unit": "mm", "type": "number", "default": 2.0, "min": 1.5, "max": 3.0, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "ベルトの厚み。スリットは幅＋1.0 × 厚み＋1.5" },
+        { "name": "centers", "unit": "mm", "type": "array", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "スリットの中心" },
+        { "name": "normals", "unit": "unit", "type": "array", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "スリットを抜く向き（カバーの外面の法線）" },
+        { "name": "axes", "unit": "unit", "type": "array", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "スリットの長い辺の向き（手首→指先）" }
+      ]
+    },
+    {
+      "id": "rail",
+      "required": true,
+      "variants": ["standard"],
+      "description_ja": "C字クリップを横から差し込むアリ溝のレール。人差し指の基節の、親指側かつ手の甲側の外面。寸法は固定（すべてのクリップと合うように）",
+      "params": [
+        { "name": "width_mm", "unit": "mm", "type": "number", "default": 10, "min": 10, "max": 10, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "溝の口の幅" },
+        { "name": "depth_mm", "unit": "mm", "type": "number", "default": 4, "min": 4, "max": 4, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "溝の深さ" },
+        { "name": "length_mm", "unit": "mm", "type": "number", "default": 24, "min": 24, "max": 24, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "レールの長さ" },
+        { "name": "dovetail_deg", "unit": "deg", "type": "number", "default": 60, "min": 60, "max": 60, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "アリ溝の角度（溝の壁と底のなす角）" },
+        { "name": "detent_mm", "unit": "mm", "type": "number", "default": 0.6, "min": 0.6, "max": 0.6, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "止めの出っ張りの高さ" },
+        { "name": "origin", "unit": "mm", "type": "array", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "レールの上面の中心（実際の手の座標）" },
+        { "name": "frame", "unit": "unit", "type": "matrix", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "レールの向き（行：横・長さ（指先の向き）・外向き）" }
+      ]
+    },
+    {
+      "id": "c_clip",
+      "required": true,
+      "variants": ["standard"],
+      "description_ja": "道具の太さぴったりのC字クリップ。押し込むだけで留まり、引き抜くだけで外れる。レールに横から差し込み、カチッと止まる。角度違いを差し替える",
+      "params": [
+        { "name": "tool_d_mm", "unit": "mm", "type": "number", "default": 8.5, "min": 3.0, "max": 20.0, "choices": null, "decided_by": "interview", "ai_delta": 0.0, "shell": false, "description_ja": "道具の柄の太さ（挟む所）。聞き取りの値。AIは変えない" },
+        { "name": "inner_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "輪の内径 ＝ 道具の太さ − しめしろ（TPUの筒を使うときは筒の外径）" },
+        { "name": "wall_mm", "unit": "mm", "type": "number", "default": 2.0, "min": 1.6, "max": 3.0, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "輪の壁の厚さ。薄いほど押し込みやすいが割れやすい" },
+        { "name": "opening_ratio", "unit": "ratio", "type": "number", "default": 0.75, "min": 0.70, "max": 0.80, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "開きの幅 ÷ 道具の太さ" },
+        { "name": "height_mm", "unit": "mm", "type": "number", "default": 12.0, "min": 8.0, "max": 20.0, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "輪の高さ（道具を挟む長さ）" },
+        { "name": "angle_deg", "unit": "deg", "type": "enum", "default": 20, "min": null, "max": null, "choices": [0, 20, 40], "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "道具の向きとレールの向きのなす角。基準は筆20・ペン40・スプーン0。AIはやりたいことから選び、理由を書く。ユーザーがプレビューで変えられる" },
+        { "name": "grip_ribs", "unit": "bool", "type": "boolean", "default": true, "min": null, "max": null, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "内側の細い溝（道具が滑りにくくなる）" },
+        { "name": "count", "unit": "count", "type": "integer", "default": 1, "min": 1, "max": 2, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "クリップの数（先が細くなる筆の柄なら2を勧めてよい）。MVPのレールは1本なので、2個目は同じ形の予備として刷る（要確認）" },
+        { "name": "tpu_sleeve", "unit": "bool", "type": "boolean", "default": false, "min": null, "max": null, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "内側にTPUの筒を入れる（TPUが使えるときだけ）" }
+      ]
+    },
+    {
+      "id": "tpu_sleeve",
+      "required": false,
+      "variants": ["standard"],
+      "description_ja": "C字クリップの内側に入れるTPUの筒（任意）。挟むのを柔らかいTPUに任せる",
+      "params": [
+        { "name": "inner_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "道具の太さ − 0.2" },
+        { "name": "outer_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "内径 ＋ 2 × TPU_SLEEVE_WALL_MM（＝クリップの内径）" },
+        { "name": "length_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "クリップの高さと同じ" }
+      ]
+    }
+  ],
+  "rules_ja": [
+    "wrist_cut_mm ≥ WRIST_FREE_MM（25）かつ ≤ 手首→中指の付け根の長さ − 15（R4・R5）",
+    "edge_radius_mm ≥ 1.5 かつ ≤ cover_thickness_mm × 1.5（R4・R5）",
+    "c_clip：opening_ratio × tool_d_mm < tool_d_mm − 0.5、inner_d_mm > 2、tpu_sleeve なら tool_d_mm ≥ 4（R4）",
+    "strap_slits：2本のとき、スリットの間を strap_width_mm + 8 以上あける（R4）"
+  ]
+}

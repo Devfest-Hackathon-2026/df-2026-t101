@@ -152,7 +152,7 @@ sequenceDiagram
   API->>FS: progress=shelling
   API->>ST: 実寸の手のメッシュを読む
   API->>API: 手の面から c〜c+t の殻を作り、切る面となめらかにつなぐ（10〜20秒。同じなら前の版のものを使う）
-  API->>ST: internal/…/cover/{cover_shell_sha256}.stl と {measurement_id}.keepout.stl・.sdf.npz
+  API->>ST: internal/…/cover/{measurement_id}/ の sdf・keepout・shell
   loop 最大3回
     API->>SC: カバー（殻 − スリット − 空気穴 ＋ レール − 内側を守る立体）、C字クリップ、画像4枚
     SC-->>API: 部品ごとのファイル

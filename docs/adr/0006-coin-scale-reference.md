@@ -7,7 +7,7 @@
 
 - 状態：採用（ADR-0004を置き換える）。2026-11-07 更新：1円玉は OpenCV.js で自動検出に変更（[measurement.md §4.3](../measurement.md#43-1円玉の見つけ方)）。最初の版の「1回タップしてInteractive Segmenterで追いかける」はやめた
 - 日付：2026-11-07
-- 関連：[measurement.md §4](../measurement.md#4-大きさの基準1円玉)、[ADR-0007](0007-video-capture.md)、[PROTOTYPE.md](../../PROTOTYPE.md) の9〜13
+- 関連：[measurement.md §4](../measurement.md#4-大きさの基準1円玉)、[ADR-0007](0007-video-capture.md)、[PROTOTYPE.md](../notes/prototype-lessons.md) の9〜13
 
 ## 背景
 

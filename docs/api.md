@@ -222,7 +222,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - `hand_model` は手の座標系（[measurement.md §8.1](measurement.md#81-手の座標系)）の、実寸（倍率 k を掛けたあと）の値。S5の3D表示に使う。画面は `mesh_path` をStorage SDKで読んでthree.jsで表示し、カバーの目印（切る面・レールの位置）を重ねる
 - 前の版のカプセル（`capsules`）とすき間の円（`cavities`）、握りの軸は返さない。カバー方式では握りの軸がなく、殻は手の面そのものから作るため（[ADR-0011](adr/0011-dorsal-cover.md)）
 - `joints_mm` は実寸の関節の位置（手首と、指ごとに付け根・PIP・DIP・指先の4点）。例では人差し指だけを示した（握った形なので、指先が付け根の近くに戻っている）
-- `cover_landmarks.palm_cut_base_mm` は、PIP関節の中心の平均の、手のひらの法線の向きの高さ（正準形の z）。手のひら側を切る面は、ここに `palm_cut_offset_mm` を足した高さ。`rail_anchor` は正準形で、`direction` は人差し指の基節の向き（指先の向き）
+- `cover_landmarks` は**実際の手の座標**（`frame: "hand_actual"`）で返す。`palm_normal`（手のひらの向き）と `outward` も入る。`palm_cut_base_mm` は、PIP関節の中心の平均の、手のひらの法線の向きの高さ。手のひら側を切る面は、ここに `palm_cut_offset_mm` を足した高さ。`rail_anchor` は正準形で、`direction` は人差し指の基節の向き（指先の向き）
 - `scale_source` は `auto`（自動の点）か `manual_points`（直した点を使った）。`scale_spread_ratio` は、指の区間の比の中央値と k の差÷k。OT画面で倍率のばらつきを見せる
 - 値の修正（`overrides`）は、MVPでは受け付けない（スキーマで `maxItems: 0`）。直せるのは、倍率に使う5点（`manual_points`）だけ
 - 同じケースに何度送ってもよい（最後に保存した値が使われる）。保存のたびに新しい `measurement_id` を作り、実寸のメッシュも別のファイルにする（前の版の形が参照しているため）。ただし、§1.1の処理中の印が有効な間の保存は `409 CONFLICT`
@@ -239,8 +239,8 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 - 処理には中央値で約75秒、最大で約170秒かかる（カバーの殻の計算の10〜20秒を含む。[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、`cases/{case_id}/designs/{design_id}` の `progress` を読んで進み具合を出す
 - 部品は、**カバー本体**（`cover`。空気穴 `air_holes`・ベルトのスリット `strap_slits`・アリ溝のレール `rail` を含む）と**C字クリップ**（`c_clip`）を必ず作る。**TPUの筒**（`tpu_sleeve`）と2個目のクリップは、道具と要望からGeminiが選ぶ（[generation-pipeline.md](generation-pipeline.md)、[ADR-0011](adr/0011-dorsal-cover.md)〜[ADR-0013](adr/0013-clip-angle-variants.md)）
-- 描く前に、**カバーの殻**を作る：実寸の手のメッシュ（正準形）の符号付き距離から、手の面から距離 `HAND_CLEARANCE_MM`（c）〜 c ＋ `cover_thickness_mm`（t）の層を取り、手のひら側・手首側・親指・人差し指側の外を切る面と、なめらかな共通部分（半径 `edge_radius_mm`）でつなぎ、閉じた面（`cover_shell.stl`）にする。切り口のふちも丸くなる。続けて、手を c だけ広げた立体（**内側を守る立体** `inner_guard.stl`。レールの土台が内側へ出ないように、最後に引く）を作る。右手なら最後に鏡像に戻す。11/7のスパイク（手元のPC）の同じ仕組みで約12秒。カバーの外接箱の大きさで変わるので、10〜20秒を見込む。Cloud Run（4 vCPU）での時間は要確認
-- 殻は `internal/cases/{case_id}/cover/{cover_shell_sha256}.stl` に、内側を守る立体と距離場は採寸の版ごとに `internal/cases/{case_id}/cover/{measurement_id}.keepout.stl`・`.sdf.npz` に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
+- 描く前に、**カバーの殻**を作る：実寸の手のメッシュ（正準形）の符号付き距離から、手の面から距離 `HAND_CLEARANCE_MM`（c）〜 c ＋ `cover_thickness_mm`（t）の層を取り、手のひら側・手首側・親指・人差し指側の外を切る面と、なめらかな共通部分（半径 `edge_radius_mm`）でつなぎ、閉じた面（`cover_shell.stl`）にする。切り口のふちも丸くなる。続けて、手を c だけ広げた立体（**内側を守る立体** `cover_keepout.stl`。レールの土台が内側へ出ないように、最後に引く）を作る。右手なら最後に鏡像に戻す。11/7のスパイク（手元のPC）の同じ仕組みで約12秒。カバーの外接箱の大きさで変わるので、10〜20秒を見込む。Cloud Run（4 vCPU）での時間は要確認
+- 殻・内側を守る立体・距離場は、採寸の版ごとのフォルダ `internal/cases/{case_id}/cover/{measurement_id}/` の下（`shell/<24桁>`・`keepout/c{c}`・`sdf`）に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
 - OpenSCADは、殻を `import()` して、ベルトのスリット・空気穴を引き、アリ溝のレールを足し、最後に内側を守る立体を引く。スリット・空気穴・レールの位置と向きは、生成APIが手のメッシュとカバーの目印（§3.3）から計算して `-D` で渡す。クリップとTPUの筒は、それぞれ別に描く（`mode=c_clip` など）
 - 版に記録するもの：`hand_measurement_id`、`scale_factor`、`hand_clearance_mm`、`cover_shell_sha256`、`clip_angle_deg`、部品ごとのファイル（下の応答の `files.parts`）。`geometry_hash` は、引数・`cover_shell_sha256`・固定値の版から作る（[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）
 - 描いたあと、実際の形で検査する（R6。[generation-pipeline.md](generation-pipeline.md)）：カバーは閉じた面で1つのかたまり、最小の厚さ ≥ `MIN_WALL_MM`、**手のひら側に材料がない**（切る面より手のひら側に頂点がない）、**手首を覆わない**（手首から25mm以内に頂点がない）、内側の面と手の距離が c 以上。クリップは開きの幅が道具の太さより小さく（抜けない）、サポートなしで刷れること。手のひら側と手首の検査は、装具にしないための安全の決まりなので、AIや画面の操作で外すことはできない

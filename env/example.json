@@ -1,0 +1,11 @@
+{
+  "_comment": "Firebase の Web アプリの設定の見本。本物は env/<名前>.json に置き、コミットしない（.gitignore 済み）。flutter build web --dart-define-from-file=env/<名前>.json",
+  "FIREBASE_API_KEY": "",
+  "FIREBASE_AUTH_DOMAIN": "YOUR_PROJECT_ID.firebaseapp.com",
+  "FIREBASE_PROJECT_ID": "YOUR_PROJECT_ID",
+  "FIREBASE_STORAGE_BUCKET": "YOUR_PROJECT_ID.firebasestorage.app",
+  "FIREBASE_APP_ID": "",
+  "API_BASE": "https://jijogu-api-XXXXXXXX.asia-northeast1.run.app",
+  "HAND_MESH_BASE": "https://hand-mesh-XXXXXXXX.asia-southeast1.run.app",
+  "AUTH_MODE": "firebase"
+}
