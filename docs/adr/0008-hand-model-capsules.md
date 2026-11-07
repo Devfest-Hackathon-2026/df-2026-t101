@@ -5,9 +5,9 @@
 > 2. 角度は、手のメッシュ復元（SAM 3D Body）で出す。全員、撮影の前に同意を得たうえで、手を切り抜いたフレームを最大8枚、GPUのサービスに送る（同意しないと採寸に進めない）。保存はせず、返すのは角度だけ。
 > 3. メッシュ復元が失敗しても、MediaPipeの角度で自動的に代わりにすることはしない（2026-11-07、チームの決定）。再試行して待ち、それでもだめなら、そのケースを止めてやり直してもらう。MediaPipeの角度は、OT画面に比較用として出すだけにする。
 
-- 状態：採用（2026-11-07、チームの決定で、全員の映像を送る方針と、MediaPipeで代わりにしない方針に変えた）
+- 状態：採用（2026-11-07、チームの決定で、全員の映像を送る方針と、MediaPipeで代わりにしない方針に変えた）。2026-11-07：決めたこと1（カプセルでくり抜く）は [ADR-0010](0010-hand-mesh-fusion.md) で置き換え。2・3は引き続き有効
 - 日付：2026-11-07
-- 関連：[measurement.md §7・§8・§11](../measurement.md#7-集計)、[parts-library.md §4.1](../parts-library.md#41-握り本体-grip_body必須)、[ADR-0009](0009-gpu-placement.md)、[non-functional.md §4](../non-functional.md#4-プライバシー)
+- 関連：[measurement.md §7・§8・§11](../measurement.md#7-集計)、[parts-library.md §4.1](../parts-library.md)、[ADR-0009](0009-gpu-placement.md)、[non-functional.md §4](../non-functional.md#4-プライバシー)
 
 ## 背景
 

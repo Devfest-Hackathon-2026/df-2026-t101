@@ -7,7 +7,7 @@
 
 - 状態：**置き換え済み**（2026-11-07、[ADR-0006](0006-coin-scale-reference.md)。撮影を動画にしたため、大きさの基準を1円玉に変えた。カードの4隅を手で合わせる考え方は、写真モードで1円玉の長径を手で合わせるフォールバックに引き継いだ）
 - 日付：2026-11-07
-- 関連：（置き換え済みのため、当時の節は今の measurement.md・screens.md にはない。今の仕様は [measurement.md §4](../measurement.md#4-大きさの基準1円玉)、[screens.md S4](../screens.md#s4-1円玉の指定)）
+- 関連：（置き換え済みのため、当時の節は今の measurement.md・screens.md にはない。今の仕様は [measurement.md §4](../measurement.md#4-大きさの基準1円玉)、[screens.md S4](../screens.md#s4-1円玉の確認)）
 
 ## 背景
 

@@ -2,7 +2,7 @@
 
 > **このドキュメントで決めたこと**
 > 1. 生成APIは、Cloud Run（asia-northeast1）上のHTTP JSON API（`/v1`）とする。認証は、FirebaseのIDトークンを `Authorization: Bearer` で送る方式にする。Firebase Hostingの転送（rewrite）は使わず、ブラウザから直接呼ぶ。Hosting経由だと60秒で打ち切られ、生成が間に合わないため。
-> 2. ケース・会話・版への書き込みはこのAPIが行う（`hand-mesh` は利用回数と費用だけを書く）。ブラウザはFirestoreを読むだけにする。生成は1回のリクエスト内で行い、途中経過と期限付きの処理中の印をFirestoreに書く。
+> 2. ケース・会話・版への書き込みはこのAPIが行う（`hand-mesh` が書くのは、利用回数と費用、Storageの未補正の手のメッシュだけ）。ブラウザはFirestoreを読むだけにする。手のメッシュを実寸にし、そこからカバーの殻を作るのもこのAPI（[ADR-0011](adr/0011-dorsal-cover.md)）。生成は1回のリクエスト内で行い、途中経過と期限付きの処理中の印をFirestoreに書く。
 > 3. エラーは `{"error": {"code", "message", "details", "retryable", "request_id"}}` の形にそろえる。`message` は画面にそのまま出せる日本語にする。
 
 関連：[generation-pipeline.md](generation-pipeline.md)、[data-model.md](data-model.md)、[measurement.md](measurement.md)
@@ -54,16 +54,16 @@
 | PUT | `/v1/cases/{case_id}/requirements` | 選択式の質問の答えを保存する（Geminiは呼ばない） | 持ち主 |
 | POST | `/v1/cases/{case_id}/interview` | 任意のチャットを1往復進める | 持ち主 |
 | PUT | `/v1/cases/{case_id}/measurement` | 採寸結果を保存する | 持ち主 |
-| POST | `/v1/cases/{case_id}/designs` | 形を作る（部品選び → 寸法決め → 描画 → 確認） | 持ち主 |
-| POST | `/v1/cases/{case_id}/consent` | メッシュ復元のためにフレームを送ることへの同意を記録する（撮影の前） | 持ち主 |
-| POST | `/v1/cases/{case_id}/designs/{design_id}/refine` | 言葉や数値、模様で直す（新しい版を作る）。色だけの変更は版を作らない | 持ち主 |
+| POST | `/v1/cases/{case_id}/designs` | 形を作る（部品選び → 寸法決め → カバーの殻の計算 → 描画 → 確認）。部品はカバー本体とC字クリップ（とTPUの筒） | 持ち主 |
+| POST | `/v1/cases/{case_id}/consent` | メッシュ復元のためにフレームを送ること、手の形の3Dデータを保存することへの同意を記録する（撮影の前） | 持ち主 |
+| POST | `/v1/cases/{case_id}/designs/{design_id}/refine` | 言葉や数値、クリップの角度、模様で直す（新しい版を作る）。色だけの変更は版を作らない | 持ち主 |
 | GET | `/v1/therapists` | 確認を頼めるOTの一覧（名前とメールアドレス） | ログインした人 |
-| POST | `/v1/cases/{case_id}/review-request` | OTに確認を頼む（印刷用STLもここで作る） | 持ち主 |
-| POST | `/v1/cases/{case_id}/designs/{design_id}/prepare-print` | デモのケースだけ：OTの確認なしで印刷用STLを作る | 持ち主（デモのケースのみ） |
+| POST | `/v1/cases/{case_id}/review-request` | OTに確認を頼む（部品ごとの印刷用STLもここで作る） | 持ち主 |
+| POST | `/v1/cases/{case_id}/designs/{design_id}/prepare-print` | デモのケースだけ：OTの確認なしで部品ごとの印刷用STLを作る | 持ち主（デモのケースのみ） |
 | POST | `/v1/cases/{case_id}/designs/{design_id}/approval` | OTが「確認済み」にするか、差し戻す | 依頼されたOT |
 | POST | `/v1/cases/{case_id}/recover` | 期限切れの処理中の印を回収し、最新状態を返す（AI・GPU処理なし） | 持ち主、依頼されたOT |
 
-STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロードする。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
+STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、FirebaseのStorage SDKでダウンロードする。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
 
 ## 3. 各エンドポイント
 
@@ -72,7 +72,7 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 リクエスト
 
 ```json
-{ "title": "筆の握り" }
+{ "title": "筆のカバー" }
 ```
 
 応答 `201 Created`
@@ -97,16 +97,19 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
   "activity": "draw",
   "tool_type": "brush",
   "hand_side": "right",
-  "tool_shaft_size": "medium",
+  "tool_d_mm": 9.5,
+  "tool_shaft_size": null,
   "tool_shaft_shape": "round",
-  "nut_operator": "self_weak",
-  "grip_strength": "light",
+  "finger_state": "fist",
+  "donning_by": "helper",
   "capture_by": "helper"
 }
 ```
 
-- 値はすべて選択肢のどれか。スキーマは `schemas/requirements.schema.json` に置く。列挙値：`activity` は `draw`／`write`／`eat`／`other`、`tool_type` は `brush`／`pen`／`spoon`（「その他」もこの3つのどれかで代用する）、`tool_shaft_size` は `thin`／`medium`／`thick`／`unknown`、`tool_shaft_shape` は `round`／`flat`、`nut_operator` は `self`／`self_weak`／`helper`、`grip_strength` は `firm`／`light`／`weak`、`capture_by` は `self`／`helper`
-- `tool_shaft_diameter_mm` はサーバーが区分から入れる（`thin`=7、`medium`=10、`thick`=13、`unknown`=道具ごとの既定で、`assumptions` に記録）。区分と挟める太さは [parts-library.md §4.2](parts-library.md#42-コレット-collet必須握りの上端と一体)
+- 値はすべて選択肢か、範囲のある数値。スキーマは `schemas/requirements.schema.json` に置く。列挙値：`activity` は `draw`／`write`／`eat`／`other`、`tool_type` は `brush`／`pen`／`spoon`（「その他」もこの3つのどれかで代用する）、`tool_shaft_size` は `thin`／`medium`／`thick`／`unknown`、`tool_shaft_shape` は `round`／`flat`、`finger_state`（指の状態）は `fist`（握った形で固まっている）／`bent`（少し曲がっている）／`straight`（ほぼ伸ばせる）、`donning_by`（カバーとクリップを着け外しする人）は `self`／`helper`、`capture_by` は `self`／`helper`
+- **道具の太さ `tool_d_mm`**（3.5〜20mm、小数第1位まで）：C字クリップの内径をこの値から決める（`内径 = tool_d_mm − CLIP_INTERFERENCE_MM`。[ADR-0012](adr/0012-c-clip-dovetail.md)）。クリップはしめしろ0.2〜0.4mmで挟むので、区分（3mm刻み）では合わない。そのため、画面では太さを**数値で**入れてもらう（1円玉＝直径20mmと並べた図と、定規で測る案内を出す）。測れないときだけ `tool_shaft_size` の区分を送り、サーバーが区分の中央の値（`thin`=6、`medium`=8.5、`thick`=11.5、`unknown`=道具ごとの既定）を `tool_d_mm` に入れて、`assumptions` に「道具の太さは推定」と残す。推定のまま刷るとクリップが合わないおそれが大きいので、S7とOT画面で目立たせる
+- `tool_shaft_shape=flat`（平たい柄）は、MVPのC字クリップでは挟めない。保存は受け付け、`assumptions` に残し、生成で `DESIGN_INFEASIBLE` の理由として伝える（平たい柄用のクリップは拡張機能）
+- 前の版の `nut_operator`（ナットを回す人）と `grip_strength` はなくした。ねじ締めのコレットとナットをやめ（[ADR-0012](adr/0012-c-clip-dovetail.md)）、道具を手で握らない形にしたため（[ADR-0011](adr/0011-dorsal-cover.md)）。代わりに、ベルトとクリップの扱いやすさを決めるため `donning_by` を聞く
 - `activity=other` のときは、チャットで `activity_ja`（やりたいことの説明）と `tool_type` が決まるまで、ケースは `interviewing` のまま（撮影に進めない）。チャットが出した `activity_ja` は、サーバーが `requirements.activity_ja` に保存する
 - それ以外は、保存するとケースの `status` が `measuring` になる。チャットのメモはあとから足してもよい
 
@@ -116,20 +119,22 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 {
   "requirements": {
     "activity": "draw", "tool_type": "brush", "hand_side": "right",
-    "tool_shaft_size": "medium", "tool_shaft_diameter_mm": 10, "tool_shaft_shape": "round",
-    "nut_operator": "self_weak", "grip_strength": "light", "capture_by": "helper",
+    "tool_d_mm": 9.5, "tool_d_source": "user", "tool_shaft_size": null, "tool_shaft_shape": "round",
+    "finger_state": "fist", "donning_by": "helper", "capture_by": "helper",
     "activity_ja": null, "notes": [], "assumptions": []
   },
   "case_status": "measuring"
 }
 ```
 
+- `tool_d_source` は `user`（数値で入れた）か `category`（区分から推定）
+
 ### 3.2.1 `POST /v1/cases/{case_id}/interview`（任意のチャット）
 
 リクエスト
 
 ```json
-{ "message": "人差し指の付け根が当たると痛いです。長い時間描きたい" }
+{ "message": "人差し指の関節の出っ張りが当たると痛いです。長い時間描きたい" }
 ```
 
 応答 `200 OK`
@@ -138,13 +143,13 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 {
   "turn": {
     "status": "ask",
-    "message_ja": "痛い所に当たらないよう、そこを少し浅くします。1回に何分くらい描きますか？",
+    "message_ja": "痛い所に当たらないよう、そこのすき間を少し広げます。1回に何分くらい描きますか？",
     "choices": ["15分くらい", "30分くらい", "1時間以上"],
-    "notes": ["人差し指の付け根が当たると痛い", "長い時間使う"],
+    "notes": ["人差し指の関節の出っ張りが当たると痛い", "長い時間使う"],
     "suggested_changes": [],
     "out_of_scope_reason": "none"
   },
-  "requirements": { "notes": ["人差し指の付け根が当たると痛い", "長い時間使う"] },
+  "requirements": { "notes": ["人差し指の関節の出っ張りが当たると痛い", "長い時間使う"] },
   "case_status": "measuring",
   "turn_count": 1
 }
@@ -156,55 +161,89 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 ### 3.2.2 `POST /v1/cases/{case_id}/consent`
 
-撮影の前の同意の画面（S3）で「同意して進む」を押したときに呼ぶ。本文は `{ "mesh_consent": true, "consent_text_version": "2026-11-07" }`。生成APIが `cases/{case_id}.mesh_consent_at`（日時）と `consent_text_version` を書く。`hand-mesh` と `PUT measurement` は、この記録があることを確かめる。同意を取り消す場合は `{ "mesh_consent": false }` を送り、記録を消す（以後、採寸に進めない）。
+撮影の前の同意の画面（S3）で「同意して進む」を押したときに呼ぶ。本文は `{ "mesh_consent": true, "consent_text_version": "mesh-consent-2" }`。生成APIが `cases/{case_id}.mesh_consent_at`（日時）と `consent_text_version` を書く。`hand-mesh` と `PUT measurement` は、この記録があり、版が `mesh-consent-2` であることを確かめる。
+
+- `mesh-consent-2` は、前の版（切り抜いたフレームを送ること）に、「手の形の3Dデータ（写真ではありません）を、作った形を確かめるために保存します。ケースを消すと消えます」を足したもの（[ADR-0010](adr/0010-hand-mesh-fusion.md)）。手のメッシュを保存するようになり、同意の中身が変わったので、版を上げる
+- 古い版（`2026-11-07`）の同意しかないケースは、撮影の前に同意の画面をもう一度出す（`hand-mesh` は `422 CONSENT_REQUIRED` を返す）
+- 同意を取り消す場合は `{ "mesh_consent": false }` を送り、記録を消す（以後、採寸に進めない）。すでに保存した手のメッシュは、ケースを消すまで残る（消したいときはケースを消す。[data-model.md §5](data-model.md#5-保存期間と削除)）
 
 ### 3.3 `PUT /v1/cases/{case_id}/measurement`
 
-リクエスト：[measurement.md §12](measurement.md#12-出力するjsonmeasurement20) のJSON（2.0）そのもの。クエリ `?dry_run=true` を付けると、保存せずに手のモデルだけを返す（S5でスライダーを動かしたときの3Dの更新に使う）
+リクエスト：[measurement.md §12](measurement.md#12-出力するjsonmeasurement22) のJSON（**2.2**）そのもの。手の甲の4区間の長さ（倍率に使う）・指の区間の長さ（確認用）・付け根の位置・比較用の角度、`capture.mesh_id`・`capture.mesh_result_token`、点を直したときは `manual_points` を含む。**手のメッシュそのものは送らない**（`hand-mesh` がStorageに置いた未補正のメッシュを、生成APIが読む）。ブラウザが重いファイルを運ばずに済み、ブラウザが書き換えたメッシュを受け取らずに済むため。
+
+**点を直したとき**（S5。代表のフレーム2〜3枚の、手首と指の付け根の5点）は、ブラウザが直したフレームから手の甲の4区間の長さを出し直し、`manual_points` を付けて**同じAPIでもう一度送る**。生成APIは倍率 k を出し直し、新しい `measurement_id` で実寸のメッシュを保存する。メッシュの形と姿勢は変わらず、大きさだけが変わるので、GPU（`hand-mesh`）は呼ばない。値のスライダーで直す機能はMVPにない（[measurement.md §13](measurement.md#13-確認と点の修正s5)）。
+
+処理の順番
+
+1. スキーマと、[measurement.md §12](measurement.md#12-出力するjsonmeasurement22) の項目間の制約を確かめる。合わなければ `422 MEASUREMENT_INVALID`（どの項目がどの制約に違反したかを `details` に入れる）。手のモデルの計算の前に検証し、負の長さや欠けた付け根の位置を計算に渡さない
+2. ケースに同意の記録（`mesh_consent_at`、`consent_text_version = mesh-consent-2`）があることを確かめる
+3. `capture.mesh_result_token` の署名（`hand-mesh` と共有の鍵でHMAC-SHA256）・ケースID・角度のハッシュを確かめる。メッシュ復元を通らない角度を受け付けないため
+4. 未補正のメッシュ `cases/{case_id}/hand/raw/{mesh_id}.glb` を読み、ファイルのSHA-256が、トークンに入った `mesh_sha256` と一致することを確かめる。関節の位置（21点）は、ブラウザの値ではなく、このファイルに入った値（`extras.joints_mm`）を使う
+5. **倍率** `k = median(測った区間の長さ ÷ メッシュの関節どうしの長さ)` を、**手の甲で見える4区間**（手首→人差し指の付け根、手首→中指の付け根、手首→小指の付け根、人差し指の付け根→小指の付け根）の比から出す。握りこぶしでは指の区間が重なって隠れ、MediaPipeの点がずれやすいため（[measurement.md §8.2](measurement.md#82-メッシュの合成と実寸化)）。指の区間の比は、ばらつきの確かめにだけ使い、4区間の k から10%を超えて離れたら警告 `MESH_SCALE_INCONSISTENT` を付ける。k が0.5〜2.0の外なら、点の取り違えか1円玉の誤検出とみなして `422 MEASUREMENT_INVALID`（範囲は入力の安全のための仮の値。要確認）
+6. メッシュの頂点に k を掛け、**実寸のメッシュ**（手の座標系、mm）を `cases/{case_id}/hand/{measurement_id}.glb` に保存する
+7. 実寸のメッシュから、**カバーの目印**を出す：手のひら側を切る面の基準（PIP関節の中心の平均の高さ）、手首側を切る位置の基準（手首→中指の付け根の長さ）、レールを付ける位置と向き（人差し指の基節の、親指側かつ手の甲側の外面）、ベルトのスリットと空気穴を置ける範囲（[generation-pipeline.md](generation-pipeline.md)）
+8. 部品の基準値（baseline）を作る
 
 応答 `200 OK`
 
 ```json
 {
   "accepted": true,
+  "measurement_id": "m_02",
   "warnings": ["ANGLE_DISAGREE"],
   "hand_model": {
     "frame": "hand",
-    "capsules": [
-      { "finger": "index", "segment": "proximal", "p1_mm": [0.0, 82.1, 0.0], "p2_mm": [1.2, 101.5, 33.0], "radius_mm": 9.0 }
-    ],
-    "cavities": {
-      "index": { "diameter_mm": 31.4, "center_mm": [2.0, 88.3, 30.1] },
-      "pinky": { "diameter_mm": 27.9, "center_mm": [58.6, 74.0, 25.4] }
+    "mesh_path": "cases/c_8f3k2m/hand/m_02.glb",
+    "scale_factor": 1.17,
+    "scale_source": "manual_points",
+    "scale_spread_ratio": 0.04,
+    "joints_mm": {
+      "wrist": [0.0, 0.0, 0.0],
+      "index": [[-21.4, 86.0, 0.0], [-22.0, 104.7, 24.2], [-21.1, 101.0, 44.5], [-19.8, 90.2, 52.0]]
+    },
+    "cover_landmarks": {
+      "palm_cut_base_mm": 38.6,
+      "wrist_to_middle_mcp_mm": 92.4,
+      "rail_anchor": { "point_mm": [-31.5, 95.0, -6.0], "direction": [0.02, 0.62, 0.78] },
+      "slit_zones": { "thumb_side": [-36.0, 52.0], "pinky_side": [44.0, 50.0] }
     }
   },
   "baseline": [
-    { "part_id": "grip_body", "name": "variant", "value": "fitted", "source": "rule" },
-    { "part_id": "grip_body", "name": "d_top_mm", "value": 34.4, "source": "measured" },
-    { "part_id": "grip_body", "name": "d_bottom_mm", "value": 30.9, "source": "measured" },
-    { "part_id": "grip_body", "name": "press_depth_mm", "value": 1.5, "source": "default" },
-    { "part_id": "collet", "name": "tool_d_max_mm", "value": 10.6, "source": "interview" }
+    { "part_id": "cover", "name": "cover_thickness_mm", "value": 2.5, "source": "default" },
+    { "part_id": "cover", "name": "wrist_cut_mm", "value": 37.0, "source": "measured" },
+    { "part_id": "cover", "name": "palm_cut_offset_mm", "value": 0.0, "source": "default" },
+    { "part_id": "c_clip", "name": "tool_d_mm", "value": 9.5, "source": "interview" },
+    { "part_id": "c_clip", "name": "angle_deg", "value": 20, "source": "rule" }
   ],
   "case_status": "designing"
 }
 ```
 
-- `hand_model` は手の座標系（[measurement.md §8.1](measurement.md#81-手の座標系)）の値。S5の3D表示に使う。握りの座標系に直したカプセル（`grip_body.capsules`）は、`POST designs` の中で計算し、版に記録する
-- 同じケースに何度送ってもよい（最後に保存した値が使われる）。ただし、§1.1の処理中の印が有効な間の保存は `409 CONFLICT`。`dry_run` は保存しないので処理権を取らない
-
-- `capture.mesh_result_token` の署名（`hand-mesh` と共有の鍵でHMAC）・ケースID・角度のハッシュが合わない、またはケースに同意の記録（`mesh_consent_at`）がなければ `422 MEASUREMENT_INVALID`。メッシュ復元を通らない角度を受け付けないため
-- スキーマおよび [measurement.md §12](measurement.md#12-出力するjsonmeasurement20) の項目間の制約に合わなければ `422 MEASUREMENT_INVALID`。どの項目がどの制約に違反したかを `details` に入れる。手のモデルの計算前に検証し、負の長さ・半径や欠けた付け根の位置を計算に渡さない
+- `hand_model` は手の座標系（[measurement.md §8.1](measurement.md#81-手の座標系)）の、実寸（倍率 k を掛けたあと）の値。S5の3D表示に使う。画面は `mesh_path` をStorage SDKで読んでthree.jsで表示し、カバーの目印（切る面・レールの位置）を重ねる
+- 前の版のカプセル（`capsules`）とすき間の円（`cavities`）、握りの軸は返さない。カバー方式では握りの軸がなく、殻は手の面そのものから作るため（[ADR-0011](adr/0011-dorsal-cover.md)）
+- `joints_mm` は実寸の関節の位置（手首と、指ごとに付け根・PIP・DIP・指先の4点）。例では人差し指だけを示した（握った形なので、指先が付け根の近くに戻っている）
+- `cover_landmarks.palm_cut_base_mm` は、PIP関節の中心の平均の、手のひらの法線の向きの高さ（正準形の z）。手のひら側を切る面は、ここに `palm_cut_offset_mm` を足した高さ。`rail_anchor` は正準形で、`direction` は人差し指の基節の向き（指先の向き）
+- `scale_source` は `auto`（自動の点）か `manual_points`（直した点を使った）。`scale_spread_ratio` は、指の区間の比の中央値と k の差÷k。OT画面で倍率のばらつきを見せる
+- 値の修正（`overrides`）は、MVPでは受け付けない（スキーマで `maxItems: 0`）。直せるのは、倍率に使う5点（`manual_points`）だけ
+- 同じケースに何度送ってもよい（最後に保存した値が使われる）。保存のたびに新しい `measurement_id` を作り、実寸のメッシュも別のファイルにする（前の版の形が参照しているため）。ただし、§1.1の処理中の印が有効な間の保存は `409 CONFLICT`
 - 採寸をやり直して保存した場合、それまでの形（designs）は残す。ただし、ケースの `current_design_id` は空に戻す
+- 時間：メッシュの読み込み・倍率・カバーの目印で1〜2秒（要確認）
 
 ### 3.4 `POST /v1/cases/{case_id}/designs`
 
 リクエスト
 
 ```json
-{ "style": { "color": "#3A7CA5", "pattern": "none" } }
+{ "style": { "color": "#2A9D8F", "pattern": "none" } }
 ```
 
-- 処理には最大で約150秒かかる（[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、`cases/{case_id}/designs/{design_id}` の `progress` を読んで進み具合を出す
+- 処理には中央値で約75秒、最大で約170秒かかる（カバーの殻の計算の10〜20秒を含む。[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、`cases/{case_id}/designs/{design_id}` の `progress` を読んで進み具合を出す
+- 部品は、**カバー本体**（`cover`。空気穴 `air_holes`・ベルトのスリット `strap_slits`・アリ溝のレール `rail` を含む）と**C字クリップ**（`c_clip`）を必ず作る。**TPUの筒**（`tpu_sleeve`）と2個目のクリップは、道具と要望からGeminiが選ぶ（[generation-pipeline.md](generation-pipeline.md)、[ADR-0011](adr/0011-dorsal-cover.md)〜[ADR-0013](adr/0013-clip-angle-variants.md)）
+- 描く前に、**カバーの殻**を作る：実寸の手のメッシュ（正準形）の符号付き距離から、手の面から距離 `HAND_CLEARANCE_MM`（c）〜 c ＋ `cover_thickness_mm`（t）の層を取り、手のひら側・手首側・親指・人差し指側の外を切る面と、なめらかな共通部分（半径 `edge_radius_mm`）でつなぎ、閉じた面（`cover_shell.stl`）にする。切り口のふちも丸くなる。続けて、手を c だけ広げた立体（**内側を守る立体** `inner_guard.stl`。レールの土台が内側へ出ないように、最後に引く）を作る。右手なら最後に鏡像に戻す。11/7のスパイク（手元のPC）の同じ仕組みで約12秒。カバーの外接箱の大きさで変わるので、10〜20秒を見込む。Cloud Run（4 vCPU）での時間は要確認
+- 殻は `internal/cases/{case_id}/cover/{cover_shell_sha256}.stl` に、内側を守る立体と距離場は採寸の版ごとに `internal/cases/{case_id}/cover/{measurement_id}.keepout.stl`・`.sdf.npz` に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
+- OpenSCADは、殻を `import()` して、ベルトのスリット・空気穴を引き、アリ溝のレールを足し、最後に内側を守る立体を引く。スリット・空気穴・レールの位置と向きは、生成APIが手のメッシュとカバーの目印（§3.3）から計算して `-D` で渡す。クリップとTPUの筒は、それぞれ別に描く（`mode=c_clip` など）
+- 版に記録するもの：`hand_measurement_id`、`scale_factor`、`hand_clearance_mm`、`cover_shell_sha256`、`clip_angle_deg`、部品ごとのファイル（下の応答の `files.parts`）。`geometry_hash` は、引数・`cover_shell_sha256`・固定値の版から作る（[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）
+- 描いたあと、実際の形で検査する（R6。[generation-pipeline.md](generation-pipeline.md)）：カバーは閉じた面で1つのかたまり、最小の厚さ ≥ `MIN_WALL_MM`、**手のひら側に材料がない**（切る面より手のひら側に頂点がない）、**手首を覆わない**（手首から25mm以内に頂点がない）、内側の面と手の距離が c 以上。クリップは開きの幅が道具の太さより小さく（抜けない）、サポートなしで刷れること。手のひら側と手首の検査は、装具にしないための安全の決まりなので、AIや画面の操作で外すことはできない
 - `design_id` は処理を始めた直後に作るので、Firestoreの `cases/{case_id}.current_design_id` を見れば、応答が返る前から追いかけられる
 - 同じケースに有効な処理中の印があれば `409 CONFLICT`。期限切れの回収は§1.1に従う
 
@@ -217,15 +256,23 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
     "revision": 1,
     "status": "ready",
     "parts": [
-      { "part_id": "grip_body", "variant": "fitted", "reason_ja": "警告が少ないので、指の形に沿わせてくり抜きました" },
-      { "part_id": "collet", "variant": "standard", "reason_ja": "筆の太さが変わっても締めて固定できます" },
-      { "part_id": "collet_nut", "variant": "wings", "reason_ja": "つまむ力が弱くても回せる羽根付きにしました" }
+      { "part_id": "cover", "variant": "standard", "reason_ja": "握った形のまま、手の甲側からかぶせられる形にしました" },
+      { "part_id": "air_holes", "variant": "standard", "reason_ja": "長い時間使うので、手の甲に空気穴を6つ開けました" },
+      { "part_id": "strap_slits", "variant": "single", "reason_ja": "ベルト1本で留めます。回ってしまう場合は2本にできます" },
+      { "part_id": "rail", "variant": "standard", "reason_ja": "人差し指の横にクリップを差し込みます" },
+      { "part_id": "c_clip", "variant": "standard", "reason_ja": "筆の太さ9.5mmに合わせ、押し込むだけで留まるクリップにしました" }
     ],
     "params": [
       {
-        "part_id": "grip_body", "name": "d_top_mm", "value": 34.0, "unit": "mm",
-        "range": [18, 55], "baseline": 34.4, "source": "ai",
-        "reason_ja": "人差し指のすき間 31.4mm に、沿わせる分（1.5mm×2）を足した34.4mmを、扱いやすい34.0に丸めました",
+        "part_id": "c_clip", "name": "angle_deg", "value": 20, "unit": "deg",
+        "range": [0, 40], "choices": [0, 20, 40], "baseline": 20, "source": "ai",
+        "reason_ja": "絵を描くので、筆先が紙に向かいやすい20度にしました。字を書くときは40度も選べます",
+        "clamped": false
+      },
+      {
+        "part_id": "cover", "name": "cover_thickness_mm", "value": 2.5, "unit": "mm",
+        "range": [2.0, 3.5], "baseline": 2.5, "source": "ai",
+        "reason_ja": "クリップの力を受けるレールのまわりが割れにくい厚さにしました",
         "clamped": false
       }
     ],
@@ -235,8 +282,12 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
       "unresolved_issues": []
     },
     "warnings": [],
+    "hand_overlay": { "mesh_path": "cases/c_8f3k2m/hand/m_02.glb", "frame": "hand" },
     "files": {
-      "preview_stl": "cases/c_8f3k2m/designs/d_01/preview.stl",
+      "parts": {
+        "cover": { "preview_stl": "cases/c_8f3k2m/designs/d_01/cover.preview.stl" },
+        "c_clip": { "preview_stl": "cases/c_8f3k2m/designs/d_01/c_clip_20.preview.stl" }
+      },
       "views": {
         "front": "cases/c_8f3k2m/designs/d_01/views/front.png",
         "side": "cases/c_8f3k2m/designs/d_01/views/side.png",
@@ -245,47 +296,56 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
       }
     },
     "approval": { "status": "none" },
-    "summary_ja": "人差し指側を34mm、小指側を31mmにして、4本の指の形に沿ってくり抜いた握りにしました。"
+    "summary_ja": "こぶしの外側に沿うカバーに、筆の太さ9.5mmに合わせた20度のクリップを付けました。手のひら側と手首は開けてあります。"
   }
 }
 ```
 
 `status` が `needs_attention` のときは、`review.unresolved_issues` に解決しなかった指摘が入る。
 
+- カバーとクリップのSTLは、**手の座標系**（実際の手の形、mm）で描く。そのため、S7のプレビューでは、手のメッシュ（`hand_overlay.mesh_path`）をそのまま重ねられる（前の版の握りの座標系への変換 `grip_transform` はなくした）。クリップは、レールに差し込んだ位置に置いて描く
+- 印刷用STL（§3.6）は、部品ごとに刷る向きに置き直す（カバーは手のひら側を切った面を下、クリップは輪が机と平行）
+
 ### 3.5 `POST /v1/cases/{case_id}/designs/{design_id}/refine`
 
-次の3つのうち、どれか1つだけを送る。
+次の4つのうち、どれか1つだけを送る。
 
 ```json
-{ "instruction": "もう少し太くして" }
+{ "instruction": "人差し指の関節のところをもう少しゆったりさせて" }
 ```
 
 ```json
-{ "param_changes": [ { "part_id": "grip_body", "name": "groove_depth_mm", "value": 2.5 } ] }
+{ "param_changes": [ { "part_id": "air_holes", "name": "count", "value": 8 } ] }
 ```
 
 ```json
-{ "style": { "color": "#E8A0BF", "pattern": "rings" } }
+{ "clip_angle_deg": 40 }
+```
+
+```json
+{ "style": { "color": "#E76F51", "pattern": "none" } }
 ```
 
 - `instruction`：Geminiの `refine` で引数の変更に直し、範囲チェック → 描画 → 確認1回、の順に進む
-- `param_changes`：画面のスライダーなどで直接直した場合。Geminiは呼ばず、範囲チェック → 描画、の順に進む。ユーザーの意思による変更なので、「AIが変えてよい幅」（R3）は当てはめず、`override_by_user=true` として記録する（OT画面で目立たせる）。範囲（R2）と組み合わせ（R4）のルールは当てはめる
-- `style`：**色だけの変更なら、新しい版を作らず**、その版の `style.color` だけを書き換える（描き直さない。`geometry_hash` に色は入らないので、確認済みもそのまま）。OTの確認後でも変えられる。模様を変えた場合は形が変わるので、新しい版を作って描き直す
-- 色だけの変更以外は、新しい `design_id`（`revision` が1つ増える）を作り、§3.4と同じ形で返す。前の版の「確認済み」は引き継がない
-- 指示があいまいなときは、新しい版を作らずに `200` で `{ "clarify_ja": "握り全体を太くしますか？人差し指側だけですか？" }` を返す
+- `param_changes`：画面で直接直した場合。Geminiは呼ばず、範囲チェック → 描画、の順に進む。ユーザーの意思による変更なので、「AIが変えてよい幅」（R3）は当てはめず、`override_by_user=true` として記録する（OT画面で目立たせる）。範囲（R2）と組み合わせ（R4）のルール、描いたあとの検査（R6。手のひら側・手首を含む）は当てはめる
+- `clip_angle_deg`：**クリップの角度だけを変える**（0／20／40のどれか。S7の角度の選択）。Geminiは呼ばず、新しい版を作るが、**クリップだけを描き直し**、カバーのファイル・確認用画像のうちカバーだけのものは前の版のものを使い回す。確認用画像は、クリップと筆の向きが変わるので描き直す。角度を変える仕組み（回す部品）は作らず、角度違いのクリップを刷って差し替える（[ADR-0013](adr/0013-clip-angle-variants.md)）。`param_changes` で `c_clip.angle_deg` を送っても同じ扱いになる
+- 殻は、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が変わったときだけ作り直す（10〜20秒）。空気穴・スリット・レール・クリップだけの変更では、前の版の殻を使い回す（§3.4）
+- `style`：**色だけの変更なら、新しい版を作らず**、その版の `style.color` だけを書き換える（描き直さない。`geometry_hash` に色は入らないので、確認済みもそのまま）。OTの確認後でも変えられる
+- 色だけの変更以外は、新しい `design_id`（`revision` が1つ増える）を作り、§3.4と同じ形で返す。前の版の「確認済み」は引き継がない（角度だけの変更も、刷る部品が変わるので引き継がない）
+- 指示があいまいなときは、新しい版を作らずに `200` で `{ "clarify_ja": "人差し指の付け根の関節ですか？ 2つ目の関節ですか？" }` を返す
 
 ### 3.6 `POST /v1/cases/{case_id}/review-request`
 
 リクエスト
 
 ```json
-{ "reviewer_email": "ot.demo@example.com", "design_id": "d_02", "message_ja": "筆の握りを確認してください" }
+{ "reviewer_email": "ot.demo@example.com", "design_id": "d_02", "message_ja": "筆のカバーとクリップを確認してください" }
 ```
 
 - 画面は `GET /v1/therapists` の一覧からOTを選ばせる（メールアドレスを打たなくてよい）。一覧にないOTは、メールアドレスを入れて頼める
 - `reviewer_email` が `therapists` の許可リストにない場合は `422 REVIEWER_NOT_ALLOWED`
 - 対象が最新の `ready`／`needs_attention` の版であることを確かめる
-- **この時点で印刷用STLを作る**：その版の引数で `mode=print`・`quality=print` を描き、R6を通す。できたファイルは、まだ誰も読めない場所（`internal/`）に置き、ファイルのSHA-256（`print_sha256`）と、引数・カプセルから作った `geometry_hash` を版に記録する。R6が不合格なら `RENDER_FAILED` を返し、依頼しない（持ち主が `refine` で直してから頼み直す）
+- **この時点で部品ごとの印刷用STLを作る**：その版の引数で、カバー（`mode=cover`）・C字クリップ（`mode=c_clip`）・TPUの筒（選んだときだけ）を `quality=print` で描き、それぞれ刷る向きに置き直して、R6を通す。カバーの殻は、版に記録した `cover_shell_sha256` の `internal/cases/{case_id}/cover/` のファイルを使う（作り直さない）。できたファイルは、まだ誰も読めない場所（`internal/`）に置き、部品ごとのSHA-256（`print_sha256` の map）と、`geometry_hash` を版に記録する。どれか1つでもR6が不合格なら `RENDER_FAILED` を返し、依頼しない（持ち主が `refine` で直してから頼み直す）
 - こうすると、OTが見る画像と印刷用STLは同じ引数から作られ、承認のときに描き直さずに済む。デプロイで描画のコンテナが新しくなっても、確認待ちの版はそのまま承認できる
 - 処理には20〜60秒かかる。画面は「印刷用のデータを準備しています」と出す
 - ケースの `reviewer_email` と `status = in_review` を書き込み、その版の `approval.status` を `requested` にする
@@ -308,20 +368,21 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 {
   "decision": "approve",
   "geometry_hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "comment_ja": "くぼみの位置は良いです。最初は短時間から試してください。",
+  "comment_ja": "関節の当たりは良さそうです。最初は短時間から試し、赤みが出たら外してください。",
   "checklist": {
     "dimensions_reviewed": true,
     "edges_safe": true,
     "not_an_orthosis": true,
+    "palm_open_wrist_free": true,
     "no_mouth_contact": true,
     "user_informed": true
   }
 }
 ```
 
-- `decision` は `approve` か `reject`。`approve` のときは、`checklist` がすべて `true` でないと `422 CHECKLIST_INCOMPLETE`
+- `decision` は `approve` か `reject`。`approve` のときは、`checklist` がすべて `true` でないと `422 CHECKLIST_INCOMPLETE`。`palm_open_wrist_free` は「手のひら側が開いていて、手首を覆っていない（握った指を開かせない・固定しない）」ことをOTが目で確かめた印（自動の検査 R6 と二重にする）
 - `geometry_hash` は、OT画面が表示した版の値を送る。最新の版でない、`approval.status` が `requested` でない、またはハッシュが一致しなければ `409 STALE_DESIGN`
-- `approve` のとき、サーバーは描き直さない。依頼のときに作った `internal/` の印刷用STLの `print_sha256` を確かめてから、読める場所（`print.stl`）にコピーし、トランザクションで `approval.status=approved` にする
+- `approve` のとき、サーバーは描き直さない。依頼のときに作った `internal/` の部品ごとの印刷用STLの `print_sha256` を確かめてから、読める場所（`print/` の下）にコピーし、トランザクションで `approval.status=approved` にする
 - 形を変えたい場合は、OTは差し戻し（`reject`）を選ぶ。持ち主が `refine` で新しい版を作り、OTに頼み直す
 
 応答 `200 OK`
@@ -332,9 +393,14 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
     "status": "approved",
     "reviewer_email": "ot.demo@example.com",
     "decided_at": "2026-11-09T05:12:30Z",
-    "comment_ja": "くぼみの位置は良いです。最初は短時間から試してください。"
+    "comment_ja": "関節の当たりは良さそうです。最初は短時間から試し、赤みが出たら外してください。"
   },
-  "files": { "print_stl": "cases/c_8f3k2m/designs/d_02/print.stl" },
+  "files": {
+    "print": {
+      "cover": "cases/c_8f3k2m/designs/d_02/print/cover.stl",
+      "c_clip": "cases/c_8f3k2m/designs/d_02/print/c_clip_20.stl"
+    }
+  },
   "case_status": "approved"
 }
 ```
@@ -357,7 +423,7 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 - ケースの `demo` は、ケースを作るときに `settings/runtime.demo_mode` が `true` なら生成APIが `true` にする（管理者がコンソールで切り替える。ケースを作ったあとで変わることはない）
 - `demo` でないケースで呼ぶと `403 FORBIDDEN`（ふだんの流れでは、必ずOTの確認を通る）
-- 中身は `review-request` と同じ：その版の引数で `mode=print`・`quality=print` を描き、R6を通し、`print.stl` に置く。R6が不合格なら `RENDER_FAILED`
+- 中身は `review-request` と同じ：その版の引数で部品ごとに `quality=print` で描き、刷る向きに置き直し、R6を通し、`print/` の下に置く。R6が不合格なら `RENDER_FAILED`
 - 版に `print_prepared_at` と `print_sha256` を記録する。`approval.status` は `none` のまま（OTの確認は受けていない）
 - 画面（S7・S10）には「デモ用：OTの確認を省略しています。実際に使う前には必ずOTの確認が必要です」と必ず出す
 
@@ -365,15 +431,28 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 
 生成APIとは別のCloud Runサービス（asia-southeast1、L4）。ブラウザの採寸エンジンから直接呼ぶ。認証・CORS・エラーの形は、生成APIと同じ。
 
-### `POST /v1/angles`
+### `POST /v1/hand`
 
-- 呼べるのは、ログインしていて、そのケースに同意の記録（`cases/{case_id}.mesh_consent_at`。`POST /consent` で生成APIが書く）がある持ち主だけ。`hand-mesh` は、推論の前にFirestoreでこれを確かめる。同意の記録がなければ `422 CONSENT_REQUIRED`
+前の版の `POST /v1/angles`（角度だけを返す）を置き換える。フレームごとに手のメッシュを復元し、**1つの手のメッシュに合成**して、角度と一緒に返す（[ADR-0010](adr/0010-hand-mesh-fusion.md)）。
+
+呼べる人と制限（前の版と同じ）
+
+- 呼べるのは、ログインしていて、そのケースに同意の記録（`cases/{case_id}.mesh_consent_at`、`consent_text_version = mesh-consent-2`。`POST /consent` で生成APIが書く）がある持ち主だけ。`hand-mesh` は、推論の前にFirestoreでこれを確かめる。同意の記録がない、または版が古ければ `422 CONSENT_REQUIRED`
 - 本文は `multipart/form-data`：`meta`（JSON）と、`frame_0` 〜 `frame_7`（JPEG、長い辺512px、1枚200KBまで）
 - `meta.case_id` を必須とし、サーバーが持ち主であることを確かめる。直接HTTPで呼んでも同じ制限をかける
 - 推論の前に、Firestoreのトランザクションで次を確かめ、回数を1つ増やす：共通の停止設定、1人1日20回・全体1日100回の上限、その日の概算費用（`usage/{日付}.estimated_cost_usd`）が `DAILY_COST_LIMIT_USD` 未満であること。だめなら推論を始めず `RATE_LIMITED`／`GENERATION_DISABLED`
-- 費用は、1回あたりの固定の見積もり額 `MESH_COST_PER_CALL_USD`（既定 $0.40）を、回数を増やすときに一緒に足す。Cloud Run GPUはインスタンスが動いている間ずっと課金されるので、まばらに呼ぶと、起動（1〜3分）＋推論（1分）＋止まるまでの待機（最大約15分。要確認）の分がかかり、1回あたり約(2+1+15)分×$1.26/時 ≈ $0.38 になる。続けて呼べば1回あたりは安くなるので、この額は「まばらに呼んだ場合の見積もり」。精算はしない。自動再試行も1回に数える。デモの時間帯に最小台数を1にした分の費用は、ここには入らない（[non-functional.md §2.6](non-functional.md#26-gpuhand-meshの費用)）
-- 1回の推論は `MESH_MAX_EXECUTION_SECONDS`（既定60秒）で打ち切る
-- 画像はFirestoreにもログにも書かない。記録するのは回数と費用だけ
+- 1回の処理は `MESH_MAX_EXECUTION_SECONDS`（既定60秒）で打ち切る
+- 画像はFirestoreにもStorageにもログにも書かない。残すのは回数と費用と、下の未補正のメッシュだけ
+
+処理
+
+1. フレームごとに、SAM 3D Bodyの手のデコーダで、形（`shape`）・体の比率（`scale`）・手の姿勢（`hand`）を出す。左手は画像を左右反転して右手として推定する（手のデコーダは右手だけのため）
+2. 手のキーポイントが切り抜きの中に収まっているフレームを有効とする
+3. 有効なフレームの `shape`・`scale`・`hand` の**中央値**で、1つの手を作り直す。関節の角度が中央値から30度を超えて外れたフレームは外し、もう一度中央値を取る。1枚だけ外れたフレームに引っぱられないため
+4. 手首の面で手の部分を切り出し、切り口をふさいで閉じた面にし、ループ細分割を1回かける（カバーの殻を距離から作るには閉じた面が要り、MHRの手は約2,300頂点と粗いため）
+5. 手の座標系（[measurement.md §8.1](measurement.md#81-手の座標系)：原点＝手首、x＝人差し指の付け根→小指の付け根、y＝手首→中指の付け根からx成分を除いたもの、z＝x×y）に置く。左手なら鏡像に戻し、**実際の手**の形にする。単位はmmだが、**大きさは未補正**（MHRの手の大きさのまま。実寸にするのは生成API。§3.3）。大きさの基準（1円玉）はブラウザ側の値だから
+6. 関節の角度を、合成した手の関節から、[measurement.md §6](measurement.md#6-フレームごとに求める値) と同じ定義（隣り合う区間の符号付きのなす角、手のひら側が正）で出す。ばらつき（四分位範囲）は、フレームごとの角度から出す
+7. 未補正のメッシュを、Cloud Storageの `cases/{case_id}/hand/raw/{mesh_id}.glb` に書く（`hand-mesh` のサービスアカウントが書く。ブラウザからは読めない）。関節の位置（21点、手の座標系、未補正のmm）を、GLBの `extras.joints_mm` に入れる
 
 `meta` の例
 
@@ -387,19 +466,41 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 {
   "method": "mesh_recovery",
   "model": "sam-3d-body",
+  "fusion": "median_params",
+  "frames_used": 7,
+  "mesh_id": "hm_5q2w9e",
+  "mesh_sha256": "sha256:9f2c…",
+  "mesh_stats": { "vertices": 9134, "faces": 18264, "watertight": true },
+  "joints_mm": {
+    "wrist": [0.0, 0.0, 0.0],
+    "index": [[-18.3, 73.5, 0.0], [-18.8, 101.4, 12.1], [-18.0, 112.8, 26.9], [-16.9, 116.4, 41.0]]
+  },
   "fingers": {
-    "index": { "flexion_deg": { "mcp": 58.0, "pip": 72.5, "dip": 18.0 }, "iqr_deg": { "mcp": 6.0, "pip": 8.5, "dip": 5.0 }, "frames_used": 7 }
+    "index": { "flexion_deg": { "mcp": 58.0, "pip": 72.5, "dip": 18.0 }, "iqr_deg": { "mcp": 6.0, "pip": 8.5, "dip": 5.0 } }
   },
   "warnings": [],
-  "result_token": "v1.c_8f3k2m.2026-11-08T10:15:00Z.<角度のハッシュ>.<HMAC>"
+  "result_token": "v1.c_8f3k2m.2026-11-08T10:15:00Z.<角度のハッシュ>.<メッシュのハッシュ>.<HMAC>"
 }
 ```
 
+- `joints_mm` は、未補正の関節の位置。ブラウザはS5の表示の準備にだけ使ってよいが、生成APIは使わない（Storageのファイルの値を使う。§3.3）。例では人差し指だけを示した
+- `mesh_stats` の頂点・三角形の数は、細分割1回のあとの目安（スパイクの細分割前は約2,300頂点・約4,500三角形）
 - 画像は応答を返したらすぐ捨てる。ログには、件数・処理時間・エラーコードだけを書く
-- `result_token`：ケースID・日時・角度のハッシュに、Secret Managerに置いた共有の鍵（`MESH_RESULT_HMAC_KEY`）でHMAC-SHA256の署名を付けたもの。鍵はリポジトリにも環境変数のファイルにも入れず、Secret Managerから両サービスに渡す。ブラウザは採寸JSONの `capture.mesh_result_token` に入れて送る
-- エラー：`CONSENT_REQUIRED`（422、同意がない）、`NO_HAND_DETECTED`（422、どのフレームでも手の姿勢が出なかった）、`MESH_UNAVAILABLE`（503、起動中・混雑・推論の60秒超過。ブラウザは自動で最大3回やり直す。MediaPipeの角度では代わりにしない）
+- `result_token`：ケースID・日時・角度のハッシュ・`mesh_sha256` に、Secret Managerに置いた共有の鍵（`MESH_RESULT_HMAC_KEY`）でHMAC-SHA256の署名を付けたもの。鍵はリポジトリにも環境変数のファイルにも入れず、Secret Managerから両サービスに渡す。ブラウザは `mesh_id` を採寸JSONの `capture.mesh_id` に、トークンを `capture.mesh_result_token` に入れて送る
+- 呼ぶたびに新しい `mesh_id` を作る（撮り直しで前のメッシュを上書きしない）。採寸に使われなかった未補正のメッシュも、ケースを消すときに一緒に消す（[data-model.md §5](data-model.md#5-保存期間と削除)）
+- エラー：`CONSENT_REQUIRED`（422、同意がない・版が古い）、`NO_HAND_DETECTED`（422、有効なフレームが1枚もなかった。撮り直し）、`MESH_UNAVAILABLE`（503、起動中・混雑・処理の60秒超過。ブラウザは自動で最大3回やり直す。MediaPipeの角度では代わりにしない）、`MESH_STORE_FAILED`（503、未補正のメッシュをStorageに書けなかった。自動で1回やり直す）
+- 何枚の有効なフレームがあれば合成が安定するかは要確認（11/8に、1〜8枚で角度とメッシュのずれを比べる）
 - 停止設定は `503 GENERATION_DISABLED`、回数・予算超過は `429 RATE_LIMITED`。この2つは自動再試行しない。`MESH_UNAVAILABLE` の自動再試行も待ち時間を含めて合計5分で終え、予算を超えて続けない
 - **Cloud Run自体が返す429**（最大1台・同時1件のため、2人目がインスタンスの空き待ちで受ける。本文がこのAPIのエラーの形ではない）と、アプリの `RATE_LIMITED` は、HTTPの番号ではなく本文の `error.code` で区別する。`error.code` がない429は、`MESH_UNAVAILABLE` と同じ扱いで自動再試行する
+
+時間と費用の見積もり
+
+| 項目 | 値 | 出どころ |
+|---|---|---|
+| モデルの読み込み | 約48秒（起動のたびに1回） | 11/7のスパイク（手元の RTX 4070 Ti SUPER）。Cloud Run の L4 では、コンテナの起動と重みの読み込みを合わせて1〜3分を見込む（要確認） |
+| 推論 | 1フレーム約0.2秒（その起動で最初の1枚は約1秒） | 同上。L4での値は要確認 |
+| 合成・切り出し・細分割・保存 | 数秒（合成そのものは0.014秒） | 同上 |
+| 1回の費用 | `MESH_COST_PER_CALL_USD`（既定 $0.40）を、回数を増やすときに足す | Cloud Run GPUはインスタンスが動いている間ずっと課金されるので、まばらに呼ぶと、起動（1〜3分）＋処理（1分未満）＋止まるまでの待機（最大約15分。要確認）の分がかかり、1回あたり約(2+1+15)分×$1.26/時 ≈ $0.38。続けて呼べば1回あたりは安くなるので、この額は「まばらに呼んだ場合の見積もり」。精算はしない。自動再試行も1回に数える。デモの時間帯に最小台数を1にした分の費用は、ここには入らない（[non-functional.md §2.6](non-functional.md#26-gpuhand-meshの費用)） |
 
 ## 5. エラー
 
@@ -427,23 +528,25 @@ STLと画像は、APIを通さずに、FirebaseのStorage SDKでダウンロー�
 | 404 | `NOT_FOUND` | ケースや版がない | false |
 | 409 | `CONFLICT` | 同じケースで生成中のものがある | true（少し待つ） |
 | 409 | `STALE_DESIGN` | 確認しようとした版が最新ではない | false |
-| 422 | `MEASUREMENT_INVALID` | 採寸データがスキーマに合わない | false |
+| 422 | `MEASUREMENT_INVALID` | 採寸データがスキーマに合わない。結果トークンや手のメッシュのハッシュが合わない。倍率が範囲外 | false |
 | 422 | `OUT_OF_SCOPE` | 装具や口に入れる部品など、対象外 | false |
 | 422 | `REVIEWER_NOT_ALLOWED` | 許可リストにないOT | false |
 | 422 | `CHECKLIST_INCOMPLETE` | 確認項目が埋まっていない | false |
-| 422 | `DESIGN_INFEASIBLE` | 自動で直しても、組み合わせのルール（穴のまわりの厚さ、造形サイズなど）を満たせない。例：細い握りに太い道具を挟もうとした | false |
+| 422 | `DESIGN_INFEASIBLE` | 自動で直しても、組み合わせのルール（厚さ、造形サイズなど）を満たせない。例：道具が太すぎる・細すぎてクリップが作れない、平たい柄（MVPのC字クリップでは挟めない） | false |
 | 429 | `RATE_LIMITED` | 回数の上限に達した | true（翌日） |
-| 500 | `RENDER_FAILED` | OpenSCADの失敗、またはメッシュの確認（R6）で不合格 | false |
+| 500 | `RENDER_FAILED` | OpenSCADの失敗、カバーの殻が作れなかった、または描いたあとの検査（R6：最小の厚さ、1つのかたまり、手のひら側に材料がない、手首を覆わない、手に食い込まない、クリップが抜けない）で不合格。どの検査かを `details` に入れる | false |
 | 502 | `AI_OUTPUT_INVALID` | 聞き直してもGeminiの出力がスキーマに合わない | true |
 | 503 | `AI_UNAVAILABLE` | Geminiが混雑している、または一時的なエラー（再試行したあと） | true |
 | 503 | `GENERATION_DISABLED` | 停止スイッチが入っている | false |
 | 504 | `RENDER_TIMEOUT` | OpenSCADが60秒を超えた | true |
 | 504 | `GENERATION_TIMEOUT` | 生成・微調整・OTへの依頼（印刷用STLの作成を含む）・デモの印刷用データ・承認の処理が280秒を超えた | true |
-| 422 | `CONSENT_REQUIRED` | `hand-mesh`：ケースに同意の記録がない | false |
+| 422 | `CONSENT_REQUIRED` | `hand-mesh`：ケースに同意の記録がない、または同意の文の版が古い | false |
 | 422 | `NO_HAND_DETECTED` | `hand-mesh`：どのフレームでも手の姿勢が出なかった（撮り直し） | false |
-| 503 | `MESH_UNAVAILABLE` | `hand-mesh`：起動中・混雑・推論の60秒超過 | true（自動で最大3回） |
+| 503 | `MESH_UNAVAILABLE` | `hand-mesh`：起動中・混雑・処理の60秒超過 | true（自動で最大3回） |
+| 503 | `MESH_STORE_FAILED` | `hand-mesh`：未補正の手のメッシュをStorageに書けなかった | true（自動で1回） |
 | 503 | `GENERATION_INTERRUPTED` | 処理中の印が期限切れになり、異常終了した処理を回収した | true |
 | 500 | `INTERNAL` | その他 | true |
 
 - `retryable` が `true` のエラーでは、画面に「もう一度試す」ボタンを出す
 - 生成の途中で失敗した場合は、その版の `status` を `failed` にし、`error` に同じ形で記録する
+- `MESH_SCALE_INCONSISTENT` はエラーではなく警告（`PUT measurement` の `warnings`）。保存は受け付け、OT画面で目立たせる
