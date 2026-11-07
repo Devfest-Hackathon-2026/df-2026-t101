@@ -26,12 +26,14 @@ flowchart TD
   C -->|3回目もrevise| H[要確認として止める<br/>needs_attention]
   H --> P
   P -->|言葉で微調整| F[refine] --> V
-  P -->|OTに依頼| O[OT確認]
-  O -->|確認済み| X[印刷用STLを作る]
+  P -->|OTに依頼| X[印刷用STLを作る<br/>R6]
+  X --> O[OT確認]
+  O -->|確認済み| Y[印刷用STLを公開]
+  P -->|デモのケース：印刷用データを作る| X2[印刷用STLを作る<br/>R6] --> Y
 ```
 
 - 「基準値の計算」では、まず採寸値から手のカプセルモデルを組み立て、指ごとのすき間と、くり抜くカプセルを握りの座標系で求める（`api/app/handmodel/`。[measurement.md §8](measurement.md#8-手のカプセルモデル)）。この計算はGeminiを使わない決まった手順で、結果はGeminiにも動かせない
-- 聞き取りは、ケースを作った直後と、ユーザーが答えるたびに呼ぶ
+- 聞き取りの基本の情報は、選択式の質問で集める（[screens.md S2](screens.md#s2-やりたいこと選択式の質問任意のチャット)）。Geminiの `interview` は、任意のチャット（S2b）で文が送られたときだけ呼ぶ
 - `POST /v1/cases/{case_id}/designs` が1回呼ばれると、「基準値の計算」から「プレビュー」までを1回のリクエストの中で続けて行う。途中経過はFirestoreの `designs/{designId}.progress` に書く。画面はそれを読んで進み具合を出す（[api.md](api.md)）
 
 ## 2. Geminiの呼び方（共通）
@@ -66,43 +68,48 @@ flowchart TD
 
 | リクエスト | 思考レベル | 入力 | 出力スキーマ |
 |---|---|---|---|
-| 聞き取り `interview` | LOW | これまでの会話、現在の `requirements` | §3.1 |
+| 聞き取り `interview`（任意のチャット） | LOW | 選択式の答え（`requirements`）、これまでの会話 | §3.1 |
 | 部品選び `select` | LOW | `requirements`、カタログ（部品と種類の説明） | §3.2 |
 | 寸法決め `dimension` | MEDIUM | `requirements`、`measurement.derived`、選んだ部品の引数の定義、基準値（baseline） | §3.3 |
 | 画像での確認 `review` | MEDIUM | 画像4枚、`requirements`、現在の引数、採寸値の要約、前回までの指摘 | §3.4 |
 | 言葉での微調整 `refine` | LOW | ユーザーの指示、現在の引数、引数の定義、言葉と引数の対応表 | §3.5 |
 
-### 3.1 聞き取り `interview`
+### 3.1 聞き取り `interview`（任意のチャット）
+
+選択式の質問（Q1〜Q7）の答えは、`PUT /v1/cases/{case_id}/requirements` で、Geminiを通さずにそのまま `requirements` に入る（[api.md §3.2](api.md#32-put-v1casescase_idrequirements)）。Geminiが受け持つのは、選択式で聞けない内容だけ。
 
 方針：
 
-- 1回に1つだけ質問する。答えやすいように選択肢（`choices`）を最大4つ付ける
-- 必ず集めるのは次の4つ：やりたいこと、道具の種類、道具の柄の太さ、どちらの手で持つか。つまむ力の強さは、分かれば集める
-- 柄の太さが分からないと言われたら、「定規で測る」「1円玉（直径20mm）と比べる」のどちらかを案内する。それでも分からなければ、道具の種類ごとの既定値（筆8mm、ペン10mm、スプーン12mm。仮の値）を使い、`assumptions` に残す
-- 質問は最大5回まで。5回目でまだ足りなければ、既定値で埋めて `ready` にする
-- 対象外の依頼は `out_of_scope` にし、理由と代わりの案（例：装具はOTに相談する）を伝える
+- 書かれた内容を、要件のメモ（`notes`。例：「人差し指の付け根が痛い」「長時間使う」）に直す
+- 足りない点があれば、1つだけ聞き返す。選択肢（`choices`）を最大4つ付ける。往復は最大3回
+- 選択式の答えと食い違う内容があっても、`requirements` を直接書き換えない。`suggested_changes` に入れ、ユーザーが画面のボタンで確かめてから変える
+- Q1が「その他」のときは、やりたいことと道具を聞き取り、`tool_type` を `brush`／`pen`／`spoon` のどれで代用できるか提案する。どれにも当たらなければ `unsupported_tool` として、できない理由を伝える
+- 対象外の依頼（指を伸ばす・固定する装具、口に入れる部分）は `out_of_scope` にし、理由と代わりの案（例：装具はOTに相談する）を伝える
+- 見た目の好みが書かれたら、メモに残し、S7の雰囲気の初期値に使う（形は変えない）
 
 ```json
 {
   "type": "object",
-  "required": ["status", "message_ja", "choices", "requirements"],
+  "required": ["status", "message_ja", "choices", "notes", "suggested_changes", "out_of_scope_reason"],
   "properties": {
-    "status": { "enum": ["ask", "ready", "out_of_scope"] },
-    "message_ja": { "type": "string", "description": "次の質問、またはまとめ" },
+    "status": { "enum": ["ask", "done", "out_of_scope"] },
+    "message_ja": { "type": "string", "description": "聞き返し、またはまとめ" },
     "choices": { "type": "array", "items": { "type": "string" }, "maxItems": 4 },
-    "requirements": {
-      "type": "object",
-      "properties": {
-        "activity_ja": { "type": "string", "description": "例: 筆で絵を描く" },
-        "tool_type": { "enum": ["brush", "pen", "spoon", "other"] },
-        "tool_shaft_diameter_mm": { "type": ["number", "null"], "minimum": 3, "maximum": 18 },
-        "tool_shaft_shape": { "enum": ["round", "flat", "unknown"] },
-        "hand_side": { "enum": ["right", "left", "unknown"] },
-        "pinch_strength": { "enum": ["weak", "normal", "unknown"] },
-        "preferences_ja": { "type": "string", "description": "見た目の好みなど" },
-        "assumptions": { "type": "array", "items": { "type": "string" } }
+    "notes": { "type": "array", "items": { "type": "string" }, "description": "要件のメモ（今回の会話で増えた分）" },
+    "suggested_changes": {
+      "type": "array",
+      "description": "選択式の答えを変える提案。ユーザーが確かめてから反映する",
+      "items": {
+        "type": "object",
+        "required": ["field", "value", "reason_ja"],
+        "properties": {
+          "field": { "enum": ["activity", "tool_type", "hand_side", "tool_shaft_size", "tool_shaft_shape", "nut_operator", "grip_strength", "capture_by"] },
+          "value": { "type": "string" },
+          "reason_ja": { "type": "string" }
+        }
       }
     },
+    "activity_ja": { "type": "string", "description": "Q1が「その他」のときの、やりたいことの説明" },
     "out_of_scope_reason": { "enum": ["orthosis", "mouth_contact", "unsupported_tool", "medical_claim", "none"] }
   }
 }
@@ -144,11 +151,11 @@ flowchart TD
 
 方針：
 
-- 選んだ部品の**全部の引数**を返す（変えない引数も、基準値のまま返す）。OTが一覧で全部を見られるようにするため
+- 選んだ部品の、**AIが扱う引数**を全部返す（変えない引数も、基準値のまま返す）。OTが一覧で全部を見られるようにするため。サーバーが決める引数（`capsules`、握りの座標系への変換）は、Geminiの出力に含めない（入れ子の配列を構造化出力で返させると壊れやすく、トークンの無駄にもなる）。サーバーが基準値のまま版に入れる
 - 引数ごとに `source` を付ける：`measured`（採寸値そのまま）、`rule`（固定の式）、`interview`（聞き取りの値）、`ai`（Geminiが要望を見て調整）、`default`（既定値）
 - `ai` で基準値から動かした引数には、必ず理由を書く。動かしてよい幅は引数の定義に書いてある
 - 曲がり角（`flexion_deg`）は、くぼみの深さや楕円にするかどうかの判断材料に使ってよい。ただし、具体的な数値の式は決めず、理由として説明させる
-- `fitted` のとき、くり抜くカプセル（`capsules`）と軸のずれ（`axis_offset_mm`）は、採寸から決まった値として渡し、変えさせない。Geminiが調整するのは、`press_depth_mm`（どれだけ深く沿わせるか）と `end_margin_mm` など、形の好みに関わる引数だけ
+- `fitted` のとき、くり抜くカプセル（`capsules`）と握りの座標系への変換は、採寸から決まった値として要約だけを渡し、出力させない。Geminiが調整するのは、`press_depth_mm`（どれだけ深く沿わせるか）と `end_margin_mm` など、形の好みに関わる引数だけ
 
 ```json
 {
@@ -196,7 +203,7 @@ flowchart TD
 | C2 | `fitted`：重ねた指のカプセルが、それぞれくぼみに収まり、指が握りの外に浮いていない。`round`／`oval`：くぼみの数と並び方が、`groove_enabled` と `finger_pos_mm` に合っている |
 | C3 | 指が当たる所に、尖った角や極端に薄い所が見えない |
 | C4 | 太さと長さの釣り合いが、手の幅（`hand_width_mcp_mm`）から見て不自然でない |
-| C5 | 聞き取りの要望（例：羽根付きのナット、楕円）が形に表れている |
+| C5 | 選択式の答えとチャットのメモの要望（例：羽根付きのナット、楕円、痛い所を避ける）が形に表れている |
 
 - 直す必要があれば `verdict=revise` とし、直す引数と値を `changes` に入れる。直す必要がなければ `changes` は空にする
 
@@ -254,12 +261,14 @@ flowchart TD
 
 方針：
 
-- 言葉と引数の対応表をプロンプトに入れる。例：「太く／細く」→ `d_top_mm` と `d_bottom_mm`、「長く／短く」→ `length_mm`、「くぼみを深く」→ `groove_depth_mm`、「ナットを回しやすく」→ `collet_nut` の種類を `wings` に
+- 言葉と引数の対応表をプロンプトに入れる。例：「太く／細く」→ `round`／`oval` なら `d_top_mm` と `d_bottom_mm`、`fitted` なら `press_depth_mm`（くり抜きの上限まで。超える分は `d_top_mm`・`d_bottom_mm` を直接変え、くり抜きの検査をやり直す）、「長く／短く」→ `length_mm`、「くぼみを深く」→ `groove_depth_mm`、「ナットを回しやすく」→ `collet_nut` の種類を `wings` に
 - 量の目安：「少し」＝5%（最低1mm）、無指定＝10%、「かなり」＝15%
 - 指示があいまいなら、何も変えずに確認の質問を返す（`clarify_ja`）
 - 採寸から決めた引数を「AIが変えてよい幅」を超えて変えたいとユーザーが言った場合は、変えたうえで `override_by_user=true` を付ける。「AIが変えてよい幅」（R3）では止めず、OT画面で目立たせる（ユーザーの意思を優先し、OTが判断する）。範囲（R2）と組み合わせ（R4）のルールは、ユーザーの指示でも当てはめる
 
 出力：`changes`（§3.4 と同じ形）、`message_ja`、`clarify_ja`（なければ空文字）、`override_by_user`（真偽）
+
+色だけの変更（「青にして」）は、Geminiを呼ばず、版を作らずに `style` だけを書き換える（[api.md §3.5](api.md#35-post-v1casescase_iddesignsdesign_idrefine)）。
 
 ## 4. 範囲チェック
 
@@ -270,13 +279,13 @@ flowchart TD
 | R1 | 出力がスキーマに合う。部品ID・引数名がカタログにある。必須の役割がそろっている | Geminiに誤りの内容を伝えて1回だけ聞き直す。だめなら `AI_OUTPUT_INVALID` |
 | R2 | 各引数が範囲（最小〜最大）に入っている | 違反の一覧を添えて1回だけ聞き直す。だめなら、範囲の端に丸めて `clamped` に記録する |
 | R3 | 採寸から決めた引数が、基準値から「AIが変えてよい幅」以内にある。ユーザーが言葉で求めた変更（`override_by_user`）と、画面のスライダーで直した値（`param_changes`）には当てはめない | 幅の端まで戻し、`clamped` に記録する |
-| R4 | 組み合わせのルール（穴のまわりの厚さ、くぼみの深さと幅の比、くぼみの並びと間隔、太さの差、造形サイズの高さ、羽根の長さ。[parts-library.md §4](parts-library.md#4-部品と引数)） | 1回だけ聞き直す。だめなら、決まった順に自動で直す：①くぼみを浅くする ②握りを太くする ③コレットを短くする ④握りを短くする。それでも満たせなければ `DESIGN_INFEASIBLE` |
+| R4 | 組み合わせのルール（穴のまわりの厚さ（楕円は短径で）、くぼみの深さと幅の比、くぼみの並びと間隔、太さの差、造形サイズの高さ、羽根の長さ、`fitted` のカプセルごとのくり抜きの深さと残りの壁。[parts-library.md §4](parts-library.md#4-部品と引数)） | 1回だけ聞き直す。だめなら、決まった順に自動で直し、**直すたびにR2〜R5をやり直す**：①くぼみを浅くする（`round`／`oval` は `groove_depth_mm`、`fitted` は `press_depth_mm` を0.25mmずつ下げる） ②楕円率を1.0に近づける ③握りを太くする（55mmまで） ④握りを短くする（造形サイズ） ⑤羽根を長くする（64mmまで）。くぼみの間隔、太さの差は自動では直さない。それでも満たせなければ、最初の寸法決めなら `DESIGN_INFEASIBLE`。確認と直しのループの途中や微調整のときは、生成全体を失敗にせず、**前に通った形のまま** `needs_attention` で終える |
 | R5 | 安全のルール（`edge_radius_mm ≥ 1.5`、対象外の依頼でない） | 対象外の依頼は `OUT_OF_SCOPE` で止める。角の丸みは1.5に引き上げる |
-| R6 | 描画したあとのメッシュの確認：閉じた立体になっている、部品の数が合う、体積が0より大きい、`print` レイアウトの外形が `BED_MM` に収まる。さらに、立てて刷る向きで、下向きに45度を超えて張り出す面（底面を除く）の面積が2cm²以下 | 生成・微調整の中では、張り出しを減らすため `press_depth_mm` を0.5mmずつ下げて描き直せる（最小値を守り、最大2回、R2〜R5も再検証）。変更後の引数と画像をその版に記録してから、Geminiの確認に進む。OTへの依頼のときのR6では引数を変えず、不合格なら `RENDER_FAILED` で依頼を止める |
+| R6 | 描画したあとのメッシュの確認：閉じた立体になっている、部品の数が合う、体積が0より大きい、`print` レイアウトの外形が `BED_MM` に収まる。さらに、立てて刷る向きで、**くり抜いた所とくぼみの面だけ**を対象に、下向きに45度を超えて張り出す面の面積が2cm²以下（面の中心が、どれかのカプセルの中心線から `r + すき間 + 1mm` 以内、またはリング状のくぼみの帯にある面だけを数える）。ねじ山・ナット・角の丸み・底は数えない（台形ねじの面は立てると約75度張り出し、それだけで数cm²になるため。これらは試し刷りで刷れることを確かめる） | 生成・微調整の中では、張り出しを減らすため `press_depth_mm` を0.5mmずつ下げて描き直せる（最小値を守り、最大2回、R2〜R5も再検証）。変更後の引数と画像をその版に記録してから、Geminiの確認に進む。2回下げても不合格なら、前に通った形のまま `needs_attention` で終える。印刷用STLを作るとき（OTへの依頼、デモのケースの「印刷用データを作る」）のR6では引数を変えず、不合格なら `RENDER_FAILED` で止める |
 
 - R2〜R4の聞き直しは、§5の「確認と直し」の回数に数えない
 - `clamped` に入った引数は、OT画面で「AIの値を自動で直しました」と目立つように出す
-- 造形サイズに収まるかは、プレビューの段階でもR4（引数の式）で確かめる。そのうえで、**OTに頼むとき**に `print` モードで印刷用のSTLを作り、R6で実際のメッシュの外形と張り出しを確かめる（[api.md §3.6](api.md#36-post-v1casescase_idreview-request)）
+- 造形サイズに収まるかは、プレビューの段階でもR4（引数の式）で確かめる。そのうえで、**OTに頼むとき**（デモのケースでは「印刷用データを作る」を押したとき）に `print` モードで印刷用のSTLを作り、R6で実際のメッシュの外形と張り出しを確かめる（[api.md §3.6](api.md#36-post-v1casescase_idreview-request)）
 - OTに頼んだあとは、その版の引数を変えない。承認では描き直さず、頼んだときに作った印刷用STLを公開するだけにする。形を変える必要があれば `refine` で新しい版を作り、OTに頼み直す
 
 ## 5. 確認と直しのループ
@@ -288,6 +297,7 @@ round = 0
     OpenSCADで描く（STL1つ＋画像4枚）
     round = round + 1
     確認の結果 = review(画像, 引数, …)
+    （この回の範囲チェックや描画が通らなければ → 前に通った形のまま needs_attention で終わる）
     verdict=ok かつ C1〜C5がすべてpass かつ high・mediumの指摘がない かつ changesが空なら → ready で終わる（lowの指摘はメモとして残す）
     verdict=ok なのに、不合格のチェックか high・mediumの指摘がある → needs_attention で終わる（ok を信じず、指摘を残す）
     changes が空なら → needs_attention で終わる（指摘を残したまま正常完了にしない）
@@ -298,7 +308,7 @@ round = 0
 
 - 「最大3回」は、確認（review）を呼ぶ回数で数える。最初の確認を含めて3回
 - C1〜C5の欠落・重複は、形の誤りなのでR1で1回だけ聞き直し、再び不正なら `AI_OUTPUT_INVALID`。一方、`verdict=ok` に low の指摘が付くのは正常な応答として扱う（Geminiはokでも補足を書くことが多いため）。ok と不合格のチェック・high/medium の指摘が食い違うときは、聞き直さずに `needs_attention` にする（生成全体を失敗にしない）。`revise` で修正案がない場合は、指摘を `unresolved_issues` に残して `needs_attention` にする。指摘自体が空でも「AIは修正が必要と判定しましたが、修正案を出せませんでした」を残す
-- 進み具合は `progress = { step: "reviewing", round: 2, max_rounds: 3 }` のようにFirestoreに書く
+- 進み具合は `progress = { step: "reviewing", round: 2, max_rounds: 3 }` のようにFirestoreに書く。版の `status` は `queued`／`running`／`ready`／`needs_attention`／`failed` の5つだけにし、どの段階かは `progress.step`（`selecting`／`dimensioning`／`rendering`／`reviewing`）で表す
 - `needs_attention` になった場合
   - 最後に範囲チェックを通った形を、プレビューとして見せる（作り直さない）
   - 解決しなかった指摘（`issues`）を、ユーザーとOTの両方に見せる
@@ -327,7 +337,7 @@ round = 0
 |---|---|---|
 | プレビュー用STL | `mode=assembled`、`quality=preview` | `-o preview.stl --export-format binstl` |
 | 確認用画像4枚 | `scad/view.scad` で `preview.stl` を読み込み、道具の目安の棒と、`fitted` なら手のカプセル（半透明）を添える | `--preview --imgsize=768,768 --viewall --autocenter --projection=p --camera=…`。4枚は並行して描く |
-| 印刷用STL（OTの確認後） | `mode=print`、`quality=print` | `-o print.stl --export-format binstl`。描いたあとR6を確かめる |
+| 印刷用STL（OTへの依頼のとき。デモのケースは「印刷用データを作る」を押したとき） | `mode=print`、`quality=print` | `-o print.stl --export-format binstl`。描いたあとR6を確かめる。承認のときは描き直さない |
 
 - 画像は、いったん作ったSTLを読み込んで描く。毎回立体を作り直さずに済み、色付きの目安の棒も重ねられる。`--preview` で色が出るか、速さが足りるかは要確認
 

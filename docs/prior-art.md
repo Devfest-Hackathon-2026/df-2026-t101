@@ -38,10 +38,10 @@
 
 | 先行研究の課題（原文） | 本作の設計 | ピッチでの言い方 |
 |---|---|---|
-| 寸法：「A central limitation across both groups was the inability to specify exact measurements or manipulate structural components.」（§5.4）。§7でも「dimensional accuracy」を課題に挙げている | 動画と1円玉で採寸し、mm単位の値から寸法を決め、範囲チェックを通す | 「先行研究では正確な寸法を指定できないことが中心的な限界でした。本作は手を測ったmmの値から寸法を決めます」 |
-| 印刷：「C2 discussed printability challenges, particularly related to orientation and strength」（§5.4） | 形は人が作って試し刷りした部品。立てて刷る向きを決め、張り出しの角度も機械的に確かめる | 「刷れることを確かめた部品だけを使い、刷る向きの張り出しも自動で確かめます」 |
+| 寸法：「A central limitation across both groups was the inability to specify exact measurements or manipulate structural components.」（§5.4）。§7でも「dimensional accuracy」を課題に挙げている | 動画と1円玉で採寸し、mm単位の値から寸法を決め、範囲チェックを通す | 「先行研究では正確な寸法を指定できないことが中心的な限界でした。本作は手を測ったmmの値から寸法を決めます。誤差は○mmでした（11/9の検証の値）」 |
+| 印刷：「C2 discussed printability challenges, particularly related to orientation and strength」（§5.4） | 形は人が作って試し刷りした部品。立てて刷る向きを決め、張り出しの角度も機械的に確かめる | 「試し刷りで確かめた部品を組み合わせ、刷る向きの張り出しも自動で確かめます」（試し刷りしたのは一部の組み合わせなので、「どんな値でも刷れる」とは言わない） |
 | 信頼：「Clinical makers were particularly cautious, expressing concerns about device safety, fit, and real-world performance.」（§6） | 決めた寸法と理由を一覧で見せ、OTが確認してから刷る | 「AIは決めた理由を説明し、最後はOTが確かめます」 |
-| 画一的な出力：「these models often generate 'one-size-fits-all' designs that overlook the functional, anatomical, and aesthetic considerations critical to AT design.」（§6.1.1） | 指のカプセルを握りからくり抜いて、本人の指に沿わせる。色も選べる | 「一人ひとりの指の曲がり方に合わせます」 |
+| 画一的な出力：「these models often generate 'one-size-fits-all' designs that overlook the functional, anatomical, and aesthetic considerations critical to AT design.」（§6.1.1） | 指のカプセルを握りからくり抜いて、本人の指に沿わせる。色も選べる | 「一人ひとりの指の曲がり方に合わせて、くぼみを付けます」（曲がったまま固まった指での検証はまだなので、メンバーの手での検証結果と合わせて言う） |
 
 注意：この論文は自らを「proof-of-concept」とし、「we do not claim that the tool is ready for market adoption」と書いている（§7）。批判ではなく「この課題に答える」という言い方にする。
 
