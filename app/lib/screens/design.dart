@@ -99,7 +99,7 @@ class _DesignScreenState extends State<DesignScreen> {
       if (id != null) {
         await _loadDesign(id);
         final st = _design?['status'];
-        if (st == 'generating') _startPolling();
+        if (_inProgress(st)) _startPolling();
       } else if (widget.autoStart) {
         await _generate();
       }
@@ -126,6 +126,10 @@ class _DesignScreenState extends State<DesignScreen> {
       _pending.clear();
     });
   }
+
+  /// 版が処理中か（APIの status は `queued` → `running`。data-model.md §2.5）
+  static bool _inProgress(Object? status) =>
+      status == 'running' || status == 'queued';
 
   Map<String, dynamic>? _angleParam(Map<String, dynamic> d) {
     for (final p in (d['params'] as List? ?? [])) {
@@ -164,7 +168,7 @@ class _DesignScreenState extends State<DesignScreen> {
           _round = (p['round'] as num?)?.toInt();
           _progressIso = _isoPath(d) ?? _progressIso;
         });
-        if (d['status'] != 'generating' && !_generating) {
+        if (!_inProgress(d['status']) && !_generating) {
           _poll?.cancel();
           _setDesign(d);
         }
@@ -281,7 +285,7 @@ class _DesignScreenState extends State<DesignScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_generating || _design?['status'] == 'generating') {
+    if (_generating || _inProgress(_design?['status'])) {
       return _progressPage();
     }
     final d = _design;
@@ -493,6 +497,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   color: color,
                   toolDmm: toolD,
                   tool: (d['tool'] as Map?)?.cast<String, dynamic>(),
+                  handSide: _case?['requirements']?['hand_side'] as String?,
                   showHand: _showHand,
                   label: '3Dの表示。カバーとクリップと道具を、手に着けた形で見られます。ドラッグで回せます',
                 ),

@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+// OrbitControls は上下の回転が真上・真下で止まる（180度まで）ので、どの向きにも回せる TrackballControls を使う（2026-11-08）
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 
 const views = new WeakMap();
 const SKIN = 0xf2c09e;
@@ -23,12 +24,15 @@ function setup(el) {
   dir2.position.set(120, 60, 100);
   scene.add(dir2);
   const camera = new THREE.PerspectiveCamera(35, 1, 1, 5000);
-  camera.up.set(0, 0, -1); // 手の甲（-z）を上に見る
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
+  const controls = new TrackballControls(camera, renderer.domElement);
+  controls.rotateSpeed = 3.0;
+  controls.zoomSpeed = 1.2;
+  controls.panSpeed = 0.6;
+  controls.dynamicDampingFactor = 0.15;
   const group = new THREE.Group();
   scene.add(group);
-  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, landmarks: null, framed: false };
+  // dorsal：手の甲の向きの z の符号（右手 +1、左手 −1。実際の手の座標では右手の手の甲が +z）。初期の視点は手の甲側から
+  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, landmarks: null, framed: false, dorsal: 1 };
   const resize = () => {
     const w = el.clientWidth || 300, h = el.clientHeight || 300;
     renderer.setSize(w, h, false);
@@ -36,6 +40,7 @@ function setup(el) {
     renderer.domElement.style.height = '100%';
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    controls.handleResize();
   };
   new ResizeObserver(resize).observe(el);
   resize();
@@ -54,8 +59,10 @@ function frame(state) {
   // 全体が収まる距離。縦長の画面（スマホ）では横の画角が狭いので、そのぶん離す
   const fov = (state.camera.fov * Math.PI) / 180;
   const dist = ((size / 2 / Math.tan(fov / 2)) * 1.1) / Math.min(1, state.camera.aspect);
-  // 手の甲側（-z）の、親指側の少し前から見る
-  const d = new THREE.Vector3(-0.45, -0.35, -0.82).normalize();
+  // 手の甲側（右手は +z、左手は −z）の、親指側（−x）の少し手首寄りから見る。手の甲を上にする
+  const dz = state.dorsal || 1;
+  state.camera.up.set(0, 0, dz);
+  const d = new THREE.Vector3(-0.45, -0.35, 0.82 * dz).normalize();
   state.camera.position.copy(center).add(d.multiplyScalar(dist));
   state.camera.near = size / 100;
   state.camera.far = size * 20;
@@ -186,6 +193,8 @@ window.jijoguViewer = {
   // S5：手の3Dメッシュ（GLB）だけ。landmarksJson は { palm_cut_z, wrist_cut_y }（任意）
   async showHand(el, url, headersJson, landmarksJson) {
     const state = setup(el);
+    const lmAll = JSON.parse(landmarksJson || 'null');
+    state.dorsal = lmAll?.hand_side === 'left' ? -1 : 1;
     for (const id of [...state.parts.keys()]) await setPart(state, id, null);
     await setHand(state, url, H(headersJson), 1.0);
     setLandmarks(state, JSON.parse(landmarksJson || 'null'));
@@ -198,6 +207,7 @@ window.jijoguViewer = {
     const s = JSON.parse(sceneJson);
     state.toolD = s.tool_d_mm || 0;
     state.toolSpec = s.tool || null;
+    state.dorsal = s.hand_side === 'left' ? -1 : 1;
     if (s.hand?.url) {
       await setHand(state, s.hand.url, s.hand.headers, s.hand.opacity ?? 0.35);
       state.hand.visible = s.hand.visible !== false;

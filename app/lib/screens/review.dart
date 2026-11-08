@@ -216,6 +216,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
                       PartFile(e.key, '${e.value['preview_stl']}'),
                   ],
                   color: '${d['style']?['color'] ?? '#2A9D8F'}',
+                  tool: (d['tool'] as Map?)?.cast<String, dynamic>(),
+                  handSide: _case?['requirements']?['hand_side'] as String?,
                   showHand: _showHand,
                 ),
               ),

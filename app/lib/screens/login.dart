@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return AppPage(
-      title: '自助具ジェネレーター',
+      title: 'Hand-Some-Fit',
       showAppBar: false,
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
@@ -89,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Semantics(
           header: true,
           child: Text(
-            '自助具ジェネレーター',
+            'Hand-Some-Fit',
             textAlign: TextAlign.center,
             style: AppText.headlineMedium,
           ),

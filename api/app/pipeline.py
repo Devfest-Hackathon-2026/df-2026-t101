@@ -105,7 +105,9 @@ def _make(case: dict, params: list[Param], selected: list[str], workdir: str, qu
     if glb is None:
         raise ApiError("NOT_FOUND", "手のメッシュが見つかりません。撮り直してください")
     try:
-        return _geometry().make_design(glb, hm["joints_mm"], case["requirements"]["hand_side"],
+        # 左右は採寸したときの値を正とする（聞き取りで変えると、保存したメッシュを逆向きに正準化してしまうため。11/8）
+        hand_side = (case.get("measurement") or {}).get("hand_side") or case["requirements"]["hand_side"]
+        return _geometry().make_design(glb, hm["joints_mm"], hand_side,
                                        validator.to_dict(params), workdir,
                                        Cache(f"internal/cases/{case['_id']}/cover/{case.get('measurement_id')}"), quality=quality,
                                        parts=tuple(p for p in ("cover", "c_clip", "tpu_sleeve") if p in selected))
@@ -238,6 +240,17 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         if [v for v in result.get("violations", []) if v.get("rule") in SAFETY_RULES]:
             status = "needs_attention"
             unresolved.append({"severity": "high", "description_ja": "手のひら側か手首を覆うおそれがあります。印刷用のデータは作れません"})
+        other = [v for v in result.get("violations", []) if v.get("rule") not in SAFETY_RULES]
+        if other:
+            # R6a/R6b/R6e/R6f の不合格（閉じていない・分かれている・手に近い・クリップの開き）。印刷用は RENDER_FAILED になるので先に知らせる
+            status = "needs_attention"
+            unresolved.append({"severity": "high", "description_ja": "形の検査に通らない所があります（"
+                               + "、".join(v.get("message_ja") or v.get("rule") for v in other) + "）。印刷用のデータは作れません"})
+        if [c for c in result.get("checks", []) if c.get("rule") == "R6h" and not c.get("ok")]:
+            # 道具が手やカバーに当たる、または机に届かない（11/8 の設計変更の核心なので、黙って ready にしない）
+            status = "needs_attention"
+            unresolved.append({"severity": "medium", "description_ja": "道具（ペン・筆）が手やカバーに当たるか、先が机に届きません。"
+                               "クリップの角度を立ててみてください"})
         if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_open") and not c.get("ok")]:
             # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）
             status = "needs_attention"
@@ -325,6 +338,13 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         db.update(f"cases/{case_id}", {"status": "previewing" if parent else "designing",
                                        "current_design_id": (parent or {}).get("design_id") or design_id})
         raise
+    except Exception:  # noqa: BLE001 - 予期しない例外（Gemini の答えの欠け、数値の例外など）でも版を「処理中」のまま残さない
+        log.exception("design run failed")
+        db.update(f"cases/{case_id}/designs/{design_id}",
+                  {"status": "failed", "error": {"code": "INTERNAL", "message": "形を作る途中で止まりました。もう一度作ってください"}})
+        db.update(f"cases/{case_id}", {"status": "previewing" if parent else "designing",
+                                       "current_design_id": (parent or {}).get("design_id") or design_id})
+        raise ApiError("INTERNAL")
     finally:
         ops.end(case_id, op_id)
         if usage.calls and settings.gemini_mode == "live":

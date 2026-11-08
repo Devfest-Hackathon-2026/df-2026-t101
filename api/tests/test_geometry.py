@@ -200,8 +200,43 @@ def _placement_for(name="hand_raw_fist", strap_count=1):
     cut = shell_cut_values(cover_p, Jc, radii)
     rail = place_rail(Jc, radii, ov, on, c, t)
     sl = place_slits(Jc, ov, on, cKDTree(ov), {**params["strap_slits"], "strap_count": strap_count, "_t": t},
-                     float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"])
+                     float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"],
+                     hand=trimesh.Trimesh(Vc, Fc, process=False), radii=radii, wrist_cut=float(cover_p["wrist_cut_mm"]))
     return Jc, cut, rail, sl
+
+
+@pytest.mark.parametrize("name", ["hand_raw_fist", "hand_raw_right"])
+def test_slit_y_follows_strap_window(name):
+    """1本のベルトは、手ごとの「手のひらだけを通る通り道」（親指の下・指先の手前）の真ん中にスリットを置く。
+    見つからない手では決まった割合の位置に置き、そのことを window に残す（2026-11-08）"""
+    Jc, cut, rail, sl = _placement_for(name)
+    win = sl["window"]
+    assert win and win["source"] in ("thumb_gap", "fallback")
+    ys = [float(c[1]) for c in sl["centers"]]
+    assert all(abs(y - win["slit_y"]) < 2.5 for y in ys), (ys, win)   # 側面の点を拾うので ±1.5mm ＋ 壁の中ほどへの寄せ
+    if win["source"] == "thumb_gap":
+        assert win["y_from"] <= win["center"] <= win["y_to"]
+        y_mcp = min(float(Jc[f][0][1]) for f in ("index", "middle", "ring", "pinky"))
+        assert win["slit_y"] < y_mcp      # 付け根の関節より手首側（カバーの中）
+
+
+def test_strap_window_on_simple_shapes():
+    """通り道の判定そのもの：手のひら（箱）の手のひら側に、浮いた親指（円柱）がある所は通せ、ぴったり付いた所は通せない"""
+    from app.geometry.placement import strap_window
+    palm = trimesh.creation.box(extents=[80, 120, 30]); palm.apply_translation([0, 60, 0])            # z −15〜+15
+    # 親指：y 0〜60 は手のひらに付いている（z 15〜27）、y 60〜120 は 8mm 浮いている（z 23〜35）
+    th_on = trimesh.creation.cylinder(radius=6, height=60); th_on.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    th_on.apply_translation([-25, 30, 21])
+    th_off = trimesh.creation.cylinder(radius=6, height=60); th_off.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    th_off.apply_translation([-25, 90, 29])
+    hand = trimesh.util.concatenate([palm, th_on, th_off])
+    far = np.array([500.0, 500, 500])
+    Jc = {"wrist": np.zeros(3), "thumb": np.array([[-25, 0, 21], [-25, 60, 21], [-25, 60.01, 29], [-25, 120, 29]], float)}
+    for f in ("index", "middle", "ring", "pinky"):
+        Jc[f] = np.array([far, far + 1, far + 2, far + 3])
+    radii = {"thumb": [6, 6, 6], **{f: [5, 5, 5] for f in ("index", "middle", "ring", "pinky")}}
+    win = strap_window(hand, Jc, radii, 5, 115)
+    assert win is not None and win["y_from"] >= 58 and win["y_to"] >= 110, win
 
 
 @pytest.mark.parametrize("name", ["hand_raw_fist", "hand_raw_right"])

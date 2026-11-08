@@ -11,6 +11,7 @@ import asyncio
 import io
 import json
 import logging
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -153,12 +154,20 @@ def _check_case(case_id: str, uid: str) -> None:
         raise ApiError(422, "CONSENT_REQUIRED", "映像を送ること・手の形の3Dデータを保存することへの同意が記録されていません。同意の画面からやり直してください。")
 
 
+# GPU の計算が走っている印。asyncio.wait_for で打ち切ってもスレッドは終わるまで走り続けるので、
+# その間に来た要求はロック待ちで制限時間を使い切らず、すぐ 503（retryable）で返す（11/8 のレビューで指摘）
+_gpu_busy = threading.Lock()
+
+
 def _compute(backend, images, hand_side):
-    """推定 → 合成 → 切り出し（GPU を使う重い所。スレッドで動かす）。"""
-    frames = backend.infer_params(images, hand_side)
-    fused = fusion.fuse(frames, backend.forward)
-    hand = fusion.build_hand_mesh(fused, hand_side)
-    return fused, hand, len(frames)
+    """推定 → 合成 → 切り出し（GPU を使う重い所。スレッドで動かす）。_gpu_busy は呼ぶ側が取り、ここで返す"""
+    try:
+        frames = backend.infer_params(images, hand_side)
+        fused = fusion.fuse(frames, backend.forward)
+        hand = fusion.build_hand_mesh(fused, hand_side)
+        return fused, hand, len(frames)
+    finally:
+        _gpu_busy.release()
 
 
 @app.post("/v1/hand")
@@ -186,17 +195,26 @@ async def hand(request: Request):
             log.info("hand: frames=%d error=MESH_UNAVAILABLE (%s)", len(images), e)
             raise ApiError(503, "MESH_UNAVAILABLE", "手の3Dを計算する準備をしています。しばらくして自動でやり直します。", True)
 
+        if not _gpu_busy.acquire(blocking=False):
+            log.info("hand: frames=%d error=GPU_BUSY", len(images))
+            raise ApiError(503, "MESH_UNAVAILABLE", "ほかの手の3Dを計算中です。少し待ってから自動でやり直します。", True)
+        started = False
         st = store.get_store()
         try:
-            await run_in_threadpool(st.reserve_call, uid)  # 上限の確認と回数・見積もり額の加算
-        except store.LimitError as e:
-            status = 429 if e.code == "RATE_LIMITED" else 503
-            raise ApiError(status, e.code, e.message, False)
+            try:
+                await run_in_threadpool(st.reserve_call, uid)  # 上限の確認と回数・見積もり額の加算
+            except store.LimitError as e:
+                status = 429 if e.code == "RATE_LIMITED" else 503
+                raise ApiError(status, e.code, e.message, False)
+            started = True   # ここから先は _compute のスレッドが印を返す（打ち切られても終わるまで持つ）
+            compute = run_in_threadpool(_compute, backend, images, hand_side)
+        finally:
+            if not started:
+                _gpu_busy.release()
 
         t_gpu = time.time()
         try:
-            fused, hm, n_frames = await asyncio.wait_for(run_in_threadpool(_compute, backend, images, hand_side),
-                                                         timeout=config.MAX_EXEC_SECONDS)
+            fused, hm, n_frames = await asyncio.wait_for(compute, timeout=config.MAX_EXEC_SECONDS)
         except asyncio.TimeoutError:
             raise ApiError(503, "MESH_UNAVAILABLE", "手の3Dの計算が時間内に終わりませんでした。", True)
         except fusion.FusionError as e:

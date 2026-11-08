@@ -188,6 +188,7 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
                     Positioned.fill(
                       child: Viewer3D(
                         handPath: _hm['mesh_path'],
+                        handSide: _m['hand_side'] as String?,
                         landmarks: {
                           if (lm['palm_cut_base_mm'] != null)
                             'palm_cut_z': lm['palm_cut_base_mm'],

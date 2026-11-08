@@ -263,7 +263,8 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     from scipy.spatial import cKDTree
     otree = cKDTree(ov)
     rail = place_rail(Jc, radii, ov, on, c, t)
-    sl = place_slits(Jc, ov, on, otree, {**slits_p, "_t": t}, float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"])
+    sl = place_slits(Jc, ov, on, otree, {**slits_p, "_t": t}, float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"],
+                     hand=hand_c, radii=radii, wrist_cut=float(cover_p["wrist_cut_mm"]))
     slit_rail_mm = slit_rail_clearance(sl, rail, wall_t=t)
     avoid = [(rail["anchor"], float(fixed("RAIL_WIDTH_MM")) + 6.0)]
     avoid += [(p, float(sl["width"]) / 2 + 2.0) for p in sl["centers"]]
@@ -372,6 +373,14 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     if sl["skipped"]:
         results.append({"rule": "R6e_slits", "ok": False, "value": sl["skipped"],
                         "message_ja": "ベルトのスリットを置けない所がありました", "severity": "warning"})
+    win = sl.get("window")
+    if win:
+        # 手のひらだけを通るベルトの通り道（親指の下・指先の手前）。見つからなければ、決まった割合の位置に置いたことを知らせる
+        found = win.get("source") == "thumb_gap"
+        results.append({"rule": "R6e_strap_window", "ok": found, "value": win,
+                        "message_ja": (f"ベルトは親指の下をくぐって手のひらだけを通せます（y={win['y_from']}〜{win['y_to']}mm）" if found
+                                       else "手のひらだけを通るベルトの通り道が見つかりませんでした（ベルトが親指か指に乗ります）"),
+                        "severity": "info"})
     # スリットとレールの台の、置く前の箱どうしの距離（目安。実際に穴が開いているかは R6e_slit_open で見る）
     ok_sr = slit_rail_mm >= 1.0
     results.append({"rule": "R6e_slit_rail", "ok": ok_sr, "value": {"clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},
@@ -410,7 +419,8 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         "timings_ms": timings,
         "placement": {"rail_origin": defs["rail_origin"], "rail_frame": defs["rail_frame"],
                       "air_holes": len(ho["centers"]), "strap_slits": len(sl["centers"]),
-                      "slit_rail_clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},
+                      "slit_rail_clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None,
+                      "strap_window": sl.get("window")},
         "clip": {"source": "library" if lib else "generated", "variant": lib["variant"] if lib else None,
                  "tool_d_mm": float(clip_p["tool_d_mm"]), "angle_deg": angle},
         "shell_info": {k: v for k, v in info.items() if k != "cut"},

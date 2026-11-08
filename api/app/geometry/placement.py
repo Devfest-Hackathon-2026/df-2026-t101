@@ -9,7 +9,7 @@ import trimesh
 from scipy.spatial import cKDTree
 
 from .consts import LONG_FINGERS, fixed
-from .handframe import palm_length, rail_direction
+from .handframe import palm_length, rail_direction, seg_dist
 
 RAIL_HEIGHT = None  # rail.scad の rail_height()：溝の深さ＋溝の下の肉
 RAIL_WALL_MM = 2.5   # common.scad の RAIL_WALL_MM（溝のまわりの肉）
@@ -102,16 +102,92 @@ def place_rail(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float) -> d
 SLIT_MAX_NZ = 0.7   # スリットを抜く向きの縦成分の上限（これより下向きなら横へ寄せる。ベルトは横〜斜め下へ出る）
 # スリットの y（手首→中指の付け根の長さに対する割合）。1本は 0.70（2026-11-08 に 0.55 から変えた：親指の付け根に
 # ベルトがかかり、側面の低い所に来ていた。付け根の関節の手前まで寄せると、親指から 10mm ほど離れ、側面も高い）
-SLIT_Y_FRACTIONS = {1: (0.70,), 2: (0.45, 0.72)}
+SLIT_Y_FRACTIONS = {1: (0.70,), 2: (0.45, 0.72)}   # 2本のとき、と、手から通り道が見つからないときの位置
+
+STRAP_GAP_MM = 3.0          # 親指の下にベルトをくぐらせるのに要るすき間（ベルトの厚み2mm＋余裕）
+STRAP_BLOCK_TOL_MM = 4.0    # 断面の中で、ふさがっていても目をつぶる幅（メッシュのでこぼこ）
+STRAP_PART_MARGIN_MM = 3.0  # 指・親指のカプセルの表面からこの距離以内の点を、その部位とみなす
 
 
-def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: float, palm_z: float) -> dict:
+def _section_points(hand, y: float, step: float = 0.5):
+    """手のメッシュの y の断面を、線分に沿った点の列にする（正準形）。断面がなければ None"""
+    sec = hand.section(plane_origin=[0.0, y, 0.0], plane_normal=[0.0, 1.0, 0.0])
+    if sec is None:
+        return None
+    pts = []
+    for e in sec.entities:
+        v = sec.vertices[e.points]
+        for a, b in zip(v[:-1], v[1:]):
+            n = max(2, int(np.linalg.norm(b - a) / step))
+            pts.append(a + np.linspace(0.0, 1.0, n)[:, None] * (b - a))
+    return np.vstack(pts) if pts else None
+
+
+def strap_window(hand, Jc: dict, radii: dict, y_lo: float, y_hi: float) -> dict | None:
+    """手のひらだけを通るベルトの通り道（正準形。手のひら側が +z）。
+    y ごとに断面を手のひら側から見上げ、x ごとに「いちばん手のひら側にある部位」を見る。
+    - 指（曲げた指先など）が見えていれば、ベルトは指に乗るので通せない
+    - 親指が見えていても、親指と手のひらのあいだに STRAP_GAP_MM 以上のすき間があれば、親指の下にくぐらせて通せる
+    通せる y がいちばん長く続く範囲を返す（{"y_from", "y_to", "center"}）。なければ None。
+    握りこぶしでは、手首寄りは親指が手のひらに付いていて、指先寄りは曲げた指先が来るので、そのあいだの狭い範囲になる（2026-11-08）"""
+    if y_hi <= y_lo:
+        return None
+
+    def part(p):
+        th = min(seg_dist(p[None], Jc["thumb"][i], Jc["thumb"][i + 1])[0][0] - radii["thumb"][i] for i in range(3))
+        fg = min(seg_dist(p[None], Jc[f][i], Jc[f][i + 1])[0][0] - radii[f][i] for f in LONG_FINGERS for i in range(3))
+        if th < STRAP_PART_MARGIN_MM and th <= fg:
+            return "thumb"
+        if fg < STRAP_PART_MARGIN_MM:
+            return "finger"
+        return "palm"
+
+    ok_ys = []
+    for y in np.arange(y_lo, y_hi + 0.01, 1.0):
+        P = _section_points(hand, float(y))
+        if P is None:
+            continue
+        blocked = 0.0
+        for x in np.arange(P[:, 0].min() + 1.0, P[:, 0].max() - 1.0, 2.0):
+            q = P[np.abs(P[:, 0] - x) < 0.6]
+            if len(q) < 2:
+                continue
+            first = q[np.argmax(q[:, 2])]                     # いちばん手のひら側の点
+            kind = part(first)
+            if kind == "palm":
+                continue
+            zs = np.sort(q[:, 2])[::-1]                       # 手のひら側から順の交点
+            cr = [zs[0]] + [z1 for z0, z1 in zip(zs[:-1], zs[1:]) if z0 - z1 > 1.0]
+            passable = kind == "thumb" and len(cr) >= 3 and (cr[1] - cr[2]) >= STRAP_GAP_MM
+            if not passable:
+                blocked += 2.0
+        if blocked <= STRAP_BLOCK_TOL_MM:
+            ok_ys.append(float(y))
+    if not ok_ys:
+        return None
+    runs, cur = [], [ok_ys[0]]
+    for y in ok_ys[1:]:
+        if y - cur[-1] <= 1.01:
+            cur.append(y)
+        else:
+            runs.append(cur)
+            cur = [y]
+    runs.append(cur)
+    best = max(runs, key=len)
+    return {"y_from": round(best[0], 1), "y_to": round(best[-1], 1), "center": round((best[0] + best[-1]) / 2, 1)}
+
+
+def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: float, palm_z: float,
+                hand=None, radii: dict | None = None, wrist_cut: float | None = None) -> dict:
     """ベルトのスリット（measurement.md §8.3・parts-library.md §5）。
     親指側・小指側の**側面**の、手のひら側のふちから inset（ふちの肉＋丸み＋スリットの半分）だけ手の甲側の高さで、
     いちばん外側の点に開ける。ベルトはそこから手のひらの下へ回る。手の甲側の角（レールの台がある所）には置かない
     （2026-11-08。前は角の手の甲側の点に置いていて、親指側のスリットがレールの真下に来て塞がれた）。
     側面が低くて（手のひら側を切る面が手の甲に近い）その高さに殻がなければ、置けなかったことを skipped に残す。
-    palm_z：手のひら側を切る面の高さ（正準形。手のひら側が +z）。"""
+    palm_z：手のひら側を切る面の高さ（正準形。手のひら側が +z）。
+    1本のとき、hand（正準形の手のメッシュ）と radii を渡すと、y は手ごとの「手のひらだけを通る通り道」（strap_window）の
+    真ん中にする（2026-11-08。ベルトは親指の下にくぐらせて手のひらだけを通し、面ファスナーで留める使い方のため）。
+    見つからなければ SLIT_Y_FRACTIONS の位置にして、window に source="fallback" を残す。"""
     L = palm_length(Jc)
     count = int(params.get("strap_count", 1))
     w = float(params.get("strap_width_mm", 25))
@@ -120,8 +196,19 @@ def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: fl
     inset = fixed("MIN_WALL_MM") + (th + 1.5) / 2 + edge_r + 0.5
     # 指先側の上限：カバーは付け根の関節の少し先で終わるので、スリットの端がそのふちの肉（MIN_WALL＋丸み）を残す所まで
     y_mcp_min = min(float(Jc[f][0][1]) for f in LONG_FINGERS)
-    y_max = y_mcp_min - ((w + 1.0) / 2 + fixed("MIN_WALL_MM") + edge_r)
+    edge_keep = (w + 1.0) / 2 + fixed("MIN_WALL_MM") + edge_r
+    y_max = y_mcp_min - edge_keep
+    y_min = (float(wrist_cut) + edge_keep) if wrist_cut is not None else 0.0   # 手首側のふちも同じだけ残す
     ys = [min(f * L, y_max) for f in SLIT_Y_FRACTIONS[2 if count >= 2 else 1]]
+    window = None
+    if count < 2 and hand is not None and radii is not None:
+        # 通り道は、カバーのある範囲（手首側のふち〜付け根の関節）で探す
+        win = strap_window(hand, Jc, radii, (float(wrist_cut) if wrist_cut is not None else 0.0), y_mcp_min)
+        if win:
+            ys = [float(np.clip(win["center"], y_min, y_max))]
+            window = {**win, "source": "thumb_gap", "slit_y": round(ys[0], 1)}
+        else:
+            window = {"source": "fallback", "slit_y": round(ys[0], 1)}
     t = float(params.get("_t", 2.5))
     for y in ys:
         band = np.abs(outer_v[:, 1] - y) < 1.5
@@ -156,7 +243,7 @@ def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: fl
             normals.append(n_cut)
             axes.append(np.array([0.0, 1.0, 0.0]))
     return {"centers": centers, "normals": normals, "axes": axes, "skipped": skipped,
-            "width": w, "thickness": th}
+            "width": w, "thickness": th, "window": window}
 
 
 def place_holes(Jc: dict, outer_v, outer_n, outer_tree, params: dict, wrist_cut: float,

@@ -1,11 +1,11 @@
 {
-    "name": "jijogu_app",
-    "short_name": "jijogu_app",
+    "name": "Hand-Some-Fit",
+    "short_name": "HSF",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "こぶしの形に合わせて、筆やペンを付けるカバーを作る",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

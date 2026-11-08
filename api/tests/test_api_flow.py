@@ -318,3 +318,39 @@ def test_token_interop_with_hand_mesh():
     v = tokens.verify(t, "c_abc12345")
     assert v and v["mesh_sha256"] == "f" * 64 and v["angles_sha256"] == tokens.angles_sha256(fingers)
     assert tokens.verify(t, "c_other") is None
+
+
+def test_hand_side_cannot_change_after_measurement(client):
+    """採寸のあとで聞き取りの左右を変えると 409（保存したメッシュを逆向きに正準化してしまうため。11/8）"""
+    cid, raw, mesh_id = _setup_case(client)
+    client.post(f"/v1/cases/{cid}/consent", headers=H, json={"mesh_consent": True, "consent_text_version": "mesh-consent-2"})
+    tok = _token(cid, raw, {"index": {"flexion_deg": {"mcp": 1}}})
+    assert client.put(f"/v1/cases/{cid}/measurement", headers=H, json=_measurement(cid, mesh_id, tok)).status_code == 200
+    body = {"activity": "draw", "tool_type": "brush", "hand_side": "left", "tool_d_mm": 9.5, "tool_shaft_size": None,
+            "tool_shaft_shape": "round", "finger_state": "fist", "donning_by": "helper", "capture_by": "helper"}
+    r = client.put(f"/v1/cases/{cid}/requirements", headers=H, json=body)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "CONFLICT"
+    body["hand_side"] = "right"   # 同じ左右なら保存できる
+    assert client.put(f"/v1/cases/{cid}/requirements", headers=H, json=body).status_code == 200
+
+
+def test_unexpected_error_marks_design_failed(client, monkeypatch):
+    """形の計算が ApiError 以外の例外で落ちても、版は running のまま残らず failed になり、次の生成ができる（11/8）"""
+    cid, raw, mesh_id = _setup_case(client)
+    client.post(f"/v1/cases/{cid}/consent", headers=H, json={"mesh_consent": True, "consent_text_version": "mesh-consent-2"})
+    tok = _token(cid, raw, {"index": {"flexion_deg": {"mcp": 1}}})
+    assert client.put(f"/v1/cases/{cid}/measurement", headers=H, json=_measurement(cid, mesh_id, tok)).status_code == 200
+    import app.pipeline as pl   # make_design の例外は _make で RENDER_FAILED に包まれるので、その後ろ（画像の保存）で落とす
+    good = pl._upload_preview
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(pl, "_upload_preview", boom)
+    r = client.post(f"/v1/cases/{cid}/designs", headers=H, json={"style": {"color": "#2A9D8F", "pattern": "none"}})
+    assert r.status_code == 500 and r.json()["error"]["code"] == "INTERNAL"
+    c = client.get(f"/v1/cases/{cid}", headers=H).json()
+    d = client.get(f"/v1/cases/{cid}/designs/{c['current_design_id']}", headers=H).json()["design"]
+    assert d["status"] == "failed" and d["error"]["code"] == "INTERNAL"
+    monkeypatch.setattr(pl, "_upload_preview", good)
+    r = client.post(f"/v1/cases/{cid}/designs", headers=H, json={"style": {"color": "#2A9D8F", "pattern": "none"}})
+    assert r.status_code == 200 and r.json()["design"]["status"] == "ready"

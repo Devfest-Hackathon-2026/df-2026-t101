@@ -70,6 +70,10 @@ def put_requirements(case_id: str, body: dict = Body(...), user: User = Depends(
             for e in _req_validator().iter_errors(body)]
     if errs:
         raise ApiError("REQUIREMENTS_INVALID", details=errs)
+    measured_side = (case.get("measurement") or {}).get("hand_side")
+    if measured_side and body.get("hand_side") and body["hand_side"] != measured_side:
+        # 採寸は左右ごとに座標が違う（保存したメッシュを逆向きに正準化すると、手のひら側を覆う形になり検査も通ってしまう。11/8）
+        raise ApiError("CONFLICT", "手の左右を変えるには、採寸（撮影）からやり直してください")
     old = case.get("requirements") or {}
     req = {**body, "notes": old.get("notes", []), "activity_ja": old.get("activity_ja"), "assumptions": []}
     if req.get("tool_d_mm") is not None:

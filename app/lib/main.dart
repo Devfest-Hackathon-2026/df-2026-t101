@@ -19,7 +19,7 @@ class JijoguApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '自助具ジェネレーター',
+      title: 'Hand-Some-Fit',
       debugShowCheckedModeBanner: false,
       theme: appTheme(),
       initialRoute: '/',

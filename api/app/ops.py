@@ -123,8 +123,9 @@ def begin(case_id: str, kind: str, design_id: str | None = None) -> str:
         case = t.get(f"cases/{case_id}")
         if not case:
             raise ApiError("NOT_FOUND")
-        _recover_case(t, case_id, case)
-        case = t.get(f"cases/{case_id}")
+        # Firestore のトランザクションは、書いたあとに読めない（ReadAfterWriteError）。回収したら手元の dict で判定する
+        if _recover_case(t, case_id, case):
+            case = {**case, "active_operation": None}
         if case.get("active_operation"):
             raise ApiError("CONFLICT")
         start = now()
