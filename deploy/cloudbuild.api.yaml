@@ -1,0 +1,8 @@
+# 生成APIのコンテナを作って Artifact Registry に置く（リポジトリの直下から）
+# gcloud builds submit --config deploy/cloudbuild.api.yaml --project jijogu-hackathon-2026 .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "api/Dockerfile", "-t", "asia-northeast1-docker.pkg.dev/$PROJECT_ID/jijogu/api:latest", "."]
+images:
+  - asia-northeast1-docker.pkg.dev/$PROJECT_ID/jijogu/api:latest
+timeout: 1800s

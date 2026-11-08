@@ -51,3 +51,6 @@ app/web/js/*.map
 .localstore/
 # 作り直しの途中で退避したプロトタイプのファイル（あとで消す）
 .trash_proto_api/
+# firebase CLI の記録
+firebase-debug.log
+.firebase/

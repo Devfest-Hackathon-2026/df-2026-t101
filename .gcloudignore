@@ -1,0 +1,17 @@
+# Cloud Build に送らないもの（生成APIのビルドに要るのは api/ と scad/ と schemas/ だけ）
+.git
+.gitignore
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+/.localstore/
+/.trash_proto_api/
+/app/
+/hand_mesh/
+/docs/
+/env/
+api/.data/
+api/tests/
+scad/vendor/BOSL2/tests/
+scad/vendor/BOSL2/examples/
+*.log
