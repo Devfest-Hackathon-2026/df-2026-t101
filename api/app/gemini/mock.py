@@ -84,7 +84,9 @@ def refine(params: list, instruction: str) -> dict:
         n = cur.get(("air_holes", "count"), 6)
         ch.append({"part_id": "air_holes", "name": "count", "value": min(10, int(n) + 2), "reason_ja": "空気穴を増やしました"})
     elif re.search(r"2本", instruction):
-        ch.append({"part_id": "strap_slits", "name": "strap_count", "value": 2, "reason_ja": "ベルトを2本にしました"})
+        # ベルトは1本に固定（2本にするとスリットがカバーのふちにかかる。2026-11-08）
+        return {"changes": [], "message_ja": "ベルトは1本です（2本にするとスリットがカバーのふちにかかるため）。",
+                "clarify_ja": "", "override_by_user": False}
     if not ch:
         return {"changes": [], "message_ja": "", "clarify_ja": "どこをどう変えたいか、もう少し教えてください（例：もう少し厚く）", "override_by_user": False}
     return {"changes": ch, "message_ja": "指示に合わせて直しました。", "clarify_ja": "", "override_by_user": False}

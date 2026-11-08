@@ -125,6 +125,14 @@ def check(params: list[Param], *, selected_parts: list[str], hand: dict, require
         if d is None or p.part_id not in selected_parts:
             res.violations.append({"rule": "R1", "message": f"カタログにない引数 {p.part_id}.{p.name}"})
             continue
+        if d.get("decided_by") == "fixed":
+            # 固定の引数（ベルトの本数、クリップの壁の厚さなど）は版に持たせず、形を作るときはカタログの既定値を使う。
+            # 前は基準値に無いので R3 をすり抜け、AI や画面が変えた値がそのまま通っていた（2026-11-08 のレビュー）
+            if p.value != d.get("default"):
+                res.violations.append({"rule": "R3", "message": f"{p.part_id}.{p.name}={p.value} は固定の値（{d.get('default')}）なので変えられない"})
+                if allow_clamp:
+                    res.clamped.append({"part_id": p.part_id, "name": p.name, "from": p.value, "to": d.get("default"), "rule": "R3"})
+            continue
         try:
             p.value = _coerce(d, p.value)
         except (TypeError, ValueError):

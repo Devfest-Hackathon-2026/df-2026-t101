@@ -189,17 +189,21 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             _progress(case_id, design_id, "dimensioning", "寸法を決めています")
             defs = _param_defs_for_prompt(selected, baseline)
             params = [p for k, p in baseline.items() if k[0] in selected]
+            def apply_dim(dim):
+                ps = [p for k, p in baseline.items() if k[0] in selected]
+                ps, _ = validator.merge_changes(ps, [c for c in dim["params"]], source="ai")
+                for p in ps:  # Gemini が書いた source と理由を残す（聞き直したあとも。前は2回目で抜けていた）
+                    g = next((c for c in dim["params"] if (c["part_id"], c["name"]) == p.key()), None)
+                    if g:
+                        p.source, p.reason_ja = g.get("source", p.source), g.get("reason_ja", "")
+                return ps
+
             dim = gemini.dimension(req, hand, parts, defs, None, usage)
-            params, _ = validator.merge_changes(params, [c for c in dim["params"]], source="ai")
-            for p in params:  # Gemini が書いた source と理由を残す
-                g = next((c for c in dim["params"] if (c["part_id"], c["name"]) == p.key()), None)
-                if g:
-                    p.source, p.reason_ja = g.get("source", p.source), g.get("reason_ja", "")
+            params = apply_dim(dim)
             res = validator.check(params, selected_parts=selected, hand=hand, requirements=req, allow_clamp=False)
             if res.violations and res.fatal != "AI_OUTPUT_INVALID":  # 1回だけ聞き直す（R2〜R4）
                 dim = gemini.dimension(req, hand, parts, defs, res.violations, usage)
-                params = [p for k, p in baseline.items() if k[0] in selected]
-                params, _ = validator.merge_changes(params, dim["params"], source="ai")
+                params = apply_dim(dim)
             summary_ja = dim.get("summary_ja", "")
         else:
             parts = parent["parts"]

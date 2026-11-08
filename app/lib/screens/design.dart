@@ -797,7 +797,6 @@ const Map<String, _ParamLabel> _paramLabels = {
   'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '丸い'),
   'air_holes.count': _ParamLabel('空気穴の数', '多いほど蒸れにくくなります', unit: '個', lowJa: '少ない', highJa: '多い'),
   'air_holes.diameter_mm': _ParamLabel('空気穴の大きさ', '大きいほど蒸れにくく、小さいほどカバーが丈夫です', lowJa: '小さい', highJa: '大きい'),
-  'strap_slits.strap_count': _ParamLabel('ベルトの本数', '2本にすると、カバーが手の上で回りにくくなります', unit: '本'),
   'strap_slits.strap_thickness_mm': _ParamLabel('ベルトの厚み', '使うベルト（面ファスナー）の厚みに合わせます。穴の大きさが変わります', lowJa: '薄い', highJa: '厚い'),
 };
 

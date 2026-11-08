@@ -51,17 +51,12 @@ def _fake_geometry():
                     {"part_id": "cover", "name": "edge_radius_mm", "value": 2.0, "source": "default"},
                     {"part_id": "air_holes", "name": "count", "value": 6, "source": "default"},
                     {"part_id": "air_holes", "name": "diameter_mm", "value": 6.0, "source": "default"},
+                    # 固定の引数（strap_count・クリップの壁/開き/高さ/溝/TPU）は本物の基準値（baseline.py）に入らないので、ここにも入れない
                     {"part_id": "strap_slits", "name": "strap_width_mm", "value": 25, "source": "default"},
-                    {"part_id": "strap_slits", "name": "strap_count", "value": 1, "source": "default"},
                     {"part_id": "strap_slits", "name": "strap_thickness_mm", "value": 2.0, "source": "default"},
                     {"part_id": "c_clip", "name": "tool_d_mm", "value": 8.5, "source": "interview"},
-                    {"part_id": "c_clip", "name": "wall_mm", "value": 2.0, "source": "default"},
-                    {"part_id": "c_clip", "name": "opening_ratio", "value": 0.75, "source": "default"},
-                    {"part_id": "c_clip", "name": "height_mm", "value": 12.0, "source": "default"},
                     {"part_id": "c_clip", "name": "angle_deg", "value": 70, "source": "rule"},
-                    {"part_id": "c_clip", "name": "grip_ribs", "value": True, "source": "default"},
                     {"part_id": "c_clip", "name": "count", "value": 1, "source": "default"},
-                    {"part_id": "c_clip", "name": "tpu_sleeve", "value": False, "source": "default"},
                 ],
                 "warnings": []}
 
@@ -354,3 +349,17 @@ def test_unexpected_error_marks_design_failed(client, monkeypatch):
     monkeypatch.setattr(pl, "_upload_preview", good)
     r = client.post(f"/v1/cases/{cid}/designs", headers=H, json={"style": {"color": "#2A9D8F", "pattern": "none"}})
     assert r.status_code == 200 and r.json()["design"]["status"] == "ready"
+
+
+def test_fixed_params_cannot_be_changed():
+    """固定の引数（ベルトの本数・クリップの壁の厚さ）は、AI や画面が変えても R1 で捨て、カタログの既定値で作る（2026-11-08）"""
+    from app import validator
+    base = [validator.Param("strap_slits", "strap_width_mm", 25, "default", "", 25)]
+    params, changed = validator.merge_changes(base, [{"part_id": "strap_slits", "name": "strap_count", "value": 2},
+                                                     {"part_id": "c_clip", "name": "wall_mm", "value": 2.6}])
+    assert len(changed) == 2
+    res = validator.check(params, selected_parts=list(validator.REQUIRED_PARTS), hand={}, requirements={})
+    keys = {(p.part_id, p.name) for p in res.params}
+    assert ("strap_slits", "strap_count") not in keys and ("c_clip", "wall_mm") not in keys
+    assert {(c["part_id"], c["name"]) for c in res.clamped} >= {("strap_slits", "strap_count"), ("c_clip", "wall_mm")}
+    assert validator.to_dict(res.params).get("strap_slits", {}).get("strap_count") is None   # 形はカタログの既定（1本）で作る
