@@ -22,7 +22,8 @@ class LiveCaptureScreen extends StatefulWidget {
 }
 
 class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
-  static const maxSec = 10.0;
+  static const maxSec = 20.0; // 撮影の目安は15〜20秒（2026-11-08 に10秒から。短いという声があった）
+  static const minSec = 15.0; // これより前には止められない（前は5秒）
   final _eng = MeasureEngine.instance;
   String _status = 'カメラを準備しています（初回は少し時間がかかります）';
   bool _ready = false;
@@ -95,17 +96,17 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
     const fg = AppColors.inverseOnSurface;
     final title = _recording ? '撮っています（あと$left秒）' : 'カメラで撮る';
     final shutterLabel = _recording
-        ? (_sec >= 5 ? '撮り終える' : '5秒以上撮ってください')
-        : '撮り始める（10秒）';
+        ? (_sec >= minSec ? '撮り終える' : '${minSec.round()}秒以上撮ってください')
+        : '撮り始める（20秒）';
     final VoidCallback? onShutter = _recording
-        ? (_sec >= 5 ? () => _eng.stopRecording() : null)
+        ? (_sec >= minSec ? () => _eng.stopRecording() : null)
         : (_ready && _error == null ? _record : null);
 
     final (statusTone, statusText) = _error != null
         ? (_Tone.error, _error!)
         : _recording
         ? (_handVisible
-              ? (_Tone.success, '手が見えています。そのまま、ゆっくり半周してください。')
+              ? (_Tone.success, '手が見えています。カメラは動かさずに、こぶしをゆっくり回してください。')
               : (_Tone.warning, '手が見えません。手と1円玉が画面に入るようにしてください。'))
         : (_Tone.info, _status);
 
@@ -211,9 +212,9 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
                             icon: Icons.info_outline_rounded,
                             child: Text(
                               'いつもの握った形のまま、手の甲を上にしてこぶしを置きます。指を無理に開かないでください。'
-                              '1円玉はこぶしの前（指の付け根の関節の前）3〜5cmに平らに置き、手と1円玉が画面いっぱいに写るくらい近づけます。'
-                              '親指側の低い所から、手の上を通って小指側まで、ゆっくり半周し、途中でこぶしの前（指の背と関節の出っ張り）も写します。'
-                              'PCのカメラで撮るときは、手は机に置いたまま、カメラ（ノートPCなど）の方を動かしてください。',
+                              '1円玉はこぶしから3〜5cm離れた机の上（前でも横でも、ずっと画面に入る所）に平らに置き、手と1円玉が画面いっぱいに写る所にカメラを固定します。'
+                              'カメラは動かさずに、手を机から大きく浮かせないまま、こぶしを親指側から手の甲、小指側へとゆっくり回します。途中でこぶしの前（指の背と関節の出っ張り）もカメラに向け、1円玉が画面から出ないようにします。'
+                              '手首や腕をひねるのがつらいときは、無理をせず、家族や支援者にそっと回してもらってください。',
                             ),
                           ),
                         ),

@@ -98,7 +98,7 @@ sequenceDiagram
   participant API as 生成API
   U->>App: 同意して進む（手のメッシュを保存することも含む）
   App->>API: POST /consent（mesh-consent-2）
-  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（5〜10秒・半周）
+  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（15〜20秒・半周）
   App->>EN: 候補フレーム（メモリ内）
   EN->>MP: 最初のフレーム
   EN->>CV: 最初のフレームと手の21点

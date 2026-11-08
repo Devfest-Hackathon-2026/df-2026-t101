@@ -21,6 +21,9 @@ type Cam = {
 
 let cam: Cam | undefined;
 const SAMPLE_FPS = 6;
+// 録画中にためる画像（1280px、1枚約3.7MB）は60枚まで。iOS Safari はキャンバスのメモリに上限があるので、
+// 長く撮るときは1秒あたりの枚数を減らす（20秒なら1秒に3枚。2026-11-08 に撮影を15〜20秒にしたとき）
+const MAX_CANDIDATES = 60;
 
 function makeCanvas(src: HTMLVideoElement, longSide: number): HTMLCanvasElement {
   const w = src.videoWidth, h = src.videoHeight;
@@ -144,7 +147,7 @@ export function startRecording(maxSec: number, onTick?: (sec: number, hand: bool
       if (c.video.readyState >= 2) frames.push({ t: sec, canvas: makeCanvas(c.video, 1280) });
       rec.onTick?.(sec, c.status.hand);
       if (sec >= rec.maxSec) { finish(); return; }
-      rec.timer = window.setTimeout(grab, 1000 / SAMPLE_FPS);
+      rec.timer = window.setTimeout(grab, 1000 / Math.min(SAMPLE_FPS, MAX_CANDIDATES / Math.max(1, rec.maxSec)));
     };
     const finish = () => {
       const rec = c.recording;

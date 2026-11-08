@@ -25,7 +25,8 @@ type Frame = {
 
 const SAMPLE_FPS = 6;
 const KEEP_PER_SEC = 3;
-const MAX_SECONDS = 15;
+const MAX_SECONDS = 25;          // 撮影の目安は15〜20秒（2026-11-08 に5〜10秒から）。動画ファイルは25秒までを使う
+const MAX_CANDIDATES = 60;       // 候補の画像は60枚まで（メモリ対策。camera.ts と同じ）
 const ANALYSIS_LONG_SIDE = 1280;
 const COIN_MM = 20.0;
 
@@ -162,7 +163,8 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
     await new Promise<void>((res, rej) => { v.onloadeddata = () => res(); v.onerror = () => rej(new Error('動画を読めませんでした。カメラの設定を「互換性優先」にして撮り直してください。')); });
     const dur = Math.min(v.duration || 0, MAX_SECONDS);
     const times: number[] = [];
-    for (let t = 0.05; t < dur; t += 1 / SAMPLE_FPS) times.push(t);
+    const fps = Math.min(SAMPLE_FPS, MAX_CANDIDATES / Math.max(1, dur));
+    for (let t = 0.05; t < dur; t += 1 / fps) times.push(t);
     const cands: Frame[] = [];
     for (const [i, t] of times.entries()) {
       progress?.('フレームを選んでいます', i + 1, times.length);
@@ -182,7 +184,9 @@ function useCandidates(cands: Frame[], duration: number) {
   st.duration = duration;
   const bySec = new Map<number, Frame[]>();
   for (const f of cands) { const k = Math.floor(f.t); bySec.set(k, [...(bySec.get(k) ?? []), f]); }
-  st.frames = [...bySec.values()].flatMap((fs) => fs.sort((a, b) => b.sharp - a.sharp).slice(0, KEEP_PER_SEC)).sort((a, b) => a.t - b.t);
+  // 1秒あたりに残す枚数：取り出した枚数の半分（最大 KEEP_PER_SEC）。1秒に6枚なら3枚、3枚なら2枚
+  const keep = Math.min(KEEP_PER_SEC, Math.max(1, Math.ceil(cands.length / Math.max(1, duration) / 2)));
+  st.frames = [...bySec.values()].flatMap((fs) => fs.sort((a, b) => b.sharp - a.sharp).slice(0, keep)).sort((a, b) => a.t - b.t);
   st.mode = 'video';
   st.coinSeeds = new Map();
   st.coinSeed = undefined;
@@ -480,7 +484,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     capture: {
       mode: st.mode,
       source: st.source,
-      duration_s: st.mode === 'video' ? r1(clamp(st.duration, 0.1, 15)) : undefined,
+      duration_s: st.mode === 'video' ? r1(clamp(st.duration, 0.1, MAX_SECONDS)) : undefined,
       frames_sampled: Math.min(90, Math.max(1, st.sampled)),
       frames_used: Math.min(45, ok.length),
       mesh_consent: true,

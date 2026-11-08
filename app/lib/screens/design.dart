@@ -336,7 +336,7 @@ class _DesignScreenState extends State<DesignScreen> {
       title: '形を作っています',
       bottom: OutlinedButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('中止して戻る（作るのは続きます）'),
+        child: const Text('中止して戻る（作業は続きます）'),
       ),
       children: _spaced(16, [
         if (iso != null) _CheckImage(path: iso),
@@ -391,7 +391,7 @@ class _DesignScreenState extends State<DesignScreen> {
         ),
         const InfoCard(
           tone: NoticeTone.info,
-          child: Text('数分かかることがあります。画面を閉じても、作るのは続きます。'),
+          child: Text('数分かかることがあります。画面を閉じても、作業は続きます。'),
         ),
         if (_error != null) ErrorCard(message: _error!, onRetry: _generate),
       ]),

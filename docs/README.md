@@ -55,7 +55,7 @@
 | 項目 | 決めたこと | 詳しくは |
 |---|---|---|
 | 映像 | 動画は保存しない。生成APIとGeminiには数値だけを送る。手を切り抜いたフレーム（最大8枚）は、全員から同意を得て手の3Dメッシュを作るために送り、保存しない。作った手の3Dメッシュ（写真ではない）は保存し、持ち主と担当のOTだけが読める | [measurement.md](measurement.md)、[non-functional.md §4](non-functional.md#4-プライバシー)、[ADR-0010](adr/0010-hand-mesh-fusion.md) |
-| 採寸 | 握った形のこぶしを、アプリの中のカメラで撮る動画（5〜10秒、半周）と1円玉（OpenCV.jsで自動検出し、ユーザーが確かめる）。手の3Dメッシュは SAM 3D Body で複数フレームを合成し、手の甲で見える点（手首と指の付け根）の長さで実寸にする（握りこぶしでは指の点が隠れてずれやすいため）。確認の画面で、代表の2〜3枚の手首と指の付け根の点を直せる。写真2枚はフォールバック | [measurement.md](measurement.md)、[ADR-0006](adr/0006-coin-scale-reference.md)〜[0010](adr/0010-hand-mesh-fusion.md) |
+| 採寸 | 握った形のこぶしを、アプリの中のカメラで撮る動画（15〜20秒、半周）と1円玉（OpenCV.jsで自動検出し、ユーザーが確かめる）。手の3Dメッシュは SAM 3D Body で複数フレームを合成し、手の甲で見える点（手首と指の付け根）の長さで実寸にする（握りこぶしでは指の点が隠れてずれやすいため）。確認の画面で、代表の2〜3枚の手首と指の付け根の点を直せる。写真2枚はフォールバック | [measurement.md](measurement.md)、[ADR-0006](adr/0006-coin-scale-reference.md)〜[0010](adr/0010-hand-mesh-fusion.md) |
 | 聞き取り | 寸法に効く基本の情報（やりたいこと、手、道具の種類と太さ（mm）など）は選択式で聞く。道具の太さでC字クリップの内径が決まる。それ以外はGeminiとの任意のチャットで受ける | [screens.md S2](screens.md#s2-やりたいこと選択式の質問任意のチャット) |
 | デザイン | 形ができてからS7で、3Dを見ながら選ぶ。模様はOTに頼む前まで、色は最後まで変えられる。色は大学にあるフィラメントから | [screens.md S7](screens.md#s7-プレビューと微調整) |
 | AIの役割 | Gemini 4 Argon（`global`）が、任意のチャット・部品選び・寸法の調整と理由・画像での確認（最大3回）を行う。形は作らない | [generation-pipeline.md](generation-pipeline.md)、[ADR-0001](adr/0001-gemini-output-json-params.md) |

@@ -120,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final empty = _error == null && _cases != null && _cases!.isEmpty;
     return AppPage(
-      title: 'わたしの道具',
+      title: 'Hand-Some-Fit',
       large: true,
       actions: [
         _AccountMenu(name: Session.instance.displayName),

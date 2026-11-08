@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../bridge/measure_engine.dart';
 import '../data/api.dart';
@@ -273,31 +272,19 @@ class _CaptureScreenState extends State<CaptureScreen> {
           BusyCard(text: _status!),
           const SizedBox(height: 12),
         ],
-        // 撮り方の図（暗い布・こぶし・1円玉・親指側から小指側への半周）
-        ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: AspectRatio(
-            aspectRatio: 364 / 210,
-            child: SvgPicture.asset(
-              'assets/images/capture_guide.svg',
-              fit: BoxFit.cover,
-              semanticsLabel:
-                  '撮り方の図。暗い布の上に置いたこぶしのまわりを、親指側から小指側へ、カメラで半周します。こぶしの前に1円玉を置きます。',
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
+        // 撮り方の図はやめた（2026-11-08、チームの決定。手順の文だけで足りるため）。
+        // 撮り方：カメラは動かさず、手のほうを回す（カメラを回すと1円玉が画面から出やすく難しかった）。暗い布も要らない
         Semantics(
           header: true,
-          child: Text('こぶしのまわりを半周撮ります（5〜10秒）', style: AppText.titleLarge),
+          child: Text('こぶしをゆっくり回して撮ります（15〜20秒）', style: AppText.titleLarge),
         ),
         const SizedBox(height: 16),
         for (final (i, s) in const [
-          '暗い色の布か紙を机に敷き、その上に、いつもの握った形のまま、手の甲を上にしてこぶしを置きます。',
-          '1円玉を、こぶしの前（指の付け根の関節の前）3〜5cmに平らに置きます。',
-          '手と1円玉が画面いっぱいに写るくらい近づけます（1円玉が小さすぎると測れません）。',
-          '親指側の低い所から、手の上を通って小指側まで、5〜10秒かけてゆっくり半周します。途中で、こぶしの前（指の背と関節の出っ張り）も写します。',
-          'PCのカメラで撮るときは、手は机に置いたまま、カメラ（ノートPCなど）の方を動かしてください。',
+          '机の上に、いつもの握った形のまま、手の甲を上にしてこぶしを置きます。',
+          '1円玉を、こぶしから3〜5cm離れた机の上に、平らに置きます。前でも横でも、撮っているあいだずっと画面に入っていれば大丈夫です。',
+          'カメラは動かしません。手と1円玉が画面いっぱいに写るくらいの所に、スマホを立てかけるか、ほかの人に持ってもらいます（PCはそのままで大丈夫です）。',
+          '手を机から大きく浮かせずに、15〜20秒かけて、こぶしを親指側から手の甲、小指側へとゆっくり回します。途中で、こぶしの前（指の背と関節の出っ張り）もカメラに向けます。1円玉が画面から出ないようにします。',
+          '手首や腕をひねるのがつらいときは、無理をしないでください。家族や支援者に、腕をそっと回してもらうこともできます。',
         ].indexed)
           _StepRow(number: i + 1, text: s),
         const SizedBox(height: 4),
