@@ -68,7 +68,6 @@ class _DesignScreenState extends State<DesignScreen> {
   late int? _recommendedAngle = widget.recommendedAngle;
   String? _clarify;
   final _instruction = TextEditingController();
-  final Map<String, num> _pending = {}; // スライダーで直した値（part_id.name → 値）
   Timer? _poll;
   int _pollCount = 0;
 
@@ -123,7 +122,6 @@ class _DesignScreenState extends State<DesignScreen> {
       _recommendedAngle ??= _angleParam(d)?['source'] == 'ai'
           ? (_angleParam(d)?['value'] as num?)?.toInt()
           : null;
-      _pending.clear();
     });
   }
 
@@ -616,7 +614,15 @@ class _DesignScreenState extends State<DesignScreen> {
             icon: Icons.help_outline_rounded,
             child: Text(_clarify!),
           ),
-        ..._sliders(d),
+        if (_numberParams(d).isNotEmpty) ...[
+          const _Heading('数値で細かく直す'),
+          OutlinedButton.icon(
+            onPressed: idle ? () => _openNumbers(d) : null,
+            icon: const Icon(Icons.tune_rounded),
+            label: const Text('カバーの厚み・空気穴などを直す'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          ),
+        ],
         const _Heading('見た目'),
         const _SubLabel('雰囲気'),
         Wrap(
@@ -750,99 +756,204 @@ class _DesignScreenState extends State<DesignScreen> {
     );
   }
 
-  /// 数値のスライダー（範囲は版の params の range。クリップの内径・道具の太さ・角度は出さない）
-  List<Widget> _sliders(Map<String, dynamic> d) {
-    final ps = [
-      for (final p in (d['params'] as List? ?? []))
-        if (p['range'] is List &&
-            (p['range'] as List).length == 2 &&
-            !(p['part_id'] == 'c_clip' &&
-                (p['name'] == 'tool_d_mm' ||
-                    p['name'] == 'angle_deg' ||
-                    p['name'] == 'inner_d_mm')))
-          Map<String, dynamic>.from(p),
-    ];
-    if (ps.isEmpty) return const [];
-    return [
-      const _Heading('数値で直す'),
-      for (final p in ps)
-        Builder(
-          builder: (context) {
-            final key = '${p['part_id']}.${p['name']}';
-            final lo = (p['range'][0] as num).toDouble(),
-                hi = (p['range'][1] as num).toDouble();
-            final v = (_pending[key] ?? p['value'] as num).toDouble().clamp(
-              lo,
-              hi,
-            );
-            final isInt = p['value'] is int && p['range'][0] is int;
-            return MergeSemantics(
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(16),
+  /// 数値で直せる引数（日本語の名前があるものだけ。範囲は版の params の range）
+  List<Map<String, dynamic>> _numberParams(Map<String, dynamic> d) => [
+    for (final p in (d['params'] as List? ?? []))
+      if (p['range'] is List &&
+          (p['range'] as List).length == 2 &&
+          _paramLabels.containsKey('${p['part_id']}.${p['name']}'))
+        Map<String, dynamic>.from(p),
+  ];
+
+  /// 数値で直す画面を下から出す（いつも出しておくと画面が長くなるので、開いたときだけ。2026-11-08）
+  Future<void> _openNumbers(Map<String, dynamic> d) async {
+    final changes = await showModalBottomSheet<List<Map<String, dynamic>>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.surfaceContainerLow,
+      builder: (_) => _NumberSheet(params: _numberParams(d)),
+    );
+    if (changes == null || changes.isEmpty || !mounted) return;
+    await _refine({'param_changes': changes}, '値に合わせて作り直しています');
+  }
+}
+
+/// 引数の日本語の名前・説明・単位（API の名前は利用者に分かりにくいので、画面ではこちらを出す）
+class _ParamLabel {
+  const _ParamLabel(this.title, this.help, {this.unit = 'mm', this.lowJa, this.highJa});
+  final String title;
+  final String help;
+  final String unit;
+  final String? lowJa; // スライダーの左端の意味
+  final String? highJa; // 右端の意味
+}
+
+const Map<String, _ParamLabel> _paramLabels = {
+  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '軽い', highJa: '丈夫'),
+  'cover.palm_cut_offset_mm': _ParamLabel('手のひら側をどこまで覆うか', 'プラスにするとカバーが手のひら側へ深くなり、マイナスにすると浅く小さくなります。手のひらは覆いません', lowJa: '浅い', highJa: '深い'),
+  'cover.wrist_cut_mm': _ParamLabel('手首からカバーまでの長さ', '大きくするとカバーが短くなり、手首が動かしやすくなります', lowJa: '長いカバー', highJa: '短いカバー'),
+  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '丸い'),
+  'air_holes.count': _ParamLabel('空気穴の数', '多いほど蒸れにくくなります', unit: '個', lowJa: '少ない', highJa: '多い'),
+  'air_holes.diameter_mm': _ParamLabel('空気穴の大きさ', '大きいほど蒸れにくく、小さいほどカバーが丈夫です', lowJa: '小さい', highJa: '大きい'),
+  'strap_slits.strap_count': _ParamLabel('ベルトの本数', '2本にすると、カバーが手の上で回りにくくなります', unit: '本'),
+  'strap_slits.strap_thickness_mm': _ParamLabel('ベルトの厚み', '使うベルト（面ファスナー）の厚みに合わせます。穴の大きさが変わります', lowJa: '薄い', highJa: '厚い'),
+};
+
+/// 数値で直す画面（ボトムシート）。変えた値を返す（作り直すのは呼び出し側）
+class _NumberSheet extends StatefulWidget {
+  const _NumberSheet({required this.params});
+  final List<Map<String, dynamic>> params;
+  @override
+  State<_NumberSheet> createState() => _NumberSheetState();
+}
+
+class _NumberSheetState extends State<_NumberSheet> {
+  final Map<String, num> _pending = {}; // part_id.name → 変えた値
+
+  String _fmt(num v, bool isInt) => isInt ? '${v.round()}' : v.toStringAsFixed(1);
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => Column(
+        children: [
+          Expanded(
+            child: ListView(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text('数値で細かく直す', style: AppText.titleLarge),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${p['label_ja'] ?? p['name']}',
-                            style: AppText.bodyLarge.copyWith(
-                              color: AppColors.onSurface,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${isInt ? v.round() : v.toStringAsFixed(1)} ${p['unit'] ?? ''}',
-                          style: AppText.titleMedium.copyWith(
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Slider(
-                      min: lo,
-                      max: hi,
-                      divisions: isInt
-                          ? (hi - lo).round().clamp(1, 100)
-                          : ((hi - lo) * 10).round().clamp(1, 200),
-                      value: v,
-                      onChanged: (x) => setState(
-                        () => _pending[key] = isInt
-                            ? x.round()
-                            : double.parse(x.toStringAsFixed(1)),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 4),
+                Text(
+                  '動かしたあと「この値で作り直す」を押すと、新しい版を作ります。クリップの角度は前の画面のボタンで変えられます',
+                  style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant),
                 ),
+                const SizedBox(height: 16),
+                for (final p in widget.params) ...[
+                  _row(p),
+                  const SizedBox(height: 12),
+                ],
+              ],
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      child: const Text('やめる'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _pending.isEmpty
+                          ? null
+                          : () => Navigator.of(context).pop([
+                              for (final e in _pending.entries)
+                                {
+                                  'part_id': e.key.split('.').first,
+                                  'name': e.key.split('.').last,
+                                  'value': e.value,
+                                },
+                            ]),
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      child: Text(_pending.isEmpty ? 'この値で作り直す' : 'この値で作り直す（${_pending.length}か所）'),
+                    ),
+                  ),
+                ],
               ),
-            );
-          },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(Map<String, dynamic> p) {
+    final key = '${p['part_id']}.${p['name']}';
+    final label = _paramLabels[key]!;
+    final lo = (p['range'][0] as num).toDouble(), hi = (p['range'][1] as num).toDouble();
+    final isInt = p['value'] is int && p['range'][0] is int ||
+        label.unit == '個' || label.unit == '本';
+    final orig = (p['value'] as num).toDouble().clamp(lo, hi);
+    final v = (_pending[key] ?? orig).toDouble().clamp(lo, hi);
+    final changed = _pending.containsKey(key);
+    return MergeSemantics(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        decoration: BoxDecoration(
+          color: changed ? AppColors.secondaryContainer : AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
         ),
-      if (_pending.isNotEmpty)
-        FilledButton(
-          onPressed: _busy != null
-              ? null
-              : () => _refine({
-                  'param_changes': [
-                    for (final e in _pending.entries)
-                      {
-                        'part_id': e.key.split('.').first,
-                        'name': e.key.split('.').last,
-                        'value': e.value,
-                      },
-                  ],
-                }, '値に合わせて作り直しています'),
-          child: const Text('この値で作り直す'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(label.title, style: AppText.titleMedium.copyWith(color: AppColors.onSurface)),
+                ),
+                const SizedBox(width: 8),
+                Text('${_fmt(v, isInt)} ${label.unit}', style: AppText.titleMedium.copyWith(color: AppColors.primary)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(label.help, style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant)),
+            Slider(
+              min: lo,
+              max: hi,
+              divisions: isInt ? (hi - lo).round().clamp(1, 100) : ((hi - lo) * 10).round().clamp(1, 200),
+              value: v,
+              label: '${_fmt(v, isInt)} ${label.unit}',
+              semanticFormatterCallback: (x) => '${label.title} ${_fmt(x, isInt)} ${label.unit}',
+              onChanged: (x) => setState(() {
+                final nv = isInt ? x.round() : double.parse(x.toStringAsFixed(1));
+                if ((nv - orig).abs() < 1e-9) {
+                  _pending.remove(key); // 元の値に戻したら、変えていない扱い
+                } else {
+                  _pending[key] = nv;
+                }
+              }),
+            ),
+            if (label.lowJa != null || label.highJa != null)
+              Row(
+                children: [
+                  Text(label.lowJa ?? '', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                  const Spacer(),
+                  Text(label.highJa ?? '', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                ],
+              ),
+            Row(
+              children: [
+                Text('元の値：${_fmt(orig, isInt)} ${label.unit}', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                const Spacer(),
+                if (changed)
+                  TextButton(
+                    onPressed: () => setState(() => _pending.remove(key)),
+                    child: const Text('元に戻す'),
+                  ),
+              ],
+            ),
+          ],
         ),
-    ];
+      ),
+    );
   }
 }
 
