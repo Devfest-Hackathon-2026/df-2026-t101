@@ -3,8 +3,8 @@
 - 「厚く／薄く」「丈夫に／軽く」→ cover.cover_thickness_mm
 - 「もっと覆って／小さく」→ cover.wrist_cut_mm（手首の側）と cover.palm_cut_offset_mm（手のひらの側。正にしても、手のひらと中節より先は覆わない）
 - 「ふちをもっと丸く」→ cover.edge_radius_mm
-- 「角度を寝かせて／立てて」→ c_clip.angle_deg を1段（20度）変える（0／20／40）
-- 「挟むのをきつく／ゆるく」→ c_clip.wall_mm（±0.2）と c_clip.opening_ratio（±0.02）。内径は変えない
+- 「角度を寝かせて／立てて」→ c_clip.angle_deg を1段（10度）変える（60／70／80。数字が大きいほど立つ）
+- 「挟むのをきつく／ゆるく」→ クリップの形は固定なので変えられない。何も変えず、message_ja で「クリップの挟む強さは固定です。道具の太さが違うなら聞き取りの太さを直してください」と伝える
 - 「ベルトを2本に」→ strap_slits.strap_count、「蒸れる」→ air_holes.count・air_holes.diameter_mm
 量の目安：「少し」＝5%（最低0.2mm）、無指定＝10%、「かなり」＝15%。
 指示があいまいなら、何も変えずに clarify_ja に確認の質問を書きます（なければ空文字）。

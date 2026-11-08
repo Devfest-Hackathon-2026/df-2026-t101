@@ -165,7 +165,7 @@ sequenceDiagram
   API-->>App: 版の要約、部品ごとのファイル
   App->>ST: cover・c_clip のプレビュー用STLと手のメッシュを読む（ルールで確認）
   App->>App: 手にカバーとクリップと道具の棒を重ねて表示
-  opt クリップの角度だけを変える（0／20／40度）
+  opt クリップの角度だけを変える（60／70／80度）
     App->>API: POST /refine（clip_angle_deg）
     API->>SC: クリップだけ描き直す（カバーは前の版のものを使う）
   end

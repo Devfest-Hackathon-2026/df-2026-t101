@@ -58,7 +58,7 @@ def _fake_geometry():
                     {"part_id": "c_clip", "name": "wall_mm", "value": 2.0, "source": "default"},
                     {"part_id": "c_clip", "name": "opening_ratio", "value": 0.75, "source": "default"},
                     {"part_id": "c_clip", "name": "height_mm", "value": 12.0, "source": "default"},
-                    {"part_id": "c_clip", "name": "angle_deg", "value": 20, "source": "rule"},
+                    {"part_id": "c_clip", "name": "angle_deg", "value": 70, "source": "rule"},
                     {"part_id": "c_clip", "name": "grip_ribs", "value": True, "source": "default"},
                     {"part_id": "c_clip", "name": "count", "value": 1, "source": "default"},
                     {"part_id": "c_clip", "name": "tpu_sleeve", "value": False, "source": "default"},
@@ -184,22 +184,22 @@ def test_flow_measure_design_refine_print(client):
     d = r.json()["design"]
     assert d["status"] == "ready", d
     assert set(d["files"]["parts"]) == {"cover", "c_clip"}
-    assert d["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_20.preview.stl")
+    assert d["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_70.preview.stl")
     angle = next(p for p in d["params"] if p["name"] == "angle_deg")
-    assert angle["value"] == 20 and angle["source"] == "ai"
+    assert angle["value"] == 70 and angle["source"] == "ai"
     did = d["design_id"]
 
     # 色だけの変更は版を作らない
     r = client.post(f"/v1/cases/{cid}/designs/{did}/refine", headers=H, json={"style": {"color": "#E76F51"}})
     assert r.status_code == 200 and r.json()["design"]["design_id"] == did
     # 角度だけの変更は新しい版（クリップの角度が変わる）
-    r = client.post(f"/v1/cases/{cid}/designs/{did}/refine", headers=H, json={"clip_angle_deg": 40})
+    r = client.post(f"/v1/cases/{cid}/designs/{did}/refine", headers=H, json={"clip_angle_deg": 80})
     assert r.status_code == 200, r.text
     d2 = r.json()["design"]
-    assert d2["design_id"] != did and d2["revision"] == 2 and d2["clip_angle_deg"] == 40
-    assert d2["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_40.preview.stl")
+    assert d2["design_id"] != did and d2["revision"] == 2 and d2["clip_angle_deg"] == 80
+    assert d2["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_80.preview.stl")
     # 古い版は直せない
-    r = client.post(f"/v1/cases/{cid}/designs/{did}/refine", headers=H, json={"clip_angle_deg": 0})
+    r = client.post(f"/v1/cases/{cid}/designs/{did}/refine", headers=H, json={"clip_angle_deg": 60})
     assert r.status_code == 409
     # 言葉の微調整（モック）
     r = client.post(f"/v1/cases/{cid}/designs/{d2['design_id']}/refine", headers=H, json={"instruction": "もう少し厚く"})

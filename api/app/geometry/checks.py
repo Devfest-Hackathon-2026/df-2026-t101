@@ -113,3 +113,41 @@ def check_clip(clip_print: trimesh.Trimesh, clip: dict) -> list[dict]:
         out.append(_item("R6f_overhang", True, {"overhang_mm2": round(area, 1)},
                          "この角度のクリップは、サポートが要るかもしれません（印刷ガイドに出す）", severity="info"))
     return out
+
+
+TOOL_TIP_MM = 100.0    # クリップから道具の先まで（ペン・筆の目安）
+TOOL_REAR_MM = 50.0    # クリップから道具の後ろの端まで
+TOOL_HAND_GAP_MM = 2.0   # 道具の面と手の間にほしいすき間
+TOOL_COVER_GAP_MM = 1.0
+
+
+def check_tool_path(hand_ref: HandRef, cover: trimesh.Trimesh | None, rail: dict, clip: dict, Jc: dict) -> list[dict]:
+    """R6h：道具の通り道（正準形。手のひら側が +z）。クリップの位置から道具の軸を引き、
+    手・カバーに当たらないか、机（手のひら側のいちばん低い点）に先が届くかを見る（2026-11-08。
+    手の甲の上に付けた道具がどの角度でも指の背に当たり、机にも届かなかった件から）。"""
+    from .clipgeom import clip_axis_rail, clip_center_rail
+    Fm = np.asarray(rail["frame"], dtype=float)
+    c = Fm.T @ clip_center_rail(clip) + np.asarray(rail["origin"], dtype=float)
+    a = Fm.T @ clip_axis_rail(clip)
+    r = float(clip["tool_d_mm"]) / 2
+    ts = np.arange(-TOOL_REAR_MM, TOOL_TIP_MM + 0.5, 1.0)
+    P = c[None, :] + ts[:, None] * a[None, :]
+    dh, _ = hand_ref.dist(P)
+    gap_hand = float(dh.min() - r)
+    gap_cover = None
+    if cover is not None and len(cover.vertices):
+        dc, _ = cKDTree(cover.vertices).query(P, workers=-1)
+        gap_cover = float(dc.min() - r)
+    z_table = float(hand_ref.pts[:, 2].max())          # 手のひら側のいちばん低い点＝机
+    reach = (z_table - c[2]) / a[2] if a[2] > 1e-6 else math.inf
+    tilt = math.degrees(math.asin(float(np.clip(a[2], -1, 1))))
+    tip = c + reach * a if math.isfinite(reach) else None
+    mcp = Jc["index"][0]
+    ok = gap_hand >= TOOL_HAND_GAP_MM and (gap_cover is None or gap_cover >= TOOL_COVER_GAP_MM) and reach <= TOOL_TIP_MM
+    value = {"gap_hand_mm": round(gap_hand, 1), "gap_cover_mm": None if gap_cover is None else round(gap_cover, 1),
+             "tilt_deg": round(tilt, 0), "reach_mm": None if not math.isfinite(reach) else round(float(reach), 0),
+             "tip_from_index_mcp_mm": None if tip is None else [round(float(v), 0) for v in (tip - mcp)[:2]]}
+    msg = "道具は手・カバーに当たらず、先が机に届く" if ok else \
+        ("道具が手かカバーに当たります" if (gap_hand < TOOL_HAND_GAP_MM or (gap_cover is not None and gap_cover < TOOL_COVER_GAP_MM))
+         else "道具の先が机に届きません（寝すぎ）")
+    return [_item("R6h", ok, value, msg, fix_hint="c_clip.angle_deg を立てる", severity="warning")]

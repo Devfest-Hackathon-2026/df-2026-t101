@@ -230,7 +230,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         _progress(case_id, design_id, "shelling", "カバーの形を作っています")
         result, params = _render_safe(case, params, selected, workdir, clamped)
         deadline.check()
-        angle = validator.to_dict(params).get("c_clip", {}).get("angle_deg", 20)
+        angle = validator.to_dict(params).get("c_clip", {}).get("angle_deg", 70)
         file_refs = _upload_preview(case_id, design_id, result, angle)
         status = "ready"
         warnings = sorted(set((case.get("hand_model") or {}).get("warnings", [])))
@@ -238,6 +238,11 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         if [v for v in result.get("violations", []) if v.get("rule") in SAFETY_RULES]:
             status = "needs_attention"
             unresolved.append({"severity": "high", "description_ja": "手のひら側か手首を覆うおそれがあります。印刷用のデータは作れません"})
+        if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_rail") and not c.get("ok")]:
+            # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）
+            status = "needs_attention"
+            unresolved.append({"severity": "medium", "description_ja": "ベルトのスリットを置けない所、またはレールの台にかかる所があります（カバーの側面が低いため）。"
+                               "ベルトの幅を狭くするか、OTに相談してください"})
 
         # 画像での確認（最初は最大3回、言葉の微調整は1回、数値・角度だけの変更は確認しない）
         max_rounds = MAX_ROUNDS if origin == "initial" else (1 if instruction else 0)
@@ -290,7 +295,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                 break
             result, params = r2, p2
             clamped += res2.clamped
-            angle = validator.to_dict(params).get("c_clip", {}).get("angle_deg", 20)
+            angle = validator.to_dict(params).get("c_clip", {}).get("angle_deg", 70)
             file_refs = _upload_preview(case_id, design_id, result, angle)
 
         if not ops.is_mine(case_id, op_id):
@@ -305,7 +310,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "scale_factor": case["hand_model"].get("scale_factor"),
             "hand_clearance_mm": validator.fixed("HAND_CLEARANCE_MM", 1.5),
             "cover_shell_sha256": result.get("cover_shell_sha256"),
-            "clip_angle_deg": angle, "checks": result.get("checks", []),
+            "clip_angle_deg": angle, "clip": result.get("clip"), "checks": result.get("checks", []),
             "summary_ja": summary_ja or "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
             "input_snapshot": {"requirements": req, "measurement_id": case.get("measurement_id"),
                                "hand_model": case.get("hand_model")},
@@ -330,7 +335,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
 def design_view(case_id: str, design_id: str) -> dict:
     d = db.get(f"cases/{case_id}/designs/{design_id}") or {}
     keep = ("revision", "status", "parts", "params", "review", "warnings", "hand_overlay", "files", "approval",
-            "summary_ja", "progress", "style", "clip_angle_deg", "error", "clamped", "geometry_hash", "origin",
+            "summary_ja", "progress", "style", "clip_angle_deg", "clip", "error", "clamped", "geometry_hash", "origin",
             "parent_design_id", "print_prepared_at")
     return {"design_id": design_id, **{k: d.get(k) for k in keep if k in d}}
 
@@ -347,7 +352,7 @@ def prepare_print(case_id: str, design_id: str, kind: str) -> dict:
         res = _make(case, params, selected, workdir, quality="print")
         if res.get("violations"):
             raise ApiError("RENDER_FAILED", details=res["violations"])
-        angle = int(d.get("clip_angle_deg") or 20)
+        angle = int(d.get("clip_angle_deg") or 70)
         shas, keys = {}, {}
         for part, path in res["files"].items():
             name = f"c_clip_{angle}.stl" if part == "c_clip" else f"{part}.stl"

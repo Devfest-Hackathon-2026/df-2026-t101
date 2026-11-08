@@ -169,7 +169,7 @@ class MockBackend {
       case ('POST', 'designs'):
         return _newDesign(
           c,
-          angle: 20,
+          angle: 70,
           color: b['style']?['color'] ?? '#2A9D8F',
           revision: 1,
         );
@@ -313,7 +313,7 @@ class MockBackend {
           'choices': [0, 20, 40],
           'baseline': 20,
           'source': 'ai',
-          'reason_ja': '絵を描くので、筆先が紙に向かいやすい20度をおすすめします。字を書くときは40度も選べます',
+          'reason_ja': '絵を描くので、筆を立て気味の70度をおすすめします。少し寝かせたいときは60度も選べます',
           'clamped': false,
         },
         {

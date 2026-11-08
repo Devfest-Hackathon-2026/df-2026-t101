@@ -7,7 +7,8 @@ from __future__ import annotations
 from .consts import catalog
 
 AI_SIDE = ("ai", "measured", "rule", "interview", "default")
-ANGLE_BY_TOOL = {"brush": 20, "pen": 40, "spoon": 0}
+# 道具の立て具合（机に対する傾き。ADR-0013、2026-11-08）。筆は立て気味、ペンは少し寝かせる。スプーンは未検証なので同じ60
+ANGLE_BY_TOOL = {"brush": 70, "pen": 60, "spoon": 60}
 
 
 def make_baseline(wrist_cut_mm: float, requirements: dict | None = None) -> list[dict]:

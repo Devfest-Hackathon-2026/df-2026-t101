@@ -18,6 +18,10 @@ COPY api/prompts api/prompts
 COPY scad scad
 COPY schemas schemas
 
+# C字クリップの固定STLのライブラリ（太さ 4〜16mm を 0.25mm 刻み × 角度 0／20／40）を先に作っておく。
+# 生成のときは OpenSCAD で描かず、ここから選んで持ってくる（api/app/geometry/cliplib.py、ADR-0012）
+RUN cd /srv/api && OPENSCAD_BIN=openscad /srv/venv/bin/python -m app.geometry.cliplib --out /srv/scad/library/c_clip --workers 4
+
 ENV PYTHONUNBUFFERED=1 \
     OPENSCAD_BIN=openscad \
     AUTH_MODE=firebase \

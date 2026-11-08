@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-ANGLE_BY_TOOL = {"brush": 20, "pen": 40, "spoon": 0}
+ANGLE_BY_TOOL = {"brush": 70, "pen": 60, "spoon": 60}   # 道具の立て具合（机に対する傾き。ADR-0013、2026-11-08）
 
 
 def interview(requirements: dict, message: str, turn: int) -> dict:
@@ -71,11 +71,11 @@ def refine(params: list, instruction: str) -> dict:
     elif re.search(r"丸く", instruction):
         scale("cover", "edge_radius_mm", True, pct)
     elif re.search(r"寝かせ", instruction):
-        a = cur.get(("c_clip", "angle_deg"), 20)
-        ch.append({"part_id": "c_clip", "name": "angle_deg", "value": max(0, a - 20), "reason_ja": "角度を1段寝かせました"})
+        a = cur.get(("c_clip", "angle_deg"), 70)
+        ch.append({"part_id": "c_clip", "name": "angle_deg", "value": max(60, a - 10), "reason_ja": "角度を1段寝かせました"})
     elif re.search(r"立て", instruction):
-        a = cur.get(("c_clip", "angle_deg"), 20)
-        ch.append({"part_id": "c_clip", "name": "angle_deg", "value": min(40, a + 20), "reason_ja": "角度を1段立てました"})
+        a = cur.get(("c_clip", "angle_deg"), 70)
+        ch.append({"part_id": "c_clip", "name": "angle_deg", "value": min(80, a + 10), "reason_ja": "角度を1段立てました"})
     elif re.search(r"きつく", instruction):
         scale("c_clip", "wall_mm", True, 0.1)
     elif re.search(r"ゆるく", instruction):

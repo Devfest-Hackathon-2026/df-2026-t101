@@ -20,7 +20,8 @@ from .field import Field, compute_field
 from .glb import read_glb, write_glb
 from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirror_z, palm_length, parse_joints,
                         rail_direction, to_actual_joints, to_canonical_joints, to_canonical_mesh, wrist_cut_default, z_pip, palm_cut_base)
-from .placement import outer_surface, place_holes, place_rail, place_slits, tool_rod
+from . import cliplib
+from .placement import outer_surface, place_holes, place_rail, place_slits, slit_rail_clearance, tool_rod
 from .scad import posix, render_views, run
 from .scale import check_mcp_order, compute_scale
 from .shell import build_keepout, build_shell, shell_cut_values
@@ -262,7 +263,8 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     from scipy.spatial import cKDTree
     otree = cKDTree(ov)
     rail = place_rail(Jc, radii, ov, on, c, t)
-    sl = place_slits(Jc, ov, on, otree, {**slits_p, "_t": t}, float(cover_p["edge_radius_mm"]))
+    sl = place_slits(Jc, ov, on, otree, {**slits_p, "_t": t}, float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"])
+    slit_rail_mm = slit_rail_clearance(sl, rail, wall_t=t)
     avoid = [(rail["anchor"], float(fixed("RAIL_WIDTH_MM")) + 6.0)]
     avoid += [(p, float(sl["width"]) / 2 + 2.0) for p in sl["centers"]]
     ho = place_holes(Jc, ov, on, otree, holes_p, float(cover_p["wrist_cut_mm"]), avoid)
@@ -292,30 +294,47 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     angle = int(clip_p["angle_deg"])
     pm = _print_matrix(shell_a.bounds, hand_side)
 
+    # クリップ：先に作っておいた固定STL（cliplib）に合うものがあれば、OpenSCAD で描かずにそれを持ってくる（2026-11-08）
+    lib = cliplib.lookup(clip_p) if "c_clip" in parts else None
+    if lib:
+        clip_p = {**clip_p, "tool_d_mm": lib["tool_d_snapped"]}
+
     # OpenSCAD（部品ごとに並行して描く）
     jobs = {}
     if quality == "print":
         if "cover" in parts:
             jobs["cover"] = ({**defs, "mode": "cover", "cover_print_matrix": pm.round(5).tolist()}, wd / "print_cover.stl")
-        if "c_clip" in parts:
+        if "c_clip" in parts and not lib:
             jobs["c_clip"] = ({**defs, "mode": "clip"}, wd / f"print_clip_{angle}.stl")
         if want_sleeve:
             jobs["tpu_sleeve"] = ({**defs, "mode": "sleeve"}, wd / "print_sleeve.stl")
     else:
         if "cover" in parts:
             jobs["cover"] = ({**defs, "mode": "assembled", "part": "cover"}, wd / "cover_preview.stl")
-        if "c_clip" in parts:
+        if "c_clip" in parts and not lib:
             jobs["c_clip"] = ({**defs, "mode": "assembled", "part": "c_clip"}, wd / "clip_preview.stl")
         if want_sleeve:
             jobs["tpu_sleeve"] = ({**defs, "mode": "assembled", "part": "tpu_sleeve"}, wd / "sleeve_preview.stl")
-    # 検査用：刷る向きのクリップ（速い）
-    jobs["_clip_print_check"] = ({**defs, "mode": "clip", "quality": "preview"}, wd / "_clip_check.stl")
+    if not lib:
+        # 検査用：刷る向きのクリップ（速い）
+        jobs["_clip_print_check"] = ({**defs, "mode": "clip", "quality": "preview"}, wd / "_clip_check.stl")
     ts = time.time()
     with ThreadPoolExecutor(max_workers=4) as ex:
         futs = {k: ex.submit(run, d, p) for k, (d, p) in jobs.items()}
         files = {k: f.result() for k, f in futs.items()}
     timings["openscad_ms"] = int((time.time() - ts) * 1000)
-    clip_check = files.pop("_clip_print_check")
+    if lib:
+        mirror = hand_side == "left"   # ライブラリは右手の形
+        if quality == "print":
+            dst = wd / f"print_clip_{angle}.stl"
+            cliplib.copy_print(lib["print"], dst, mirror=mirror)
+        else:
+            dst = wd / "clip_preview.stl"
+            cliplib.place_in_rail(lib["rail"], defs["rail_origin"], defs["rail_frame"], dst, mirror=mirror)
+        files["c_clip"] = posix(dst)
+        clip_check = lib["print"]
+    else:
+        clip_check = files.pop("_clip_print_check")
 
     # 検査（正準形で）
     ts = time.time()
@@ -338,6 +357,11 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         cm_c = _mesh_to_canonical(cm, hand_side)
         results += CK.check_cover(cm_c, href, cut)
     results += CK.check_clip(trimesh.load(clip_check, force="mesh"), clip_p)
+    # R6h：道具の通り道（手・カバーに当たらず、机に届くか）
+    cover_c = _mesh_to_canonical(trimesh.load(files["cover"], force="mesh"), hand_side) if "cover" in files else None
+    if cover_c is not None and quality == "print":
+        cover_c = _mesh_to_canonical(trimesh.load(files["cover"], force="mesh").apply_transform(np.linalg.inv(pm)), hand_side)
+    results += CK.check_tool_path(href, cover_c, rail, clip_p, Jc)
     timings["checks_ms"] = int((time.time() - ts) * 1000)
     violations = [{"rule": r["rule"], "message_ja": r["message_ja"], "fix_hint": r.get("fix_hint")}
                   for r in results if not r["ok"] and r.get("severity") == "error"]
@@ -347,6 +371,11 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     if sl["skipped"]:
         results.append({"rule": "R6e_slits", "ok": False, "value": sl["skipped"],
                         "message_ja": "ベルトのスリットを置けない所がありました", "severity": "warning"})
+    # スリットとレールの台が重なると、レールがスリットを塞ぐ（2026-11-08 に実際に起きた）
+    ok_sr = slit_rail_mm >= float(fixed("MIN_WALL_MM"))
+    results.append({"rule": "R6e_slit_rail", "ok": ok_sr, "value": {"clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},
+                    "message_ja": "ベルトのスリットはレールの台から離れている" if ok_sr else "ベルトのスリットがレールの台にかかっています",
+                    "severity": "warning"})
 
     # 確認用画像（プレビューのときだけ）
     views = []
@@ -373,7 +402,10 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         "violations": violations,
         "timings_ms": timings,
         "placement": {"rail_origin": defs["rail_origin"], "rail_frame": defs["rail_frame"],
-                      "air_holes": len(ho["centers"]), "strap_slits": len(sl["centers"])},
+                      "air_holes": len(ho["centers"]), "strap_slits": len(sl["centers"]),
+                      "slit_rail_clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},
+        "clip": {"source": "library" if lib else "generated", "variant": lib["variant"] if lib else None,
+                 "tool_d_mm": float(clip_p["tool_d_mm"]), "angle_deg": angle},
         "shell_info": {k: v for k, v in info.items() if k != "cut"},
     }
 

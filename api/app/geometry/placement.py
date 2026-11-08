@@ -12,10 +12,52 @@ from .consts import LONG_FINGERS, fixed
 from .handframe import palm_length, rail_direction
 
 RAIL_HEIGHT = None  # rail.scad の rail_height()：溝の深さ＋溝の下の肉
+RAIL_WALL_MM = 2.5   # common.scad の RAIL_WALL_MM（溝のまわりの肉）
+RAIL_BASE_MM = 2.0   # common.scad の RAIL_BASE_MM（溝の底の下の肉）
+RAIL_FOOT_MM = 6.0   # common.scad の RAIL_FOOT_MM（殻の中へ入り込ませる土台）
 
 
 def rail_height() -> float:
-    return float(fixed("RAIL_DEPTH_MM")) + 2.0
+    return float(fixed("RAIL_DEPTH_MM")) + RAIL_BASE_MM
+
+
+def rail_outer_w() -> float:
+    """レールの台の外の幅（common.scad の rail_outer_w()）"""
+    import math
+    bottom = float(fixed("RAIL_WIDTH_MM")) + 2 * float(fixed("RAIL_DEPTH_MM")) / math.tan(math.radians(float(fixed("RAIL_DOVETAIL_DEG"))))
+    return bottom + 2 * RAIL_WALL_MM
+
+
+def slit_rail_clearance(sl: dict, rail: dict, wall_t: float = 2.5) -> float:
+    """スリットの穴（壁の中の部分）とレールの台（土台を含む箱）の、いちばん近い所の距離（mm）。
+    重なっていれば負。レールの座標（原点＝上面の中心、X＝横、Y＝長さ、Z＝外向き）で、
+    スリットの箱の面を細かく点にして、箱（軸に沿う）までの距離を取る。"""
+    if not sl["centers"]:
+        return float("inf")
+    hx, hy = rail_outer_w() / 2, float(fixed("RAIL_LENGTH_MM")) / 2
+    z_lo, z_hi = -(rail_height() + RAIL_FOOT_MM), 0.0
+    half = np.array([hx, hy, (z_hi - z_lo) / 2])
+    mid = np.array([0.0, 0.0, (z_hi + z_lo) / 2])
+    Fm = np.asarray(rail["frame"])
+    best = float("inf")
+    g = np.linspace(-1, 1, 7)
+    for cen, n, a in zip(sl["centers"], sl["normals"], sl["axes"]):
+        n = np.asarray(n, float) / (np.linalg.norm(n) or 1.0)
+        a0 = np.asarray(a, float) - (np.asarray(a, float) @ n) * n
+        a0 /= (np.linalg.norm(a0) or 1.0)
+        x = np.cross(a0, n)
+        # 穴の箱：長い辺 ±(幅+1)/2、短い辺 ±(厚み+1.5)/2、壁の向きに ±(壁の厚み/2 + 1)
+        e = np.array([(sl["thickness"] + 1.5) / 2, (sl["width"] + 1.0) / 2, wall_t / 2 + 1.0])
+        U, Vv, W = np.meshgrid(g, g, g, indexing="ij")
+        on_face = (np.abs(U) == 1) | (np.abs(Vv) == 1) | (np.abs(W) == 1)
+        P = (np.asarray(cen, float)[None, :] + (U[on_face, None] * e[0]) * x + (Vv[on_face, None] * e[1]) * a0
+             + (W[on_face, None] * e[2]) * n)
+        R = (P - np.asarray(rail["origin"], float)) @ Fm.T - mid      # レールの座標、箱の中心を原点に
+        q = np.abs(R) - half
+        outside = np.linalg.norm(np.maximum(q, 0.0), axis=1)
+        inside = np.minimum(q.max(axis=1), 0.0)
+        best = min(best, float((outside + inside).min()))
+    return best
 
 
 def outer_surface(shell: trimesh.Trimesh, hand_tree: cKDTree, c: float, t: float):
@@ -57,7 +99,16 @@ def place_rail(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float) -> d
     return {"anchor": anchor, "origin": origin, "frame": np.stack([x_r, y_r, z_r])}
 
 
-def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: float) -> dict:
+SLIT_MAX_NZ = 0.7   # スリットを抜く向きの縦成分の上限（これより下向きなら横へ寄せる。ベルトは横〜斜め下へ出る）
+
+
+def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: float, palm_z: float) -> dict:
+    """ベルトのスリット（measurement.md §8.3・parts-library.md §5）。
+    親指側・小指側の**側面**の、手のひら側のふちから inset（ふちの肉＋丸み＋スリットの半分）だけ手の甲側の高さで、
+    いちばん外側の点に開ける。ベルトはそこから手のひらの下へ回る。手の甲側の角（レールの台がある所）には置かない
+    （2026-11-08。前は角の手の甲側の点に置いていて、親指側のスリットがレールの真下に来て塞がれた）。
+    側面が低くて（手のひら側を切る面が手の甲に近い）その高さに殻がなければ、置けなかったことを skipped に残す。
+    palm_z：手のひら側を切る面の高さ（正準形。手のひら側が +z）。"""
     L = palm_length(Jc)
     count = int(params.get("strap_count", 1))
     ys = [0.55 * L] if count == 1 else [0.45 * L, 0.70 * L]
@@ -67,23 +118,36 @@ def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: fl
     inset = fixed("MIN_WALL_MM") + (th + 1.5) / 2 + edge_r + 0.5
     t = float(params.get("_t", 2.5))
     for y in ys:
-        band = np.abs(outer_v[:, 1] - y) < 1.2
+        band = np.abs(outer_v[:, 1] - y) < 1.5
         if band.sum() < 5:
             skipped.append({"y": round(float(y), 1), "reason": "殻がその高さにない"})
             continue
         bv, bn = outer_v[band], outer_n[band]
         for side in (-1, 1):                     # -1：親指側（x が小さい）、+1：小指側
-            x_edge = float((side * bv[:, 0]).max() * side)
-            target = x_edge - side * inset
-            cand = np.abs(bv[:, 0] - target) < 1.5
-            if not cand.any():
-                skipped.append({"y": round(float(y), 1), "side": side, "reason": "スリットの場所がない"})
+            sv = side * bv[:, 0] > 0
+            if sv.sum() < 5:
+                skipped.append({"y": round(float(y), 1), "side": side, "reason": "その側に殻がない"})
                 continue
-            ci = np.where(cand)[0]
-            j = ci[np.argmin(bv[ci, 2])]        # 手の甲の側（z が小さい）の点
-            n = bn[j] / (np.linalg.norm(bn[j]) or 1.0)
-            centers.append(bv[j] - n * (t / 2))   # 壁の中ほど
-            normals.append(n)
+            v, n = bv[sv], bn[sv]
+            # その側のふち（手のひら側の端）の高さ：いちばん外側の x から 6mm 以内の点の中で、いちばん手のひら側
+            x_edge = float((side * v[:, 0]).max() * side)
+            near = v[np.abs(v[:, 0] - x_edge) < 6.0]
+            z_edge = min(float(near[:, 2].max()), float(palm_z))
+            z_c = z_edge - inset
+            at = np.abs(v[:, 2] - z_c) < 1.5
+            if not at.any():
+                skipped.append({"y": round(float(y), 1), "side": side, "reason": "側面が低く、スリットの高さに殻がない"})
+                continue
+            ci = np.where(at)[0]
+            outer = ci[side * v[ci, 0] >= (side * v[ci, 0]).max() - 1.0]   # その高さで外側（1mm 以内）の点
+            j = outer[np.argmin(np.abs(v[outer, 2] - z_c))]                 # の中で、決めた高さにいちばん近い点
+            n_s = n[j] / (np.linalg.norm(n[j]) or 1.0)
+            n_cut = n_s
+            if abs(n_s[2]) > SLIT_MAX_NZ:                 # 下向きが強ければ、縦を SLIT_MAX_NZ に固定して横を伸ばす
+                h = n_s[:2] / (np.linalg.norm(n_s[:2]) or 1.0)
+                n_cut = np.array([*(h * np.sqrt(1.0 - SLIT_MAX_NZ ** 2)), np.sign(n_s[2]) * SLIT_MAX_NZ])
+            centers.append(v[j] - n_s * (t / 2))     # 壁の中ほど
+            normals.append(n_cut)
             axes.append(np.array([0.0, 1.0, 0.0]))
     return {"centers": centers, "normals": normals, "axes": axes, "skipped": skipped,
             "width": w, "thickness": th}

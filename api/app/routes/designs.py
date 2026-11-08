@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends
 
-from .. import ops, pipeline
+from .. import ops, pipeline, validator
 from ..auth import User, current_user, is_therapist
 from ..errors import ApiError
 from ..store import db, now
@@ -70,8 +70,9 @@ def refine(case_id: str, design_id: str, body: dict = Body(...), user: User = De
             return pipeline.run(case_id, origin="refine_clip_angle", parent=d, clip_angle=int(angle[0]["value"]))
         return pipeline.run(case_id, origin="refine_params", parent=d, param_changes=ch)
     a = int(body["clip_angle_deg"])
-    if a not in (0, 20, 40):
-        raise ApiError("INVALID_ARGUMENT", "角度は 0・20・40 のどれかです")
+    choices = (validator.param_def("c_clip", "angle_deg") or {}).get("choices") or [60, 70, 80]   # カタログが唯一の正
+    if a not in choices:
+        raise ApiError("INVALID_ARGUMENT", "角度は " + "・".join(str(c) for c in choices) + " のどれかです")
     return pipeline.run(case_id, origin="refine_clip_angle", parent=d, clip_angle=a)
 
 

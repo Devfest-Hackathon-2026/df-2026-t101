@@ -70,7 +70,7 @@ def test_prepare_measurement_scale_and_landmarks():
     assert lm["frame"] == "hand_actual" and lm["palm_normal"] == [0.0, 0.0, -1.0]
     names = {(b["part_id"], b["name"]): b for b in r["baseline"]}
     assert names[("c_clip", "tool_d_mm")]["value"] == 9.5 and names[("c_clip", "tool_d_mm")]["source"] == "interview"
-    assert names[("c_clip", "angle_deg")]["value"] == 20
+    assert names[("c_clip", "angle_deg")]["value"] == 70     # 筆＝70度（道具の立て具合。ADR-0013）
     assert names[("cover", "wrist_cut_mm")]["source"] == "measured"
     assert names[("cover", "wrist_cut_mm")]["value"] >= 25
 
@@ -173,3 +173,73 @@ def test_finger_radii_reasonable():
     r = finger_radii(Vc, Jc)
     for f in ("index", "middle", "ring", "pinky"):
         assert 3.0 <= r[f][0] <= 15.0
+
+
+def _placement_for(name="hand_raw_fist", strap_count=1):
+    """試験用の手でカバーの殻を作り、レールとスリットの位置を出す（正準形）。"""
+    from scipy.spatial import cKDTree
+
+    from app.geometry.placement import outer_surface, place_rail, place_slits
+    from app.geometry.shell import build_shell, shell_cut_values
+    raw = fixture_glb(name)
+    J = parse_joints(read_glb(raw)[2]["joints_mm"])
+    pm = prepare_measurement(raw, make_measurement(J, 1.15), "right", {"tool_d_mm": 9.5, "tool_type": "brush"})
+    params = {}
+    for b in pm["baseline"]:
+        params.setdefault(b["part_id"], {})[b["name"]] = b["value"]
+    V, F, _ = read_glb(pm["scaled_glb"])
+    Jc = to_canonical_joints(parse_joints(pm["joints_mm"]), "right")
+    Vc, Fc = to_canonical_mesh(V, F, "right")
+    radii = finger_radii(Vc, Jc)
+    cover_p = {**params["cover"], "clearance_mm": 1.5}
+    c, t = 1.5, float(cover_p["cover_thickness_mm"])
+    field = compute_field(Vc, Fc, Jc, radii)
+    shell_c, _ = build_shell(field, Jc, radii, cover_p)
+    href = HandRef(trimesh.Trimesh(Vc, Fc, process=False))
+    ov, on = outer_surface(shell_c, href.tree, c, t)
+    cut = shell_cut_values(cover_p, Jc, radii)
+    rail = place_rail(Jc, radii, ov, on, c, t)
+    sl = place_slits(Jc, ov, on, cKDTree(ov), {**params["strap_slits"], "strap_count": strap_count, "_t": t},
+                     float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"])
+    return Jc, cut, rail, sl
+
+
+@pytest.mark.parametrize("name", ["hand_raw_fist", "hand_raw_right"])
+def test_slits_sit_on_side_walls_near_palm_edge(name):
+    """スリットは側面（向きが横寄り）の、手のひら側のふちから決まった距離の高さに開く（2026-11-08。
+    前は手の甲側の角に置いていて、親指側のスリットがレールの真下に来て塞がれた）。"""
+    Jc, cut, rail, sl = _placement_for(name)
+    assert sl["skipped"] == [] and len(sl["centers"]) == 2
+    inset = 2.0 + (2.0 + 1.5) / 2 + 2.0 + 0.5           # MIN_WALL ＋ スリットの半分 ＋ 丸み ＋ 余裕
+    for cen, n, side in zip(sl["centers"], sl["normals"], (-1, 1)):
+        assert side * n[0] > 0.5 and abs(n[2]) <= 0.75, f"スリットの向きが横ではない: {n}"
+        # 高さは決めた所の ±1.5mm で点を探し、さらに壁の中ほど（t/2）へ寄せるので、合わせて 3mm まで
+        assert abs(cen[2] - (cut["palm_plane_z"] - inset)) <= 3.0, (cen, cut["palm_plane_z"])
+
+
+def test_slit_rail_clearance_detects_overlap_on_short_walls():
+    """試験用の2つの手は側面が低く（手のひら側を切る面が手の甲に近い）、スリットの高さにレールの台の角が来る。
+    その重なりを距離（負）として検出できること。実際の手（側面15mm）では +2.7mm だった（11/8 の本番のケース）。"""
+    from app.geometry.placement import slit_rail_clearance
+    _, _, rail, sl = _placement_for("hand_raw_fist")
+    assert slit_rail_clearance(sl, rail) < 2.0
+    _, _, rail, sl = _placement_for("hand_raw_right", strap_count=2)
+    assert len(sl["centers"]) == 4 and slit_rail_clearance(sl, rail) < 2.0
+
+
+def test_slit_rail_clearance_box_geometry():
+    """距離の計算そのもの：レールの座標でスリットの箱を置き、台の箱との距離が合うこと。"""
+    from app.geometry.placement import RAIL_FOOT_MM, rail_height, rail_outer_w, slit_rail_clearance
+    rail = {"origin": np.zeros(3), "frame": np.eye(3)}
+    base = {"width": 25.0, "thickness": 2.0, "axes": [np.array([0.0, 1.0, 0.0])]}
+    hx = rail_outer_w() / 2
+    # 台の横（+X）に、壁の向きが X のスリット：穴の箱は X に ±(t/2+1)＝±2.25。中心を hx+2.25+5 に置けば距離 5
+    sl = {**base, "centers": [np.array([hx + 2.25 + 5.0, 0.0, -3.0])], "normals": [np.array([1.0, 0.0, 0.0])]}
+    assert slit_rail_clearance(sl, rail, wall_t=2.5) == pytest.approx(5.0, abs=0.05)
+    # 土台の下（−Z）に、壁の向きが Z のスリット：箱の上端が土台の底より 3 下
+    zb = -(rail_height() + RAIL_FOOT_MM)
+    sl = {**base, "centers": [np.array([0.0, 0.0, zb - 3.0 - 2.25])], "normals": [np.array([0.0, 0.0, 1.0])]}
+    assert slit_rail_clearance(sl, rail, wall_t=2.5) == pytest.approx(3.0, abs=0.05)
+    # 台の中に中心があれば負
+    sl = {**base, "centers": [np.array([0.0, 0.0, -2.0])], "normals": [np.array([1.0, 0.0, 0.0])]}
+    assert slit_rail_clearance(sl, rail) < 0

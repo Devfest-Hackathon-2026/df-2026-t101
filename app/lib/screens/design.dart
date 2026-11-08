@@ -519,7 +519,8 @@ class _DesignScreenState extends State<DesignScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final (i, a) in const [0, 20, 40].indexed) ...[
+              // 道具の立て具合（机に対する傾き。ADR-0013、2026-11-08 に 0/20/40 から変えた）
+              for (final (i, a) in const [60, 70, 80].indexed) ...[
                 if (i > 0) const SizedBox(width: 2),
                 Expanded(
                   child: _AngleButton(

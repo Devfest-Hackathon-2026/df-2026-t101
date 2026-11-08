@@ -265,9 +265,9 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
     ],
     "params": [
       {
-        "part_id": "c_clip", "name": "angle_deg", "value": 20, "unit": "deg",
-        "range": [0, 40], "choices": [0, 20, 40], "baseline": 20, "source": "ai",
-        "reason_ja": "絵を描くので、筆先が紙に向かいやすい20度にしました。字を書くときは40度も選べます",
+        "part_id": "c_clip", "name": "angle_deg", "value": 70, "unit": "deg",
+        "range": [60, 80], "choices": [60, 70, 80], "baseline": 70, "source": "ai",
+        "reason_ja": "絵を描くので、筆を立て気味の70度にしました。少し寝かせたいときは60度も選べます",
         "clamped": false
       },
       {
@@ -297,7 +297,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
       }
     },
     "approval": { "status": "none" },
-    "summary_ja": "こぶしの外側に沿うカバーに、筆の太さ9.5mmに合わせた20度のクリップを付けました。手のひら側と手首は開けてあります。"
+    "summary_ja": "こぶしの外側に沿うカバーに、筆の太さ9.5mmに合わせた70度のクリップを付けました。手のひら側と手首は開けてあります。"
   }
 }
 ```

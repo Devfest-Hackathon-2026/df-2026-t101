@@ -54,3 +54,5 @@ app/web/js/*.map
 # firebase CLI の記録
 firebase-debug.log
 .firebase/
+# C字クリップの固定STLのライブラリ（python -m app.geometry.cliplib で作る。コンテナのビルドでも作る）
+scad/library/

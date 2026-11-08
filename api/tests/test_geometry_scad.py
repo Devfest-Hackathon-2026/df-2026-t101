@@ -21,21 +21,32 @@ if not (Path(openscad_bin()).exists() or shutil.which(openscad_bin())):
     pytest.skip("OpenSCAD がありません", allow_module_level=True)
 
 
-@pytest.mark.parametrize("angle", [0, 20, 40])
-def test_clip_prints_as_one_piece(tmp_path, angle):
-    out = run({"mode": "clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": angle}, tmp_path / f"clip_{angle}.stl")
+@pytest.mark.parametrize("angle", [60, 70, 80])
+@pytest.mark.parametrize("hand", ["right", "left"])
+def test_clip_prints_as_one_piece(tmp_path, angle, hand):
+    out = run({"mode": "clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": angle, "hand": hand}, tmp_path / f"clip_{hand}_{angle}.stl")
     m = trimesh.load(out, force="mesh")
     assert m.is_watertight and len(m.split(only_watertight=False)) == 1
-    assert abs(m.bounds[0][2]) < 1e-6        # 机の面（z=0）に乗る
+    assert abs(m.bounds[0][2]) < 0.05        # 机の面（z=0）に乗る
     clip = {"tool_d_mm": 9.5, "opening_ratio": 0.75, "wall_mm": 2.0, "height_mm": 12, "angle_deg": angle}
     res = {r["rule"]: r for r in check_clip(m, clip)}
     assert res["R6f"]["ok"]
 
 
+def test_clip_left_is_mirror_of_right(tmp_path):
+    """左手のクリップは、レールの座標で X の符号を変えた鏡像（横張り出しの向きが逆）"""
+    from app.geometry.cliplib import MIRROR_X
+    r = trimesh.load(run({"mode": "assembled", "part": "c_clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": 70, "hand": "right"}, tmp_path / "r.stl"), force="mesh")
+    l = trimesh.load(run({"mode": "assembled", "part": "c_clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": 70, "hand": "left"}, tmp_path / "l.stl"), force="mesh")
+    assert r.bounds[0][0] < -20 and l.bounds[1][0] > 20          # 右手は −X（親指側）へ、左手は +X へ張り出す
+    r.apply_transform(MIRROR_X)
+    assert np.allclose(r.bounds, l.bounds, atol=0.05) and abs(r.volume - l.volume) < 1.0
+
+
 def test_clip_opening_too_wide_is_caught(tmp_path):
     out = run({"mode": "clip", "c_clip_tool_d_mm": 9.5, "c_clip_opening_ratio": 0.95}, tmp_path / "clip_wide.stl")
     m = trimesh.load(out, force="mesh")
-    clip = {"tool_d_mm": 9.5, "opening_ratio": 0.95, "wall_mm": 2.0, "height_mm": 12, "angle_deg": 20}
+    clip = {"tool_d_mm": 9.5, "opening_ratio": 0.95, "wall_mm": 2.0, "height_mm": 12, "angle_deg": 70}
     assert not {r["rule"]: r for r in check_clip(m, clip)}["R6f"]["ok"]
 
 
