@@ -492,6 +492,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   ],
                   color: color,
                   toolDmm: toolD,
+                  tool: (d['tool'] as Map?)?.cast<String, dynamic>(),
                   showHand: _showHand,
                   label: '3Dの表示。カバーとクリップと道具を、手に着けた形で見られます。ドラッグで回せます',
                 ),

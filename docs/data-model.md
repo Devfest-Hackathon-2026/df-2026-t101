@@ -104,6 +104,7 @@ settings/filaments
 | `hand_clearance_mm` | number | この版のカバーとこぶしのすき間（`HAND_CLEARANCE_MM`。フェルトの厚みを含む。11/9に値を変えても、前の版を同じ形で描き直せるよう記録する） |
 | `cover_shell_sha256` | string | カバーの殻（`cover_shell.stl`）のSHA-256。ファイルは採寸の版ごとのフォルダ `internal/cases/{caseId}/cover/{measurementId}/` の下（殻は `shell/<殻の引数のハッシュ24桁>`、内側を守る立体は `keepout/c{c}`、距離場は `sdf`）。採寸の版と、殻を決める引数が同じ版では同じ値になる |
 | `clip_angle_deg` | number | C字クリップの角度（道具の立て具合。60／70／80。2026-11-08 に 0／20／40 から変えた）。角度だけを変えた版は、カバーのファイルを前の版と共有する |
+| `tool` | map | 道具の軸（実際の手の座標、mm）：`center`（クリップの輪の中心）、`axis`（先の向き。単位ベクトル）、`tip_mm`（先までの長さ、100）、`rear_mm`（後ろまで、50）、`diameter_mm`。S7の3D表示はこの値で道具の棒を描く（クリップの形から推定しない。2026-11-08） |
 | `clip` | map | 使ったクリップ：`source`（`library`＝先に作っておいた固定STL、`generated`＝その場で描いた）、`variant`（例 `c_clip_d0850_a20`）、`tool_d_mm`（刻みに丸めた太さ）、`angle_deg`（[ADR-0012](adr/0012-c-clip-dovetail.md) の 4.、2026-11-08） |
 | `print_prepared_at` / `print_sha256` | timestamp / map | 印刷用STLを作った日時と、部品ごとのファイルのSHA-256 |
 | `input_snapshot` | map | その版の採寸・要件・手のモデル。ケースの現在値が変わっても書き換えない |

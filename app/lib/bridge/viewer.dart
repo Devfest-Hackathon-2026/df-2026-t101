@@ -58,6 +58,7 @@ class Viewer3D extends StatefulWidget {
     this.parts = const [],
     this.color = '#2A9D8F',
     this.toolDmm = 0,
+    this.tool,
     this.showHand = true,
     this.landmarks,
     this.label = '3Dの表示。指でドラッグすると回せます。2本の指で広げると大きくなります',
@@ -66,6 +67,9 @@ class Viewer3D extends StatefulWidget {
   final List<PartFile> parts;
   final String color;
   final double toolDmm;
+
+  /// 道具の軸（版の `tool`：center・axis・tip_mm・rear_mm。実際の手の座標）
+  final Map<String, dynamic>? tool;
   final bool showHand;
   final Map<String, dynamic>? landmarks;
   final String label;
@@ -118,6 +122,8 @@ class _Viewer3DState extends State<Viewer3D> {
                   },
                 'parts': parts,
                 'tool_d_mm': widget.toolDmm,
+                // 生成APIが版に書いた道具の軸（実際の手の座標）。なければ viewer.js がクリップの形から推定する
+                if (widget.tool != null) 'tool': widget.tool,
               }),
             )
             .toDart;
@@ -139,6 +145,7 @@ class _Viewer3DState extends State<Viewer3D> {
         ].any((x) => x);
     if (old.handPath != widget.handPath ||
         partsChanged ||
+        jsonEncode(old.tool) != jsonEncode(widget.tool) ||
         jsonEncode(old.landmarks) != jsonEncode(widget.landmarks)) {
       unawaited(_render());
       return;

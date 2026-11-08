@@ -243,7 +243,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - 描く前に、**カバーの殻**を作る：実寸の手のメッシュ（正準形）の符号付き距離から、手の面から距離 `HAND_CLEARANCE_MM`（c）〜 c ＋ `cover_thickness_mm`（t）の層を取り、手のひら側・手首側・親指・人差し指側の外を切る面と、なめらかな共通部分（半径 `edge_radius_mm`）でつなぎ、閉じた面（`cover_shell.stl`）にする。切り口のふちも丸くなる。続けて、手を c だけ広げた立体（**内側を守る立体** `cover_keepout.stl`。レールの土台が内側へ出ないように、最後に引く）を作る。右手なら最後に鏡像に戻す。11/7のスパイク（手元のPC）の同じ仕組みで約12秒。カバーの外接箱の大きさで変わるので、10〜20秒を見込む。Cloud Run（4 vCPU）での時間は要確認
 - 殻・内側を守る立体・距離場は、採寸の版ごとのフォルダ `internal/cases/{case_id}/cover/{measurement_id}/` の下（`shell/<24桁>`・`keepout/c{c}`・`sdf`）に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
 - OpenSCADは、殻を `import()` して、ベルトのスリット・空気穴を引き、アリ溝のレールを足し、最後に内側を守る立体を引く。スリット・空気穴・レールの位置と向きは、生成APIが手のメッシュとカバーの目印（§3.3）から計算して `-D` で渡す。クリップとTPUの筒は、それぞれ別に描く（`mode=c_clip` など）
-- 版に記録するもの：`hand_measurement_id`、`scale_factor`、`hand_clearance_mm`、`cover_shell_sha256`、`clip_angle_deg`、部品ごとのファイル（下の応答の `files.parts`）。`geometry_hash` は、引数・`cover_shell_sha256`・固定値の版から作る（[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）
+- 版に記録するもの：`hand_measurement_id`、`scale_factor`、`hand_clearance_mm`、`cover_shell_sha256`、`clip_angle_deg`、`clip`（使った固定STL）、`tool`（道具の軸。S7の3D表示が棒を描くのに使う）、部品ごとのファイル（下の応答の `files.parts`）。`geometry_hash` は、引数・`cover_shell_sha256`・固定値の版から作る（[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）
 - 描いたあと、実際の形で検査する（R6。[generation-pipeline.md](generation-pipeline.md)）：カバーは閉じた面で1つのかたまり、最小の厚さ ≥ `MIN_WALL_MM`、**手のひら側に材料がない**（切る面より手のひら側に頂点がない）、**手首を覆わない**（手首から25mm以内に頂点がない）、内側の面と手の距離が c 以上。クリップは開きの幅が道具の太さより小さく（抜けない）、サポートなしで刷れること。手のひら側と手首の検査は、装具にしないための安全の決まりなので、AIや画面の操作で外すことはできない
 - `design_id` は処理を始めた直後に作るので、Firestoreの `cases/{case_id}.current_design_id` を見れば、応答が返る前から追いかけられる
 - 同じケースに有効な処理中の印があれば `409 CONFLICT`。期限切れの回収は§1.1に従う
@@ -329,7 +329,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 - `instruction`：Geminiの `refine` で引数の変更に直し、範囲チェック → 描画 → 確認1回、の順に進む
 - `param_changes`：画面で直接直した場合。Geminiは呼ばず、範囲チェック → 描画、の順に進む。ユーザーの意思による変更なので、「AIが変えてよい幅」（R3）は当てはめず、`override_by_user=true` として記録する（OT画面で目立たせる）。範囲（R2）と組み合わせ（R4）のルール、描いたあとの検査（R6。手のひら側・手首を含む）は当てはめる
-- `clip_angle_deg`：**クリップの角度だけを変える**（0／20／40のどれか。S7の角度の選択）。Geminiは呼ばず、新しい版を作るが、**クリップだけを描き直し**、カバーのファイル・確認用画像のうちカバーだけのものは前の版のものを使い回す。確認用画像は、クリップと筆の向きが変わるので描き直す。角度を変える仕組み（回す部品）は作らず、角度違いのクリップを刷って差し替える（[ADR-0013](adr/0013-clip-angle-variants.md)）。`param_changes` で `c_clip.angle_deg` を送っても同じ扱いになる
+- `clip_angle_deg`：**クリップの角度だけを変える**（60／70／80のどれか。カタログの選択肢。S7の角度の選択）。Geminiは呼ばず、新しい版を作るが、**クリップだけを描き直し**、カバーのファイル・確認用画像のうちカバーだけのものは前の版のものを使い回す。確認用画像は、クリップと筆の向きが変わるので描き直す。角度を変える仕組み（回す部品）は作らず、角度違いのクリップを刷って差し替える（[ADR-0013](adr/0013-clip-angle-variants.md)）。`param_changes` で `c_clip.angle_deg` を送っても同じ扱いになる
 - 殻は、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が変わったときだけ作り直す（10〜20秒）。空気穴・スリット・レール・クリップだけの変更では、前の版の殻を使い回す（§3.4）
 - `style`：**色だけの変更なら、新しい版を作らず**、その版の `style.color` だけを書き換える（描き直さない。`geometry_hash` に色は入らないので、確認済みもそのまま）。OTの確認後でも変えられる
 - 色だけの変更以外は、新しい `design_id`（`revision` が1つ増える）を作り、§3.4と同じ形で返す。前の版の「確認済み」は引き継がない（角度だけの変更も、刷る部品が変わるので引き継がない）

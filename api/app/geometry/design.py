@@ -20,7 +20,7 @@ from .field import Field, compute_field
 from .glb import read_glb, write_glb
 from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirror_z, palm_length, parse_joints,
                         rail_direction, to_actual_joints, to_canonical_joints, to_canonical_mesh, wrist_cut_default, z_pip, palm_cut_base)
-from . import cliplib
+from . import clipgeom, cliplib
 from .placement import outer_surface, place_holes, place_rail, place_slits, slit_rail_clearance, tool_rod
 from .scad import posix, render_views, run
 from .scale import check_mcp_order, compute_scale
@@ -394,7 +394,13 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         views = render_views(vfiles, str(wd / "hand.stl"), rod, float(clip_p["tool_d_mm"]), color, cams, wd)
         timings["views_ms"] = int((time.time() - ts) * 1000)
     timings["total_ms"] = int((time.time() - t0) * 1000)
+    # 道具の軸（実際の手の座標）。画面（S7）の3D表示が、クリップの形から推定せずにこの値で棒を描く
+    Rc = np.asarray(rail["frame"]).T
+    tool_c = _to_actual_point(Rc @ clipgeom.clip_center_rail(clip_p) + rail["origin"], hand_side)
+    tool_a = _to_actual_point(Rc @ clipgeom.clip_axis_rail(clip_p), hand_side)
     return {
+        "tool": {"center": [round(float(v), 2) for v in tool_c], "axis": [round(float(v), 4) for v in tool_a],
+                 "tip_mm": CK.TOOL_TIP_MM, "rear_mm": CK.TOOL_REAR_MM, "diameter_mm": float(clip_p["tool_d_mm"])},
         "files": files,
         "views": views,
         "cover_shell_sha256": shell_sha,

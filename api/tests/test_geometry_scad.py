@@ -67,6 +67,10 @@ def test_make_design_fist_cover_and_clip(tmp_path):
     assert cover.is_watertight and len(cover.split(only_watertight=False)) == 1
     assert len(r["views"]) == 4 and all(Path(v).exists() for v in r["views"])
     assert r["placement"]["air_holes"] >= 3 and r["placement"]["strap_slits"] == 2
+    # 道具の軸（実際の手の座標）：単位ベクトルで、右手では手のひら側（−z）へ下がる。中心はレールの近く
+    t = r["tool"]
+    assert abs(np.linalg.norm(t["axis"]) - 1) < 1e-3 and t["axis"][2] < -0.8 and t["tip_mm"] == 100
+    assert np.linalg.norm(np.array(t["center"]) - np.array(r["placement"]["rail_origin"])) < 30
     # 2回目は距離場と殻を使い回すので速い
     r2 = make_design(pm["scaled_glb"], pm["joints_mm"], "right", params, str(tmp_path / "job2"), cache, quality="print")
     assert "field_ms" not in r2["timings_ms"] and "shell_ms" not in r2["timings_ms"]

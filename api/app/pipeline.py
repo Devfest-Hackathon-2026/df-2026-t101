@@ -310,7 +310,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "scale_factor": case["hand_model"].get("scale_factor"),
             "hand_clearance_mm": validator.fixed("HAND_CLEARANCE_MM", 1.5),
             "cover_shell_sha256": result.get("cover_shell_sha256"),
-            "clip_angle_deg": angle, "clip": result.get("clip"), "checks": result.get("checks", []),
+            "clip_angle_deg": angle, "clip": result.get("clip"), "tool": result.get("tool"), "checks": result.get("checks", []),
             "summary_ja": summary_ja or "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
             "input_snapshot": {"requirements": req, "measurement_id": case.get("measurement_id"),
                                "hand_model": case.get("hand_model")},
@@ -335,7 +335,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
 def design_view(case_id: str, design_id: str) -> dict:
     d = db.get(f"cases/{case_id}/designs/{design_id}") or {}
     keep = ("revision", "status", "parts", "params", "review", "warnings", "hand_overlay", "files", "approval",
-            "summary_ja", "progress", "style", "clip_angle_deg", "clip", "error", "clamped", "geometry_hash", "origin",
+            "summary_ja", "progress", "style", "clip_angle_deg", "clip", "tool", "error", "clamped", "geometry_hash", "origin",
             "parent_design_id", "print_prepared_at")
     return {"design_id": design_id, **{k: d.get(k) for k in keep if k in d}}
 

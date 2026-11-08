@@ -28,7 +28,7 @@ function setup(el) {
   controls.enableDamping = true;
   const group = new THREE.Group();
   scene.add(group);
-  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, landmarks: null, framed: false };
+  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, landmarks: null, framed: false };
   const resize = () => {
     const w = el.clientWidth || 300, h = el.clientHeight || 300;
     renderer.setSize(w, h, false);
@@ -101,11 +101,28 @@ async function setPart(state, id, url, headers, color) {
   if (id === 'c_clip') placeTool(state);
 }
 
-// 道具（筆など）の棒：クリップの輪の軸（頂点の広がりが一番小さい向き）に沿って、指先の向き（+y）へ伸ばす
+// 道具（筆など）の棒。生成APIが版に書いた軸（tool: {center, axis, tip_mm, rear_mm}。実際の手の座標）があればそれで描く。
+// なければ（古い版）、クリップの輪の軸（頂点の広がりが一番小さい向き）を推定して、指先の向き（+y）へ伸ばす
 function placeTool(state) {
   if (state.tool) { state.group.remove(state.tool); dispose(state.tool); state.tool = null; }
   const clip = state.parts.get('c_clip');
   if (!clip || !(state.toolD > 0)) return;
+  const spec = state.toolSpec;
+  if (spec && Array.isArray(spec.center) && Array.isArray(spec.axis)) {
+    const c = new THREE.Vector3(...spec.center);
+    const axis = new THREE.Vector3(...spec.axis).normalize();
+    const tipL = spec.tip_mm || 100, rearL = spec.rear_mm || 50, len = tipL + rearL, r = state.toolD / 2;
+    const g = new THREE.Group();
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 24), new THREE.MeshStandardMaterial({ color: 0xc8a165, roughness: 0.6 }));
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(r * 1.1, 22, 24), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+    tip.position.y = len / 2 + 11;
+    g.add(rod, tip);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+    g.position.copy(c).add(axis.clone().multiplyScalar((tipL - rearL) / 2));   // クリップの位置が、後ろから rear_mm の所
+    state.tool = g;
+    state.group.add(g);
+    return;
+  }
   const pos = clip.geometry.attributes.position;
   const n = pos.count, c = new THREE.Vector3();
   for (let i = 0; i < n; i++) c.add(new THREE.Vector3().fromBufferAttribute(pos, i));
@@ -174,11 +191,13 @@ window.jijoguViewer = {
     setLandmarks(state, JSON.parse(landmarksJson || 'null'));
     frame(state);
   },
-  // S7：手（半透明）＋部品＋道具の棒。sceneJson = { hand: {url, headers, opacity, visible}, parts: [{id, url, headers, color}], tool_d_mm }
+  // S7：手（半透明）＋部品＋道具の棒。sceneJson = { hand: {url, headers, opacity, visible}, parts: [{id, url, headers, color}], tool_d_mm,
+  //   tool: {center, axis, tip_mm, rear_mm}（任意。生成APIが版に書いた道具の軸） }
   async showAssembly(el, sceneJson) {
     const state = setup(el);
     const s = JSON.parse(sceneJson);
     state.toolD = s.tool_d_mm || 0;
+    state.toolSpec = s.tool || null;
     if (s.hand?.url) {
       await setHand(state, s.hand.url, s.hand.headers, s.hand.opacity ?? 0.35);
       state.hand.visible = s.hand.visible !== false;
