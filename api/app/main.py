@@ -37,7 +37,7 @@ if settings.project:
     p = re.escape(settings.project)
     origin_regex = rf"^(http://(localhost|127\.0\.0\.1)(:\d+)?|https://{p}(--[a-z0-9-]+)?\.web\.app|https://{p}\.firebaseapp\.com)$"
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_origin_regex=origin_regex, allow_credentials=False,
-                   allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+                   allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                    allow_headers=["Authorization", "Content-Type", "X-User", "X-User-Email", "X-Firebase-AppCheck"],
                    expose_headers=["X-Request-Id"])
 

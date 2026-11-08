@@ -113,14 +113,24 @@ def z_pip(Jc: dict) -> float:
     return float(np.mean([Jc[f][1][2] for f in LONG_FINGERS]))
 
 
+def palm_cut_base(Jc: dict, palm_half_mm: float = 8.0) -> float:
+    """手のひら側を切る平面の基準の高さ（正準形の z）。PIP の高さと、付け根の関節の中心＋palm_half_mm の浅い方"""
+    z_mcp = float(np.mean([Jc[f][0][2] for f in ("index", "middle", "ring", "pinky")]))
+    return min(z_pip(Jc), z_mcp + palm_half_mm)
+
+
+RAIL_ALONG_METACARPAL = 0.72  # 手首→人差し指の付け根の、この割合の所にレールを置く（こぶしの山の少し手前）
+
+
 def rail_direction(Jc: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """人差し指の基節の中点、基節の向き u（指先の向き）、外向き d（親指側かつ手の甲側の45度。u に垂直）。正準形。"""
-    a, b = Jc["index"][0], Jc["index"][1]
+    """人差し指の中手骨（手首→付け根）の上の点、その向き u（指先の向き）、外向き d（親指側かつ手の甲側の45度。u に垂直）。正準形。
+    指は覆わないので、レールは基節ではなく中手骨の上に置く（2026-11-07）。"""
+    a, b = Jc["wrist"], Jc["index"][0]
     u = (b - a) / (np.linalg.norm(b - a) or 1.0)
     d0 = np.array([-1.0, 0.0, -1.0]) / np.sqrt(2.0)
     d = d0 - (d0 @ u) * u
     d /= (np.linalg.norm(d) or 1.0)
-    return (a + b) / 2.0, u, d
+    return a + (b - a) * RAIL_ALONG_METACARPAL, u, d
 
 
 def wrist_cut_default(Jc: dict, wrist_free: float) -> float:

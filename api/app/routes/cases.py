@@ -12,7 +12,7 @@ from .. import gemini, ops
 from ..auth import User, current_user
 from ..config import CONSENT_TEXT_VERSION, SCHEMA_DIR
 from ..errors import ApiError
-from ..store import db, now
+from ..store import db, files, now
 from .common import case_view, owned_case, readable_case
 
 router = APIRouter()
@@ -45,6 +45,21 @@ def list_cases(user: User = Depends(current_user)):
 @router.get("/v1/cases/{case_id}")
 def get_case(case_id: str, user: User = Depends(current_user)):
     return case_view(case_id, readable_case(case_id, user))
+
+
+@router.delete("/v1/cases/{case_id}")
+def delete_case(case_id: str, user: User = Depends(current_user)):
+    """ケースを消す（docs/data-model.md §5）。手のメッシュ・STL・画像・版・チャットもまとめて消す。
+    形を作っている途中（有効な処理中の印がある）なら 409。Storage を先に消し、ケースの文書は最後に消す
+    （途中で失敗しても、ケースが残っていれば、もう一度消せる）"""
+    case = owned_case(case_id, user)
+    ops.assert_no_active(case)
+    n_files = files.delete_prefix(f"cases/{case_id}/") + files.delete_prefix(f"internal/cases/{case_id}/")
+    for sub in ("designs", "messages"):
+        for doc_id, _ in db.list(f"cases/{case_id}/{sub}"):
+            db.delete(f"cases/{case_id}/{sub}/{doc_id}")
+    db.delete(f"cases/{case_id}")
+    return {"deleted": True, "case_id": case_id, "files_deleted": n_files}
 
 
 @router.put("/v1/cases/{case_id}/requirements")

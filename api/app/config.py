@@ -37,6 +37,7 @@ class Settings:
     gemini_mode: str = field(default_factory=lambda: _env("GEMINI_MODE", "mock"))       # mock | live
     gemini_location: str = field(default_factory=lambda: _env("GEMINI_LOCATION", "global"))
     gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "gemini-4-argon"))
+    gemini_fallback_model: str = field(default_factory=lambda: _env("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash"))
     hmac_key: str | None = field(default_factory=lambda: _env("MESH_RESULT_HMAC_KEY"))
     generation_enabled_env: bool = field(default_factory=lambda: _env("GENERATION_ENABLED", "true").lower() != "false")
     daily_cost_limit_usd: float = field(default_factory=lambda: _float("DAILY_COST_LIMIT_USD", 15.0))

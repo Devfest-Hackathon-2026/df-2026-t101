@@ -62,6 +62,7 @@
 | POST | `/v1/cases/{case_id}/designs/{design_id}/prepare-print` | デモのケースだけ：OTの確認なしで部品ごとの印刷用STLを作る | 持ち主（デモのケースのみ） |
 | POST | `/v1/cases/{case_id}/designs/{design_id}/approval` | OTが「確認済み」にするか、差し戻す | 依頼されたOT |
 | POST | `/v1/cases/{case_id}/recover` | 期限切れの処理中の印を回収し、最新状態を返す（AI・GPU処理なし） | 持ち主、依頼されたOT |
+| DELETE | `/v1/cases/{case_id}` | ケースを消す（手のメッシュ・版・チャット・STL・画像もまとめて消す） | 持ち主 |
 
 STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、FirebaseのStorage SDKでダウンロードする。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
 
@@ -426,6 +427,16 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - 中身は `review-request` と同じ：その版の引数で部品ごとに `quality=print` で描き、刷る向きに置き直し、R6を通し、`print/` の下に置く。R6が不合格なら `RENDER_FAILED`
 - 版に `print_prepared_at` と `print_sha256` を記録する。`approval.status` は `none` のまま（OTの確認は受けていない）
 - 画面（S7・S10）には「デモ用：OTの確認を省略しています。実際に使う前には必ずOTの確認が必要です」と必ず出す
+
+### 3.12 `DELETE /v1/cases/{case_id}`
+
+ケースを消す。S1のカードのメニューの「消す」から、確かめてから呼ぶ。消したあとは元に戻せない。
+
+- 呼べるのは持ち主だけ（ほかの人は `403 FORBIDDEN`、ケースがなければ `404 NOT_FOUND`）
+- 有効な処理中の印（`active_operation`）があるあいだは `409 CONFLICT`（形を作っている途中に消すと、書き込みと食い違うため）
+- 消すもの（[data-model.md §5](data-model.md#5-保存期間と削除)）：Storageの `cases/{case_id}/`（実寸と未補正の手のメッシュ、STL、画像）と `internal/cases/{case_id}/`、Firestoreの `cases/{case_id}/designs` と `cases/{case_id}/messages`、最後に `cases/{case_id}` 本体。途中で失敗しても、ケースの文書が残っていればもう一度消せる
+- OTに確認を頼んでいる途中（`in_review`）でも消せる。消すと、OTの確認の画面も開けなくなる（画面の確認の文で伝える）
+- 応答は `200` で `{ "deleted": true, "case_id": "...", "files_deleted": 12 }`
 
 ## 4. 手のメッシュ復元サービス `hand-mesh`
 

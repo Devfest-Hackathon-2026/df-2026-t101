@@ -51,6 +51,11 @@ class MockBackend {
     final c = _cases[seg[2]];
     if (c == null) throw ApiError('ケースがありません', code: 'NOT_FOUND');
     final rest = seg.sublist(3).join('/');
+    if (method == 'DELETE' && rest.isEmpty) {
+      _cases.remove(seg[2]);
+      _designs.removeWhere((_, d) => d['case_id'] == seg[2]);
+      return {'deleted': true, 'case_id': seg[2]};
+    }
     c['updated_at'] = DateTime.now().toIso8601String();
     switch ((method, rest)) {
       case ('GET', ''):

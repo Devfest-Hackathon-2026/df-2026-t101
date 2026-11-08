@@ -23,6 +23,7 @@ class Api {
   Future<dynamic> post(String path, [Object? body]) =>
       _send('POST', path, body ?? {});
   Future<dynamic> put(String path, Object body) => _send('PUT', path, body);
+  Future<dynamic> delete(String path) => _send('DELETE', path);
 
   Future<dynamic> _send(String method, String path, [Object? body]) async {
     if (Config.mockApi) return MockBackend.instance.handle(method, path, body);
@@ -33,6 +34,7 @@ class Api {
       r = switch (method) {
         'GET' => await http.get(uri, headers: h),
         'PUT' => await http.put(uri, headers: h, body: jsonEncode(body)),
+        'DELETE' => await http.delete(uri, headers: h),
         _ => await http.post(uri, headers: h, body: jsonEncode(body)),
       };
     } catch (_) {

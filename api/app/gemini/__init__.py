@@ -14,7 +14,8 @@ from . import mock, schemas
 
 log = logging.getLogger("gemini")
 PROMPT_VERSIONS = {"system": "v1", "interview": "v1", "select": "v1", "dimension": "v1", "review": "v1", "refine": "v1"}
-THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "review": "MEDIUM", "refine": "LOW"}
+# review は画像4枚で時間がぶれやすい（11/7 の実測で6〜108秒）ので LOW にした（generation-pipeline.md §3 の表も同じ）
+THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "review": "LOW", "refine": "LOW"}
 
 
 class Usage:
@@ -22,9 +23,11 @@ class Usage:
         self.input_tokens = 0
         self.output_tokens = 0
         self.calls = 0
+        self.models: dict[str, str] = {}  # 呼び出しの種類 → 実際に答えたモデル（予備に切り替えたかを残す）
 
     def as_dict(self) -> dict:
-        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens, "gemini_calls": self.calls}
+        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens, "gemini_calls": self.calls,
+                "models": self.models}
 
 
 @lru_cache(maxsize=None)
@@ -44,8 +47,21 @@ def _client():
     if not settings.project:
         raise ApiError("AI_UNAVAILABLE", details=[{"reason": "GOOGLE_CLOUD_PROJECT が設定されていません"}])
     return genai.Client(vertexai=True, project=settings.project, location=settings.gemini_location,
-                        http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(
-                            attempts=5, initial_delay=1.0, http_status_codes=[408, 429, 500, 502, 503, 504])))
+                        http_options=types.HttpOptions(
+                            timeout=45_000,  # 1回の呼び出しの上限（ミリ秒）。混んでいるときに止まったまま待たない（11/7、Argon が6分返らなかった）
+                            retry_options=types.HttpRetryOptions(
+                                attempts=2, initial_delay=1.0, http_status_codes=[408, 429, 500, 502, 503, 504])))
+
+
+def _jpeg(png: bytes, side: int = 768) -> bytes:
+    """確認用画像を軽くする（PNG → 長い辺768pxのJPEG）"""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    im.thumbnail((side, side))
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=85)
+    return out.getvalue()
 
 
 def _live(name: str, text: str, schema: dict, usage: Usage, images: list[bytes] | None = None) -> dict:
@@ -53,7 +69,7 @@ def _live(name: str, text: str, schema: dict, usage: Usage, images: list[bytes] 
 
     parts: list = []
     for b in images or []:
-        parts.append(types.Part.from_bytes(data=b, mime_type="image/png"))
+        parts.append(types.Part.from_bytes(data=_jpeg(b), mime_type="image/jpeg"))
     parts.append(text)
     cfg = types.GenerateContentConfig(
         system_instruction=_prompt("system"),
@@ -63,13 +79,20 @@ def _live(name: str, text: str, schema: dict, usage: Usage, images: list[bytes] 
         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
     )
     last = None
+    models = [settings.gemini_model] + ([settings.gemini_fallback_model]
+                                       if settings.gemini_fallback_model and settings.gemini_fallback_model != settings.gemini_model else [])
     for _ in range(2):  # 形が崩れていたら1回だけ聞き直す（R1）
-        try:
-            resp = _client().models.generate_content(model=settings.gemini_model, contents=parts, config=cfg)
-        except ApiError:
-            raise
-        except Exception as e:  # noqa: BLE001 - SDK の再試行のあとでもだめなとき
-            log.warning("gemini %s failed: %s", name, type(e).__name__)
+        resp = None
+        for model in models:  # 混んでいて返らないときは、予備のモデルで答えさせる（generation-pipeline.md §2）
+            try:
+                resp = _client().models.generate_content(model=model, contents=parts, config=cfg)
+                usage.models[name] = model
+                break
+            except ApiError:
+                raise
+            except Exception as e:  # noqa: BLE001 - SDK の再試行のあとでもだめなとき
+                log.warning("gemini %s failed on %s: %s: %s", name, model, type(e).__name__, str(e)[:300])
+        if resp is None:
             raise ApiError("AI_UNAVAILABLE")
         um = resp.usage_metadata
         if um:

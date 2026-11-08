@@ -75,6 +75,47 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// ケースを消す（確かめてから。手の3Dの形・版・印刷用のデータもまとめて消える。元に戻せない）
+  Future<void> _delete(Map<String, dynamic> c) async {
+    final title = '${c['title'] ?? '道具'}';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+        title: const Text('この道具を消しますか？'),
+        content: Text(
+          '「$title」を消します。手の3Dの形、作った形、印刷用のデータもすべて消えます。消したあとは元に戻せません。'
+          '${c['status'] == 'in_review' ? '\n\nOTに確認を頼んでいる途中です。消すと、OTも見られなくなります。' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('やめる'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(64, 48),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('消す'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await Api.instance.delete('/v1/cases/${c['case_id']}');
+      if (!mounted) return;
+      setState(() => _cases?.removeWhere((x) => x['case_id'] == c['case_id']));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('「$title」を消しました')));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final empty = _error == null && _cases != null && _cases!.isEmpty;
@@ -110,6 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 await Navigator.of(context).pushNamed(continueRoute(c));
                 _load();
               },
+              onDelete: () => _delete(c),
             ),
           const SizedBox(height: 8),
           const InfoCard(
@@ -211,9 +253,15 @@ class _CardSkeleton extends StatelessWidget {
 
 /// ケースのカード（Figma の M3/Case card）。左に最新の版の画像（views/iso.png）、なければ状態のアイコン
 class _CaseCard extends StatefulWidget {
-  const _CaseCard({super.key, required this.data, required this.onTap});
+  const _CaseCard({
+    super.key,
+    required this.data,
+    required this.onTap,
+    required this.onDelete,
+  });
   final Map<String, dynamic> data;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
   @override
   State<_CaseCard> createState() => _CaseCardState();
 }
@@ -235,9 +283,12 @@ class _CaseCardState extends State<_CaseCard> {
     if (d == null) return;
     try {
       final r = await Api.instance.get('/v1/cases/${c['case_id']}/designs/$d');
-      final design = Map<String, dynamic>.from((r is Map && r['design'] != null) ? r['design'] : r);
+      final design = Map<String, dynamic>.from(
+        (r is Map && r['design'] != null) ? r['design'] : r,
+      );
       final rejected = (design['approval'] as Map?)?['status'] == 'rejected';
-      final iso = ((design['files'] as Map?)?['views'] as Map?)?['iso'] as String?;
+      final iso =
+          ((design['files'] as Map?)?['views'] as Map?)?['iso'] as String?;
       if (mounted && rejected) setState(() => _rejected = true);
       if (iso == null) return;
       final ref = await Files.resolve(iso);
@@ -270,50 +321,78 @@ class _CaseCardState extends State<_CaseCard> {
     final updated = _updated(c['updated_at']);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Semantics(
-        button: true,
-        label: '$title、$label、$updated',
-        excludeSemantics: true,
-        child: Material(
-          color: AppColors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(16),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: widget.onTap,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-              child: Row(
-                children: [
-                  _Thumb(bytes: _thumb, statusIcon: icon),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      child: Material(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          children: [
+            // カードの本体を押すと続きの画面へ。右のメニューのボタンは別に押せる（読み上げでも別の項目）
+            Expanded(
+              child: Semantics(
+                button: true,
+                label: '$title、$label、$updated',
+                excludeSemantics: true,
+                child: InkWell(
+                  onTap: widget.onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+                    child: Row(
                       children: [
-                        Text(title, style: AppText.titleMedium),
-                        const SizedBox(height: 4),
-                        StatusLabel(label: label, tone: tone, icon: icon),
-                        if (updated.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            updated,
-                            style: AppText.bodySmall.copyWith(
-                              color: AppColors.onSurfaceVariant,
-                            ),
+                        _Thumb(bytes: _thumb, statusIcon: icon),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title, style: AppText.titleMedium),
+                              const SizedBox(height: 4),
+                              StatusLabel(label: label, tone: tone, icon: icon),
+                              if (updated.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  updated,
+                                  style: AppText.bodySmall.copyWith(
+                                    color: AppColors.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                        ],
+                        ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    color: AppColors.onSurfaceVariant,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: PopupMenuButton<String>(
+                tooltip: '「$title」のメニュー',
+                icon: const Icon(
+                  Icons.more_vert_rounded,
+                  color: AppColors.onSurfaceVariant,
+                ),
+                onSelected: (v) {
+                  if (v == 'delete') widget.onDelete();
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.delete_outline_rounded,
+                        color: AppColors.error,
+                      ),
+                      title: Text('消す'),
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -336,7 +415,8 @@ class _Thumb extends StatelessWidget {
           ? Image.memory(
               bytes!,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Icon(statusIcon, color: AppColors.primary),
+              errorBuilder: (_, _, _) =>
+                  Icon(statusIcon, color: AppColors.primary),
             )
           : Icon(statusIcon, color: AppColors.primary),
     ),

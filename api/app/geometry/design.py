@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+
+SHELL_RULES_VERSION = "2026-11-07b"  # 指を覆わない（基節から先を捨てる）、手のひら側の平面を付け根＋8mmまで
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +19,7 @@ from .errors import GeometryError
 from .field import Field, compute_field
 from .glb import read_glb, write_glb
 from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirror_z, palm_length, parse_joints,
-                        rail_direction, to_actual_joints, to_canonical_joints, to_canonical_mesh, wrist_cut_default, z_pip)
+                        rail_direction, to_actual_joints, to_canonical_joints, to_canonical_mesh, wrist_cut_default, z_pip, palm_cut_base)
 from .placement import outer_surface, place_holes, place_rail, place_slits, tool_rod
 from .scad import posix, render_views, run
 from .scale import check_mcp_order, compute_scale
@@ -73,7 +75,7 @@ def prepare_measurement(raw_glb: bytes, measurement: dict, hand_side: str, requi
     landmarks = {
         "frame": "hand_actual",
         "palm_normal": _palm_normal_actual(hand_side).tolist(),
-        "palm_cut_base_mm": round(z_pip(Jc), 2),
+        "palm_cut_base_mm": round(palm_cut_base(Jc), 2),
         "wrist_to_middle_mcp_mm": round(L, 2),
         "x_index_mcp_mm": round(float(Jc["index"][0][0]), 2),
         "rail_anchor": {"point_mm": [round(float(v), 2) for v in _to_actual_point(rail_pt, hand_side)],
@@ -222,7 +224,8 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         timings["field_ms"] = int((time.time() - ts) * 1000)
 
     # 殻（殻の引数が同じなら使い回す）
-    key_src = json.dumps({"f": fver, "c": c, "t": cover_p["cover_thickness_mm"], "o": cover_p["palm_cut_offset_mm"],
+    # "r" は切り方の決まりの版。決まりを変えたら上げる（前の決まりの殻を使い回さないため）
+    key_src = json.dumps({"r": SHELL_RULES_VERSION, "f": fver, "c": c, "t": cover_p["cover_thickness_mm"], "o": cover_p["palm_cut_offset_mm"],
                           "w": round(float(cover_p["wrist_cut_mm"]), 2), "e": cover_p["edge_radius_mm"]}, sort_keys=True)
     shell_key = "shell/" + _sha(key_src.encode())[:24]
     cut = shell_cut_values(cover_p, Jc, radii)

@@ -56,7 +56,7 @@ flowchart TD
 | 構造化出力 | `response_mime_type="application/json"` と `response_json_schema`（Pydanticのモデルから作るJSON Schema） | スキーマで出力の形を縛り、崩れにくくする。使えるキーワードは `type`、`enum`、`minimum`、`maximum`、`anyOf`、`required` など（SDK 3.0.0 の型定義で確認） |
 | 思考レベル | `thinking_level` を LOW／MEDIUM で使い分ける（§3の表）。使える値はモデルごとに違うので、モデルごとの設定表を持つ | Argonは `thinking_budget` と `MINIMAL` を受け付けない（400エラーになる）。3.8 Flashには `MINIMAL` がなく、3.5 Flash-Liteは既定が `MINIMAL`。温度などのサンプリング設定はArgonと3.6 Flash以降で無視されるので、指定しない |
 | 画像の解像度 | `media_resolution` を MEDIUM（1枚560トークン）にする | 既定のHIGH（1,120トークン）の半分で済む。形の確認なら768pxで足りる。精度が足りなければHIGHにする |
-| 失敗したとき | 408／429／5xxは、指数的に間隔を空けて最大5回まで自動で再試行する（SDKの再試行設定）。それでもだめなら `AI_UNAVAILABLE` を返す | 429はクォータ超過ではなく、共有リソースの一時的な混雑だと公式に説明されている |
+| 失敗したとき | 1回の呼び出しは45秒で打ち切る。408／429／5xxは同じモデルで1回だけ再試行し、それでもだめなら予備のモデル（`GEMINI_FALLBACK_MODEL`、既定 `gemini-3.8-flash`）で答えさせる。どちらもだめなら `AI_UNAVAILABLE`。どのモデルが答えたかは `designs/{id}.usage.models` に残す（2026-11-07 に変えた。本番で Argon の最初の呼び出しが約6分返らず、Cloud Run の300秒で打ち切られたため） | 429はクォータ超過ではなく、共有リソースの一時的な混雑だと公式に説明されている |
 | キャッシュ | プロジェクトの `cacheConfig` を `disableCache: true` にする（既定では最長24時間キャッシュされる）。request-response logging は有効にしない | 健康に関わる会話を残さないため（[non-functional.md §4](non-functional.md#4-プライバシー)） |
 | 記録 | 呼ぶたびに、モデル名・プロンプトの版・入出力のトークン数を `designs/{id}.usage` に足していく | コストの見張りと、プロンプトを直したときの比較のため |
 
@@ -78,7 +78,7 @@ flowchart TD
 | 聞き取り `interview`（任意のチャット） | LOW | 選択式の答え（`requirements`）、これまでの会話 | §3.1 |
 | 部品選び `select` | LOW | `requirements`、カタログ（部品と種類の説明） | §3.2 |
 | 寸法決め `dimension` | MEDIUM | `requirements`、手の要約（§3.3）、選んだ部品の引数の定義、基準値（baseline） | §3.3 |
-| 画像での確認 `review` | MEDIUM | 画像4枚、`requirements`、現在の引数、手の要約、前回までの指摘 | §3.4 |
+| 画像での確認 `review` | LOW（2026-11-07 に MEDIUM から変えた。画像4枚の呼び出しは混み具合で6〜108秒とぶれ、MEDIUM では120秒の期限切れが続いたため。AIの確認ができなかったときは生成を失敗にせず `needs_attention` で終える） | 画像4枚、`requirements`、現在の引数、手の要約、前回までの指摘 | §3.4 |
 | 言葉での微調整 `refine` | LOW | ユーザーの指示、現在の引数、引数の定義、言葉と引数の対応表 | §3.5 |
 
 ### 3.1 聞き取り `interview`（任意のチャット）
@@ -211,7 +211,7 @@ flowchart TD
 |---|---|
 | C1 | 道具の目安の棒が、人差し指の親指側から出て、先が人差し指の指先の近くにある。角度がやりたいこと（`activity`）に合っている |
 | C2 | カバーが、こぶしの外側（手の甲・付け根の関節の山・指の背）に沿っている。手がカバーを突き抜けていない、大きく浮いていない |
-| C3 | 手のひら側が開いている、手首が出ている、親指を包んでいない、中節より先の指を覆っていない |
+| C3 | 手のひら側が開いている、手首が出ている、親指を包んでいない、指（基節から先）を覆っていない |
 | C4 | ふちが丸く、尖った所や極端に薄い所が見えない。スリット・空気穴・レールが関節の山にかかっていない |
 | C5 | 選択式の答えとチャットのメモの要望（例：ベルト2本、薄く軽く、TPUの筒、痛い所を避ける）が形に表れている |
 
@@ -273,7 +273,7 @@ flowchart TD
 
 - 言葉と引数の対応表をプロンプトに入れる。例：
   - 「厚く／薄く」「丈夫に／軽く」→ `cover.cover_thickness_mm`
-  - 「もっと覆って／小さく」→ `cover.wrist_cut_mm`（手首の側）と `cover.palm_cut_offset_mm`（手のひらの側。正にしても、手のひらと中節より先は覆わない）
+  - 「もっと覆って／小さく」→ `cover.wrist_cut_mm`（手首の側）と `cover.palm_cut_offset_mm`（手のひらの側。正にしても、手のひらと指（基節から先）は覆わない）
   - 「ふちをもっと丸く」→ `cover.edge_radius_mm`
   - 「角度を寝かせて／立てて」→ `c_clip.angle_deg` を1段（20度）変える
   - 「挟むのをきつく／ゆるく」→ `c_clip.wall_mm`（±0.2mm）と `c_clip.opening_ratio`（±0.02）。内径は変えない

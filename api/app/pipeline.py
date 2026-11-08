@@ -26,6 +26,9 @@ class Deadline:
     def __init__(self, seconds: int):
         self.t_end = time.monotonic() + seconds
 
+    def left(self) -> float:
+        return self.t_end - time.monotonic()
+
     def check(self) -> None:
         if time.monotonic() > self.t_end:
             raise ApiError("GENERATION_TIMEOUT")
@@ -242,9 +245,21 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         for rnd in range(1, max_rounds + 1):
             if status != "ready":
                 break
+            if deadline.left() < 100:  # 確認1回（最大90秒）と描き直しの時間が残っていなければ、ここで止める
+                status = "needs_attention"
+                unresolved.append({"severity": "medium", "description_ja": "時間が足りず、AIによる画像の確認を最後までできませんでした（形と安全の検査は通っています）"})
+                break
             _progress(case_id, design_id, "reviewing", f"できた形を確かめています（{rnd}/{max_rounds}回目）", rnd)
             imgs = [Path(p).read_bytes() for p in result.get("views", [])]
-            rv = gemini.review(imgs, req, hand, validator.param_records(params), review_rounds, rnd, usage)
+            try:
+                rv = gemini.review(imgs, req, hand, validator.param_records(params), review_rounds, rnd, usage)
+            except ApiError as e:
+                if e.code not in ("AI_UNAVAILABLE", "AI_OUTPUT_INVALID"):
+                    raise
+                # AIが混んでいて確認できなくても、形と安全の検査は決まった計算で通っているので、生成は失敗にしない
+                status = "needs_attention"
+                unresolved.append({"severity": "medium", "description_ja": "AIが混んでいて、画像の確認ができませんでした（形と安全の検査は通っています）。必要なら作り直してください"})
+                break
             review_rounds.append({"round": rnd, "verdict": rv["verdict"], "checks": rv.get("checks", []),
                                   "issues": rv.get("issues", []), "changes": rv.get("changes", [])})
             if _review_passed(rv):

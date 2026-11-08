@@ -277,6 +277,36 @@ def test_errors_and_conflict(client):
     assert r.status_code == 200 and r.json()["turn"]["status"] == "out_of_scope"
 
 
+def test_delete_case(client):
+    """ケースを消すと、手のメッシュ・版・チャット・印刷用のファイルもまとめて消える（data-model.md §5）"""
+    cid, raw, mesh_id = _setup_case(client)
+    client.post(f"/v1/cases/{cid}/consent", headers=H, json={"mesh_consent": True, "consent_text_version": "mesh-consent-2"})
+    client.put(f"/v1/cases/{cid}/measurement", headers=H, json=_measurement(cid, mesh_id, _token(cid, raw, {})))
+    d = client.post(f"/v1/cases/{cid}/designs", headers=H, json={}).json()["design"]
+    client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print", headers=H)
+    db.set(f"cases/{cid}/messages/m1u", {"role": "user", "text": "テスト"})
+    files.put(f"internal/cases/{cid}/cover/x/sdf", b"x")
+    assert files.exists(f"cases/{cid}/hand/raw/{mesh_id}.glb")
+    # 持ち主でない人は消せない
+    assert client.delete(f"/v1/cases/{cid}", headers={"X-User": "someone-else"}).status_code == 403
+    # 形を作っている途中は消せない
+    from app import ops
+    op = ops.begin(cid, "design", "d_x")
+    assert client.delete(f"/v1/cases/{cid}", headers=H).status_code == 409
+    ops.end(cid, op)
+    r = client.delete(f"/v1/cases/{cid}", headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] is True and r.json()["files_deleted"] > 0
+    assert db.get(f"cases/{cid}") is None
+    assert db.list(f"cases/{cid}/designs") == [] and db.list(f"cases/{cid}/messages") == []
+    assert not files.exists(f"cases/{cid}/hand/raw/{mesh_id}.glb")
+    assert not files.exists(f"internal/cases/{cid}/cover/x/sdf")
+    assert client.get(f"/v1/cases/{cid}", headers=H).status_code == 404
+    assert cid not in [c["case_id"] for c in client.get("/v1/cases", headers=H).json()["cases"]]
+    # もう一度消そうとすると 404
+    assert client.delete(f"/v1/cases/{cid}", headers=H).status_code == 404
+
+
 def test_token_interop_with_hand_mesh():
     """hand-mesh が作ったトークンを、生成APIが確かめられる（impl_contract §3）"""
     import importlib.util

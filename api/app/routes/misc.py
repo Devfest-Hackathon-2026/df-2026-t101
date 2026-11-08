@@ -15,7 +15,8 @@ from ..store import db, files
 router = APIRouter()
 
 
-@router.get("/healthz")
+@router.get("/health")
+@router.get("/healthz")  # Cloud Run では /healthz は Google 側に横取りされるので、本番は /health を使う
 def healthz():
     return {"ok": True, "gemini_mode": settings.gemini_mode, "store": settings.store_backend, "auth": settings.auth_mode}
 
