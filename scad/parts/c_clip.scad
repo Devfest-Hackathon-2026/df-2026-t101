@@ -85,9 +85,8 @@ module clip_ring_2d(tool_d, wall, opening_ratio, tpu) {
     // 開き：内側で幅 w、外へ向かって面取りの角度で広がる
     polygon([[0, -w / 2], [ri + 0.2, -w / 2], [ro + 1, -w / 2 - (wall + 0.8) * ch],
              [ro + 1, w / 2 + (wall + 0.8) * ch], [ri + 0.2, w / 2], [0, w / 2]]);
-    // 根元の切り欠き（腕の付け根の外側。開きの反対側から ±70度）
-    for (s = [-1, 1]) rotate(180 + s * 70) translate([ro, 0])
-      rotate(45) square(CLIP_ROOT_NOTCH_MM * 1.414, center = true);
+    // 根元の切り欠き（CLIP_ROOT_NOTCH_MM）は 2026-11-08 にやめた：差し込むときの応力が切り欠きに集まり
+    // （見積もりで 27→37MPa）、PLA の積層の境目から割れやすくなるため
   }
 }
 

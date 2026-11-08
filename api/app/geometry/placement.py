@@ -202,13 +202,19 @@ def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: fl
     ys = [min(f * L, y_max) for f in SLIT_Y_FRACTIONS[2 if count >= 2 else 1]]
     window = None
     if count < 2 and hand is not None and radii is not None:
-        # 通り道は、カバーのある範囲（手首側のふち〜付け根の関節）で探す
-        win = strap_window(hand, Jc, radii, (float(wrist_cut) if wrist_cut is not None else 0.0), y_mcp_min)
-        if win:
-            ys = [float(np.clip(win["center"], y_min, y_max))]
-            window = {**win, "source": "thumb_gap", "slit_y": round(ys[0], 1)}
+        if y_min > y_max:
+            # 手のひらが短く、ふちの肉を両側に残すとスリットを置ける所がない
+            window = {"source": "fallback", "slit_y": round(ys[0], 1), "reason": "スリットを置ける範囲がない（手のひらが短い）"}
         else:
-            window = {"source": "fallback", "slit_y": round(ys[0], 1)}
+            # 通り道は「スリットの真ん中を置ける範囲」（両側のふちの肉を残す所）の中だけで探す。
+            # 前は範囲の外で見つけてから端へ寄せ、通り道から外れた位置なのに「通せる」と出ていた（2026-11-08 のレビュー）
+            win = strap_window(hand, Jc, radii, y_min, y_max)
+            if win:
+                ys = [float(win["center"])]
+                window = {**win, "source": "thumb_gap", "slit_y": round(ys[0], 1),
+                          "width_mm": round(win["y_to"] - win["y_from"] + 1.0, 1), "strap_width_mm": w}
+            else:
+                window = {"source": "fallback", "slit_y": round(ys[0], 1), "reason": "親指の下をくぐれる所が、スリットを置ける範囲にない"}
     t = float(params.get("_t", 2.5))
     for y in ys:
         band = np.abs(outer_v[:, 1] - y) < 1.5

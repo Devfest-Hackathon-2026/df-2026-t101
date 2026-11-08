@@ -27,6 +27,7 @@ extension type _Viewer._(JSObject _) implements JSObject {
   external void setColor(web.HTMLElement el, String color);
   external void setHandVisible(web.HTMLElement el, bool visible);
   external void reframe(web.HTMLElement el);
+  external void dispose(web.HTMLElement el);
 }
 
 @JS('jijoguViewer')
@@ -137,6 +138,19 @@ class _Viewer3DState extends State<Viewer3D> {
     } catch (e) {
       if (mounted) setState(() => _error = '3Dを読み込めませんでした（$e）');
     }
+  }
+
+  @override
+  void dispose() {
+    // WebGL のコンテキストと描画のループを解放する（iOS の上限対策。viewer.js の dispose）
+    final el = _el;
+    final v = _viewer;
+    if (el != null && v != null) {
+      try {
+        v.dispose(el);
+      } catch (_) {}
+    }
+    super.dispose();
   }
 
   @override

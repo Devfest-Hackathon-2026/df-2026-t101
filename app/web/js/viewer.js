@@ -42,12 +42,34 @@ function setup(el) {
     camera.updateProjectionMatrix();
     controls.handleResize();
   };
-  new ResizeObserver(resize).observe(el);
+  const ro = new ResizeObserver(resize);
+  ro.observe(el);
   resize();
-  const loop = () => { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); };
+  state.ro = ro;
+  const loop = () => {
+    if (state.disposed) return;
+    controls.update(); renderer.render(scene, camera);
+    state.raf = requestAnimationFrame(loop);
+  };
   loop();
   views.set(el, state);
   return state;
+}
+
+// 3D表示を片付ける（画面を閉じたとき）。iOS Safari は WebGL のコンテキストの数に上限（約16）があり、
+// 角度を変えるたびに新しい表示を作るので、古いものを解放しないと表示が消え、裏で描画も回り続ける（2026-11-08）
+function disposeView(el) {
+  const state = views.get(el);
+  if (!state) return;
+  state.disposed = true;
+  if (state.raf) cancelAnimationFrame(state.raf);
+  state.ro?.disconnect();
+  state.controls.dispose();
+  dispose(state.group);
+  state.renderer.dispose();
+  state.renderer.forceContextLoss();
+  state.renderer.domElement.remove();
+  views.delete(el);
 }
 
 function frame(state) {
@@ -232,5 +254,6 @@ window.jijoguViewer = {
     if (state?.hand) state.hand.visible = !!visible;
   },
   reframe(el) { const state = views.get(el); if (state) frame(state); },
+  dispose(el) { disposeView(el); },
 };
 window.dispatchEvent(new Event('jijogu-viewer-ready'));

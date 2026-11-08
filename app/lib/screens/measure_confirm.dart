@@ -190,8 +190,12 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
                         handPath: _hm['mesh_path'],
                         handSide: _m['hand_side'] as String?,
                         landmarks: {
-                          if (lm['palm_cut_base_mm'] != null)
-                            'palm_cut_z': lm['palm_cut_base_mm'],
+                          // palm_cut_base_mm は正準形（手のひら側が +z）の高さ。表示している手は実際の座標で、
+                          // 右手は手のひら側が −z なので、手のひらの向き（palm_normal の z）を掛ける（11/8 のレビュー）
+                          if (lm['palm_cut_base_mm'] is num)
+                            'palm_cut_z': (lm['palm_cut_base_mm'] as num) *
+                                (((lm['palm_normal'] as List?)?[2] as num?) ??
+                                    (_m['hand_side'] == 'left' ? 1 : -1)),
                           if (_baseline('cover', 'wrist_cut_mm') != null)
                             'wrist_cut_y': _baseline('cover', 'wrist_cut_mm'),
                         },

@@ -377,10 +377,13 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     if win:
         # 手のひらだけを通るベルトの通り道（親指の下・指先の手前）。見つからなければ、決まった割合の位置に置いたことを知らせる
         found = win.get("source") == "thumb_gap"
-        results.append({"rule": "R6e_strap_window", "ok": found, "value": win,
-                        "message_ja": (f"ベルトは親指の下をくぐって手のひらだけを通せます（y={win['y_from']}〜{win['y_to']}mm）" if found
-                                       else "手のひらだけを通るベルトの通り道が見つかりませんでした（ベルトが親指か指に乗ります）"),
-                        "severity": "info"})
+        if found:
+            msg = f"ベルトの真ん中は親指の下をくぐって手のひらだけを通せます（通り道 y={win['y_from']}〜{win['y_to']}mm、幅{win['width_mm']}mm）"
+            if win["width_mm"] < win["strap_width_mm"]:
+                msg += f"。ベルト幅{win['strap_width_mm']:g}mmより狭いので、ベルトの端は親指か指に少し乗ります"
+        else:
+            msg = "手のひらだけを通るベルトの通り道が見つかりませんでした（ベルトが親指か指に乗ります）"
+        results.append({"rule": "R6e_strap_window", "ok": found, "value": win, "message_ja": msg, "severity": "info"})
     # スリットとレールの台の、置く前の箱どうしの距離（目安。実際に穴が開いているかは R6e_slit_open で見る）
     ok_sr = slit_rail_mm >= 1.0
     results.append({"rule": "R6e_slit_rail", "ok": ok_sr, "value": {"clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},

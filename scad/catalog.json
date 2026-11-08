@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-08.1",
+  "version": "2026-11-08.2",
   "units": { "length": "mm", "angle": "deg" },
   "fixed": {
     "NOZZLE_MM": 0.4,
@@ -104,7 +104,7 @@
         { "name": "inner_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "輪の内径 ＝ 道具の太さ − しめしろ（TPUの筒を使うときは筒の外径）" },
         { "name": "wall_mm", "unit": "mm", "type": "number", "default": 2.0, "min": 1.6, "max": 3.0, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "輪の壁の厚さ。固定（クリップは先に作っておいた固定STLから選ぶ。2026-11-08）。11/9の clip_test で値を決め直す" },
         { "name": "opening_ratio", "unit": "ratio", "type": "number", "default": 0.75, "min": 0.70, "max": 0.80, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "開きの幅 ÷ 道具の太さ。固定（同上）" },
-        { "name": "height_mm", "unit": "mm", "type": "number", "default": 12.0, "min": 8.0, "max": 20.0, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "輪の高さ（道具を挟む長さ）。固定（同上）" },
+        { "name": "height_mm", "unit": "mm", "type": "number", "default": 20.0, "min": 8.0, "max": 20.0, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "輪の高さ（道具を挟む長さ）。固定。2026-11-08 に 12 から 20 にした（ペン先までのてこが約90mmあり、12mm ではぐらついたため）" },
         { "name": "angle_deg", "unit": "deg", "type": "enum", "default": 70, "min": null, "max": null, "choices": [60, 70, 80], "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "道具の立て具合（机に手の甲を上にして置いたときの、机に対する道具の傾き）。クリップはこぶしの親指側の横に道具を立てる。基準は筆70・ペン60。AIはやりたいことから選び、理由を書く。ユーザーがプレビューで変えられる（2026-11-08 に 0/20/40 から変えた）" },
         { "name": "grip_ribs", "unit": "bool", "type": "boolean", "default": true, "min": null, "max": null, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "内側の細い溝（道具が滑りにくくなる）。固定（同上）" },
         { "name": "count", "unit": "count", "type": "integer", "default": 1, "min": 1, "max": 2, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "クリップの数（先が細くなる筆の柄なら2を勧めてよい）。MVPのレールは1本なので、2個目は同じ形の予備として刷る（要確認）" },

@@ -215,9 +215,12 @@ def test_slit_y_follows_strap_window(name):
     ys = [float(c[1]) for c in sl["centers"]]
     assert all(abs(y - win["slit_y"]) < 2.5 for y in ys), (ys, win)   # 側面の点を拾うので ±1.5mm ＋ 壁の中ほどへの寄せ
     if win["source"] == "thumb_gap":
-        assert win["y_from"] <= win["center"] <= win["y_to"]
+        # スリットは通り道の中（範囲の外へ寄せて「通せる」と言わない。2026-11-08 のレビュー）
+        assert win["y_from"] <= win["slit_y"] <= win["y_to"], win
         y_mcp = min(float(Jc[f][0][1]) for f in ("index", "middle", "ring", "pinky"))
         assert win["slit_y"] < y_mcp      # 付け根の関節より手首側（カバーの中）
+    else:
+        assert win.get("reason")          # 見つからなかった理由を残す
 
 
 def test_strap_window_on_simple_shapes():

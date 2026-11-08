@@ -461,7 +461,8 @@ class _DesignScreenState extends State<DesignScreen> {
           InfoCard(
             tone: NoticeTone.warning,
             child: Text(
-              'AIの確認で解決しなかった点があります：\n${issues.map((i) => '・${i is Map ? (i['message_ja'] ?? i['issue_ja'] ?? i) : i}').join('\n')}',
+              // API は未解決の点を {severity, description_ja} で返す（pipeline.py・review.dart と同じ）
+              '確かめてほしい点があります：\n${issues.map((i) => '・${i is Map ? (i['description_ja'] ?? i['message_ja'] ?? i['issue_ja'] ?? '') : i}').join('\n')}',
             ),
           ),
         if (approval == 'rejected')
