@@ -115,6 +115,43 @@ def check_clip(clip_print: trimesh.Trimesh, clip: dict) -> list[dict]:
     return out
 
 
+def _inside_by_normal(mesh: trimesh.Trimesh, P: np.ndarray, min_depth: float = 0.2) -> np.ndarray:
+    """点が立体の中にあるか：いちばん近い面の中心とその法線で判定する（rtree なしで済む。面が細かい殻なら十分）"""
+    tree = cKDTree(mesh.triangles_center)
+    d, i = tree.query(P, workers=-1)
+    depth = -((P - mesh.triangles_center[i]) * mesh.face_normals[i]).sum(1)
+    return (depth > min_depth) & (d > min_depth)
+
+
+def check_slits_open(cover: trimesh.Trimesh | None, sl: dict, wall_t: float) -> list[dict]:
+    """R6e_slit_open：描いたあとのカバーで、ベルトのスリットの穴が本当に開いているか（正準形）。
+    穴の箱（壁の中の部分）に点を並べ、カバーの中にある点の割合を数える。レールの台が穴をふさぐと（2026-11-08 に起きた）
+    ここで分かる。置く前の箱どうしの距離（R6e_slit_rail）より正確"""
+    if cover is None or not sl["centers"]:
+        return []
+    g = np.linspace(-1, 1, 9)
+    worst, per = 0.0, []
+    for cen, n, a in zip(sl["centers"], sl["normals"], sl["axes"]):
+        n = np.asarray(n, float) / (np.linalg.norm(n) or 1.0)
+        a0 = np.asarray(a, float) - (np.asarray(a, float) @ n) * n
+        a0 /= (np.linalg.norm(a0) or 1.0)
+        x = np.cross(a0, n)
+        # 縁から 1mm 内側の穴の箱。壁の向きには壁の真ん中の ±0.25×厚み だけ（内外の面の縁の近くは、最寄りの面の
+        # 法線で内外を決める方法が揺れるので数えない。レールの台が穴をふさぐときは壁の真ん中も埋まる）
+        e = np.array([(sl["thickness"] + 1.5) / 2 - 1.0, (sl["width"] + 1.0) / 2 - 1.0, wall_t * 0.25])
+        U, Vv, W = np.meshgrid(g, g, np.linspace(-1, 1, 3), indexing="ij")
+        P = (np.asarray(cen, float)[None, :] + (U.ravel()[:, None] * e[0]) * x + (Vv.ravel()[:, None] * e[1]) * a0
+             + (W.ravel()[:, None] * e[2]) * n)
+        inside = _inside_by_normal(cover, P, min_depth=0.5)
+        frac = float(inside.mean())
+        per.append(round(frac, 3))
+        worst = max(worst, frac)
+    ok = worst <= 0.02
+    return [_item("R6e_slit_open", ok, {"blocked_fraction": per},
+                  "ベルトのスリットは開いている" if ok else "ベルトのスリットがふさがれています（レールの台など）",
+                  fix_hint="strap_width_mm を狭くする", severity="warning")]
+
+
 TOOL_TIP_MM = 100.0    # クリップから道具の先まで（ペン・筆の目安）
 TOOL_REAR_MM = 50.0    # クリップから道具の後ろの端まで
 TOOL_HAND_GAP_MM = 2.0   # 道具の面と手の間にほしいすき間

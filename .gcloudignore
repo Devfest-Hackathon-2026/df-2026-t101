@@ -15,3 +15,5 @@ api/tests/
 scad/vendor/BOSL2/tests/
 scad/vendor/BOSL2/examples/
 *.log
+# クリップの固定STLのライブラリは、コンテナのビルドの中で作る（手元の45MBは送らない）
+scad/library/

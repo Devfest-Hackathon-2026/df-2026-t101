@@ -238,10 +238,10 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         if [v for v in result.get("violations", []) if v.get("rule") in SAFETY_RULES]:
             status = "needs_attention"
             unresolved.append({"severity": "high", "description_ja": "手のひら側か手首を覆うおそれがあります。印刷用のデータは作れません"})
-        if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_rail") and not c.get("ok")]:
+        if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_open") and not c.get("ok")]:
             # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）
             status = "needs_attention"
-            unresolved.append({"severity": "medium", "description_ja": "ベルトのスリットを置けない所、またはレールの台にかかる所があります（カバーの側面が低いため）。"
+            unresolved.append({"severity": "medium", "description_ja": "ベルトのスリットを置けない所、またはふさがれている所があります（カバーの側面が低いため）。"
                                "ベルトの幅を狭くするか、OTに相談してください"})
 
         # 画像での確認（最初は最大3回、言葉の微調整は1回、数値・角度だけの変更は確認しない）

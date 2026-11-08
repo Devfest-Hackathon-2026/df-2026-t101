@@ -100,6 +100,9 @@ def place_rail(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float) -> d
 
 
 SLIT_MAX_NZ = 0.7   # スリットを抜く向きの縦成分の上限（これより下向きなら横へ寄せる。ベルトは横〜斜め下へ出る）
+# スリットの y（手首→中指の付け根の長さに対する割合）。1本は 0.70（2026-11-08 に 0.55 から変えた：親指の付け根に
+# ベルトがかかり、側面の低い所に来ていた。付け根の関節の手前まで寄せると、親指から 10mm ほど離れ、側面も高い）
+SLIT_Y_FRACTIONS = {1: (0.70,), 2: (0.45, 0.72)}
 
 
 def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: float, palm_z: float) -> dict:
@@ -111,11 +114,14 @@ def place_slits(Jc: dict, outer_v, outer_n, outer_tree, params: dict, edge_r: fl
     palm_z：手のひら側を切る面の高さ（正準形。手のひら側が +z）。"""
     L = palm_length(Jc)
     count = int(params.get("strap_count", 1))
-    ys = [0.55 * L] if count == 1 else [0.45 * L, 0.70 * L]
     w = float(params.get("strap_width_mm", 25))
     th = float(params.get("strap_thickness_mm", 2.0))
     centers, normals, axes, skipped = [], [], [], []
     inset = fixed("MIN_WALL_MM") + (th + 1.5) / 2 + edge_r + 0.5
+    # 指先側の上限：カバーは付け根の関節の少し先で終わるので、スリットの端がそのふちの肉（MIN_WALL＋丸み）を残す所まで
+    y_mcp_min = min(float(Jc[f][0][1]) for f in LONG_FINGERS)
+    y_max = y_mcp_min - ((w + 1.0) / 2 + fixed("MIN_WALL_MM") + edge_r)
+    ys = [min(f * L, y_max) for f in SLIT_Y_FRACTIONS[2 if count >= 2 else 1]]
     t = float(params.get("_t", 2.5))
     for y in ys:
         band = np.abs(outer_v[:, 1] - y) < 1.5

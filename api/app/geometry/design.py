@@ -245,7 +245,7 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         cache.put(shell_key, sb)
         timings["shell_ms"] = int((time.time() - ts) * 1000)
     shell_sha = _sha(sb)
-    kkey = f"keepout/c{c:.2f}"
+    kkey = f"keepout/{mesh_sha[:16]}_c{c:.2f}"   # 採寸の版（メッシュ）ごと。前は c だけで、別の手のものを使い回すおそれがあった
     kb = cache.get(kkey)
     if not kb:
         kb = _stl_bytes(_mesh_to_actual(build_keepout(field, c), hand_side))
@@ -362,6 +362,7 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     if cover_c is not None and quality == "print":
         cover_c = _mesh_to_canonical(trimesh.load(files["cover"], force="mesh").apply_transform(np.linalg.inv(pm)), hand_side)
     results += CK.check_tool_path(href, cover_c, rail, clip_p, Jc)
+    results += CK.check_slits_open(cover_c, sl, t)
     timings["checks_ms"] = int((time.time() - ts) * 1000)
     violations = [{"rule": r["rule"], "message_ja": r["message_ja"], "fix_hint": r.get("fix_hint")}
                   for r in results if not r["ok"] and r.get("severity") == "error"]
@@ -371,11 +372,11 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     if sl["skipped"]:
         results.append({"rule": "R6e_slits", "ok": False, "value": sl["skipped"],
                         "message_ja": "ベルトのスリットを置けない所がありました", "severity": "warning"})
-    # スリットとレールの台が重なると、レールがスリットを塞ぐ（2026-11-08 に実際に起きた）
-    ok_sr = slit_rail_mm >= float(fixed("MIN_WALL_MM"))
+    # スリットとレールの台の、置く前の箱どうしの距離（目安。実際に穴が開いているかは R6e_slit_open で見る）
+    ok_sr = slit_rail_mm >= 1.0
     results.append({"rule": "R6e_slit_rail", "ok": ok_sr, "value": {"clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},
-                    "message_ja": "ベルトのスリットはレールの台から離れている" if ok_sr else "ベルトのスリットがレールの台にかかっています",
-                    "severity": "warning"})
+                    "message_ja": "ベルトのスリットはレールの台から離れている" if ok_sr else "ベルトのスリットがレールの台に近い",
+                    "severity": "info"})
 
     # 確認用画像（プレビューのときだけ）
     views = []
