@@ -292,7 +292,7 @@ function drawOverlay(f: Frame, opts: { coin?: Ellipse | null; landmarks?: boolea
     ctx.moveTo(opts.tap.x, opts.tap.y - r); ctx.lineTo(opts.tap.x, opts.tap.y + r); ctx.stroke();
   }
   if (coin) {
-    ctx.strokeStyle = '#ffcc00'; ctx.lineWidth = lw * 1.5;
+    ctx.strokeStyle = '#FBBC04'; ctx.lineWidth = lw * 3;  // Figma S4 の黄色い輪（Google Yellow）
     ctx.beginPath();
     ctx.ellipse(coin.cx, coin.cy, coin.major / 2, coin.minor / 2, coin.angle, 0, Math.PI * 2);
     ctx.stroke();

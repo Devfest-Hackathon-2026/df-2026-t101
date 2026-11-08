@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../bridge/measure_engine.dart';
 import '../data/api.dart';
@@ -132,39 +133,104 @@ class _CaptureScreenState extends State<CaptureScreen> {
       );
     }
     if (_consented == false) {
+      // Figma S3「撮影の前の同意」（22:948）
       return AppPage(
         title: '撮影の前に',
         bottom: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             FilledButton(
               onPressed: _busy ? null : _consent,
               child: const Text('同意して進む'),
             ),
             const SizedBox(height: 8),
-            OutlinedButton(
+            TextButton(
               onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, 56),
+                textStyle: AppText.titleMedium,
+              ),
               child: const Text('やめる'),
             ),
           ],
         ),
         children: [
-          const InfoCard(
-            icon: Icons.privacy_tip_outlined,
-            child: Text(
-              '手の3Dの形を作るため、手の部分を切り抜いた画像を最大8枚、計算のためだけにシンガポールのサーバーに送ります。'
-              '画像は保存しません。\n\n作った手の3Dの形（写真ではありません）は、作った形を確かめるために保存します。ケースを消すと消えます。\n\n'
-              '動画そのものは、この端末から外に出しません。同意しない場合は、撮影に進めません。',
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: _IconBox(icon: Icons.verified_user_rounded),
+          ),
+          const SizedBox(height: 16),
+          Semantics(
+            header: true,
+            child: Text('手の3Dの形を作るための同意', style: AppText.headlineSmall),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Column(
+              children: [
+                _ConsentRow(
+                  icon: Icons.image_rounded,
+                  label: '送るもの',
+                  text: '手の3Dの形を作るため、手の部分を切り抜いた画像を最大8枚',
+                ),
+                _ConsentRow(
+                  icon: Icons.monitor_rounded,
+                  label: 'どこで',
+                  text: 'シンガポールのサーバーに送り、計算のためだけに使います',
+                ),
+                _ConsentRow(
+                  icon: Icons.lock_rounded,
+                  label: '保存しないもの',
+                  text: '送った画像は保存しません。動画そのものは、この端末から外に出しません',
+                ),
+                _ConsentRow(
+                  icon: Icons.back_hand_rounded,
+                  label: '保存するもの',
+                  text: '作った手の3Dの形（写真ではありません）。作った形を確かめるために保存します',
+                ),
+                _ConsentRow(
+                  icon: Icons.close_rounded,
+                  label: '消すとき',
+                  text: 'ケースを消すと、手の3Dの形も消えます',
+                ),
+              ],
             ),
           ),
-          if (_error != null) ErrorCard(message: _error!),
+          const SizedBox(height: 16),
+          Text(
+            '同意しない場合は、撮影に進めません。',
+            style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '同意の文の版：$consentVersion',
+            style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            ErrorCard(message: _error!),
+          ],
         ],
       );
     }
+    // Figma S3「撮り方の案内」（22:1032）
+    final smallOutline = OutlinedButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      textStyle: AppText.labelLarge,
+      iconSize: 18,
+    );
     return AppPage(
       title: '手を撮る',
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           FilledButton.icon(
             onPressed: _busy
@@ -175,23 +241,27 @@ class _CaptureScreenState extends State<CaptureScreen> {
                           LiveCaptureScreen(caseId: widget.caseId, hand: _hand),
                     ),
                   ),
-            icon: const Icon(Icons.videocam_outlined),
+            icon: const Icon(Icons.photo_camera_rounded),
             label: const Text('カメラで撮る'),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
-                child: OutlinedButton(
+                child: OutlinedButton.icon(
                   onPressed: _busy ? null : () => _pick(video: true),
-                  child: const Text('撮った動画を選ぶ'),
+                  style: smallOutline,
+                  icon: const Icon(Icons.videocam_rounded),
+                  label: const Text('撮った動画を選ぶ'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: OutlinedButton(
+                child: OutlinedButton.icon(
                   onPressed: _busy ? null : () => _pick(video: false),
-                  child: const Text('写真2枚で測る'),
+                  style: smallOutline,
+                  icon: const Icon(Icons.image_rounded),
+                  label: const Text('写真2枚で測る'),
                 ),
               ),
             ],
@@ -199,19 +269,29 @@ class _CaptureScreenState extends State<CaptureScreen> {
         ],
       ),
       children: [
-        if (_status != null) BusyCard(text: _status!),
-        const InfoCard(
-          icon: Icons.people_outline,
-          child: Text('家族や支援者に撮ってもらうのがおすすめです。'),
-        ),
-        InfoCard(
-          icon: Icons.back_hand_outlined,
-          child: Text(
-            _fingerState == 'straight'
-                ? '軽く握った形で撮ってください。指を無理に動かさないでください。'
-                : '指を無理に開かないでください。いつもの握った形のまま撮ります。',
+        if (_status != null) ...[
+          BusyCard(text: _status!),
+          const SizedBox(height: 12),
+        ],
+        // 撮り方の図（暗い布・こぶし・1円玉・親指側から小指側への半周）
+        ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: AspectRatio(
+            aspectRatio: 364 / 210,
+            child: SvgPicture.asset(
+              'assets/images/capture_guide.svg',
+              fit: BoxFit.cover,
+              semanticsLabel:
+                  '撮り方の図。暗い布の上に置いたこぶしのまわりを、親指側から小指側へ、カメラで半周します。こぶしの前に1円玉を置きます。',
+            ),
           ),
         ),
+        const SizedBox(height: 16),
+        Semantics(
+          header: true,
+          child: Text('こぶしのまわりを半周撮ります（5〜10秒）', style: AppText.titleLarge),
+        ),
+        const SizedBox(height: 16),
         for (final (i, s) in const [
           '暗い色の布か紙を机に敷き、その上に、いつもの握った形のまま、手の甲を上にしてこぶしを置きます。',
           '1円玉を、こぶしの前（指の付け根の関節の前）3〜5cmに平らに置きます。',
@@ -219,10 +299,113 @@ class _CaptureScreenState extends State<CaptureScreen> {
           '親指側の低い所から、手の上を通って小指側まで、5〜10秒かけてゆっくり半周します。途中で、こぶしの前（指の背と関節の出っ張り）も写します。',
           'PCのカメラで撮るときは、手は机に置いたまま、カメラ（ノートPCなど）の方を動かしてください。',
         ].indexed)
-          InfoCard(child: Text('${i + 1}. $s')),
+          _StepRow(number: i + 1, text: s),
+        const SizedBox(height: 4),
+        InfoCard(
+          tone: NoticeTone.warning,
+          child: Text(
+            _fingerState == 'straight'
+                ? '軽く握った形で撮ってください。指を無理に動かさないでください。'
+                : '指を無理に開かないでください。いつもの握った形のまま撮ります。',
+          ),
+        ),
+        const SizedBox(height: 8),
+        const InfoCard(
+          tone: NoticeTone.helper,
+          child: Text('家族や支援者に撮ってもらうのがおすすめです。'),
+        ),
       ],
     );
   }
+}
+
+/// 色の付いた角丸の箱に入れたアイコン（Figma の同意画面の上の飾り）
+class _IconBox extends StatelessWidget {
+  const _IconBox({required this.icon});
+  final IconData icon;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 56,
+    height: 56,
+    decoration: BoxDecoration(
+      color: AppColors.secondaryContainer,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Icon(icon, size: 28, color: AppColors.onSecondaryContainer),
+  );
+}
+
+/// 同意の1行（アイコン＋小さな見出し＋本文）
+class _ConsentRow extends StatelessWidget {
+  const _ConsentRow({
+    required this.icon,
+    required this.label,
+    required this.text,
+  });
+  final IconData icon;
+  final String label;
+  final String text;
+  @override
+  Widget build(BuildContext context) => MergeSemantics(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 24, color: AppColors.onSurfaceVariant),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: AppText.bodySmall.copyWith(
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ),
+                Text(text, style: AppText.bodyLarge),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// 撮り方の手順の1行（丸の中の番号＋本文）
+class _StepRow extends StatelessWidget {
+  const _StepRow({required this.number, required this.text});
+  final int number;
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: MergeSemantics(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: AppColors.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$number',
+              style: AppText.titleSmall.copyWith(
+                color: AppColors.onPrimaryContainer,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(child: Text(text, style: AppText.bodyLarge)),
+        ],
+      ),
+    ),
+  );
 }
 
 /// S4 1円玉の確認（自動で見つけた輪を確かめ、違うときだけタップ）。docs/screens.md S4
@@ -337,6 +520,12 @@ class _CoinScreenState extends State<CoinScreen> {
         : _auto
         ? '1円玉を自動では見つけられませんでした。写真の中の1円玉をタップ（PCはクリック）してください。'
         : 'うまく見つかりませんでした（赤い十字がタップした所です）。1円玉の上をもう一度タップしてください。';
+    // Figma S4「1円玉の確認」（23:1176）。色だけで伝えないよう、お知らせのアイコンも状態で変える
+    final tone = _busy
+        ? NoticeTone.progress
+        : _ok == false
+        ? NoticeTone.warning
+        : NoticeTone.info;
     return AppPage(
       title: _count > 1 ? '1円玉の確認（${_index + 1}/$_count枚目）' : '1円玉の確認',
       bottom: FilledButton(
@@ -356,8 +545,13 @@ class _CoinScreenState extends State<CoinScreen> {
         child: Text(!last ? '次の写真へ' : 'この1円玉で解析する'),
       ),
       children: [
-        Semantics(liveRegion: true, child: Text(msg)),
-        const SizedBox(height: 8),
+        if (_ok == true) ...[
+          Semantics(
+            header: true,
+            child: Text('黄色い輪が1円玉に重なっていますか？', style: AppText.headlineSmall),
+          ),
+          const SizedBox(height: 16),
+        ],
         AspectRatio(
           aspectRatio: _w / _h,
           child: LayoutBuilder(
@@ -371,26 +565,46 @@ class _CoinScreenState extends State<CoinScreen> {
                   cursor: _busy
                       ? SystemMouseCursors.wait
                       : SystemMouseCursors.click,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.memory(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(
                           dataUrlBytes(_image),
                           fit: BoxFit.fill,
                           gaplessPlayback: true,
                         ),
-                      ),
-                      if (_busy)
-                        const Center(child: CircularProgressIndicator()),
-                    ],
+                        if (_busy)
+                          Center(
+                            child: Container(
+                              width: 56,
+                              height: 56,
+                              padding: const EdgeInsets.all(14),
+                              decoration: const BoxDecoration(
+                                color: AppColors.primaryContainer,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const CircularProgressIndicator(
+                                strokeWidth: 3,
+                                color: AppColors.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        InfoCard(
+          tone: tone,
+          child: Semantics(liveRegion: true, child: Text(msg)),
+        ),
+        const SizedBox(height: 8),
         const HelperNote(),
       ],
     );
@@ -413,7 +627,18 @@ class AnalyzeScreen extends StatefulWidget {
 }
 
 class _AnalyzeScreenState extends State<AnalyzeScreen> {
+  /// 段階の一覧（Figma の M3/Step item の並び）。先頭3つは解析エンジンが出す段階の名前と同じ
+  static const _steps = [
+    'フレームを選んでいます',
+    '手の形を調べています',
+    'まとめています',
+    '手の3Dの形を作っています',
+    '手の3Dを実寸にしています',
+  ];
   String _stage = 'フレームを選んでいます';
+  int _step = 0;
+  int _i = 0;
+  int _n = 0;
   double? _value;
   String? _error;
   bool _retake = false;
@@ -428,17 +653,27 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
     setState(() {
       _error = null;
       _retake = false;
+      _stage = _steps[0];
+      _step = 0;
+      _n = 0;
+      _value = null;
     });
     final eng = MeasureEngine.instance;
     try {
       final a = await eng.analyze(
         (stage, i, n) => setState(() {
-          _stage = '$stage（$i/$n）';
+          _stage = stage;
+          final k = _steps.indexOf(stage);
+          if (k >= 0) _step = k;
+          _i = i;
+          _n = n;
           _value = n == 0 ? null : i / n;
         }),
       );
       setState(() {
         _stage = '手の3Dの形を作っています';
+        _step = 3;
+        _n = 0;
         _value = null;
       });
       // 起動待ち・混雑は自動で最大3回、合わせて5分まで（RATE_LIMITED・GENERATION_DISABLED はやり直さない）
@@ -465,7 +700,10 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
           await Future<void>.delayed(Duration(seconds: 10 * attempt));
         }
       }
-      setState(() => _stage = '手の3Dを実寸にしています');
+      setState(() {
+        _stage = '手の3Dを実寸にしています';
+        _step = 4;
+      });
       final m = Map<String, dynamic>.from(mesh!['measurement']);
       final r = await Api.instance.put(
         '/v1/cases/${widget.caseId}/measurement',
@@ -509,35 +747,177 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
     }
   }
 
+  // Figma S3「解析中」（22:1217）
   @override
   Widget build(BuildContext context) {
+    final sub = AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant);
     return AppPage(
       title: '手を調べています',
       bottom: _error == null
           ? null
           : Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (!_retake)
-                  FilledButton(onPressed: _run, child: const Text('もう一度試す')),
+                  FilledButton.icon(
+                    onPressed: _run,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('もう一度試す'),
+                  ),
                 if (!_retake) const SizedBox(height: 8),
-                OutlinedButton(
+                OutlinedButton.icon(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('撮り直す'),
+                  icon: const Icon(Icons.photo_camera_rounded),
+                  label: const Text('撮り直す'),
                 ),
               ],
             ),
       children: [
-        if (_error == null)
-          BusyCard(text: _stage, value: _value)
-        else
+        if (_error == null) ...[
+          Row(
+            children: [
+              const _LoadingMark(),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(_stage, style: AppText.headlineSmall),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '画面を閉じると、撮影からやり直しになります。',
+                      style: AppText.bodyLarge.copyWith(
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(child: Text(_steps[_step], style: sub)),
+              if (_n > 0) Text('$_i / $_n枚', style: sub),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(value: _value),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                for (final (k, label) in _steps.indexed)
+                  _StageRow(
+                    label: label,
+                    state: k < _step
+                        ? _StageState.done
+                        : k == _step
+                        ? _StageState.current
+                        : _StageState.todo,
+                  ),
+              ],
+            ),
+          ),
+        ] else
           ErrorCard(message: _error!),
+        const SizedBox(height: 12),
         const InfoCard(
+          tone: NoticeTone.info,
+          icon: Icons.lock_rounded,
           child: Text(
             '動画はこの端末の中だけで調べています。外に送るのは、手の3Dを作るための手の部分の画像（最大8枚）だけで、画像は保存しません。',
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 処理中の印（M3 の Loading indicator の代わり。色の付いた丸の中で回る）。
+/// 必ず「いま何をしているか」の文と一緒に出す
+class _LoadingMark extends StatelessWidget {
+  const _LoadingMark();
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: Container(
+      width: 48,
+      height: 48,
+      padding: const EdgeInsets.all(12),
+      decoration: const BoxDecoration(
+        color: AppColors.primaryContainer,
+        shape: BoxShape.circle,
+      ),
+      child: const CircularProgressIndicator(
+        strokeWidth: 3,
+        color: AppColors.onPrimaryContainer,
+      ),
+    ),
+  );
+}
+
+enum _StageState { done, current, todo }
+
+/// 処理の段階の1行（Figma の M3/Step item：済み／いま／これから）。
+/// 色だけで伝えないよう、印のアイコンと文字の太さも変え、読み上げにも状態を添える
+class _StageRow extends StatelessWidget {
+  const _StageRow({required this.label, required this.state});
+  final String label;
+  final _StageState state;
+  @override
+  Widget build(BuildContext context) {
+    final (bg, fg, icon, style, said) = switch (state) {
+      _StageState.done => (
+        AppColors.primary,
+        AppColors.onPrimary,
+        Icons.check_circle_rounded,
+        AppText.bodyLarge,
+        '済み',
+      ),
+      _StageState.current => (
+        AppColors.primaryContainer,
+        AppColors.onPrimaryContainer,
+        Icons.hourglass_top_rounded,
+        AppText.titleMedium,
+        'いま',
+      ),
+      _StageState.todo => (
+        AppColors.surfaceContainerHighest,
+        AppColors.onSurfaceVariant,
+        Icons.remove_rounded,
+        AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+        'これから',
+      ),
+    };
+    return Semantics(
+      label: '$label（$said）',
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+                child: Icon(icon, size: 20, color: fg),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Text(label, style: style)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

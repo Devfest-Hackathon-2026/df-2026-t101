@@ -108,18 +108,31 @@ class _PointEditorState extends State<PointEditor> {
                       children: [
                         Positioned.fill(
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.memory(
-                              dataUrlBytes(widget.imageDataUrl),
-                              fit: BoxFit.fill,
-                              gaplessPlayback: true,
+                            borderRadius: BorderRadius.circular(28),
+                            child: ColoredBox(
+                              color: _photoBackdrop,
+                              child: Image.memory(
+                                dataUrlBytes(widget.imageDataUrl),
+                                fit: BoxFit.fill,
+                                gaplessPlayback: true,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 手首から各付け根への線（Figma：inversePrimary の細い線）
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _BonesPainter(widget.points, scale),
                             ),
                           ),
                         ),
                         for (final e in widget.points.entries)
                           Positioned(
-                            left: e.value.dx * scale - 16,
-                            top: e.value.dy * scale - 16,
+                            left: e.value.dx * scale -
+                                _Dot.sizeFor(e.key == _selected) / 2,
+                            top: e.value.dy * scale -
+                                _Dot.sizeFor(e.key == _selected) / 2,
                             child: IgnorePointer(
                               child: _Dot(
                                 label: e.key == '0' ? '手' : e.key,
@@ -127,24 +140,47 @@ class _PointEditorState extends State<PointEditor> {
                               ),
                             ),
                           ),
-                        if (_dragging != null && _finger != null)
+                        if (_dragging != null && _finger != null) ...[
                           Positioned(
-                            left: _finger!.dx - 60,
-                            top: _finger!.dy - 150,
+                            left: _finger!.dx - 50,
+                            top: _finger!.dy - 160,
                             child: const RawMagnifier(
-                              size: Size(120, 120),
+                              size: Size(100, 100),
                               magnificationScale: 3,
-                              focalPointOffset: Offset(0, 90),
+                              focalPointOffset: Offset(0, 110),
                               decoration: MagnifierDecoration(
                                 shape: CircleBorder(
                                   side: BorderSide(
-                                    color: AppColors.primary,
+                                    color: Colors.white,
                                     width: 3,
                                   ),
                                 ),
                               ),
                             ),
                           ),
+                          Positioned(
+                            left: _finger!.dx - 50,
+                            top: _finger!.dy - 56,
+                            width: 100,
+                            child: IgnorePointer(
+                              child: ExcludeSemantics(
+                                child: Text(
+                                  '3倍に拡大',
+                                  textAlign: TextAlign.center,
+                                  style: AppText.labelSmall.copyWith(
+                                    color: Colors.white,
+                                    shadows: const [
+                                      Shadow(
+                                        blurRadius: 3,
+                                        color: Colors.black54,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -153,30 +189,43 @@ class _PointEditorState extends State<PointEditor> {
             },
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
             for (final e in palmPointNames.entries)
-              SuggestButton(
-                label: '${e.key == _selected ? '● ' : ''}${e.value}',
+              _PointChip(
+                label: e.value,
+                selected: e.key == _selected,
                 onPressed: () => setState(() => _selected = e.key),
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _Arrow(Icons.arrow_back, '左へ', () => _nudge(const Offset(-2, 0))),
-            _Arrow(Icons.arrow_upward, '上へ', () => _nudge(const Offset(0, -2))),
             _Arrow(
-              Icons.arrow_downward,
+              Icons.arrow_back_rounded,
+              '左へ',
+              () => _nudge(const Offset(-2, 0)),
+            ),
+            _Arrow(
+              Icons.arrow_upward_rounded,
+              '上へ',
+              () => _nudge(const Offset(0, -2)),
+            ),
+            _Arrow(
+              Icons.arrow_downward_rounded,
               '下へ',
               () => _nudge(const Offset(0, 2)),
             ),
-            _Arrow(Icons.arrow_forward, '右へ', () => _nudge(const Offset(2, 0))),
+            _Arrow(
+              Icons.arrow_forward_rounded,
+              '右へ',
+              () => _nudge(const Offset(2, 0)),
+            ),
           ],
         ),
       ],
@@ -184,29 +233,94 @@ class _PointEditorState extends State<PointEditor> {
   }
 }
 
+/// 写真の後ろの暗い色（Figma の写真の枠と同じ）
+const _photoBackdrop = Color(0xFF2C3134);
+
+/// 手首（0）から指の付け根への線
+class _BonesPainter extends CustomPainter {
+  _BonesPainter(this.points, this.scale);
+  final Map<String, Offset> points;
+  final double scale;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = points['0'];
+    if (w == null) return;
+    final paint = Paint()
+      ..color = AppColors.inversePrimary
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    for (final e in points.entries) {
+      if (e.key == '0') continue;
+      canvas.drawLine(w * scale, e.value * scale, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BonesPainter old) => true;
+}
+
+/// 動かせる点（Figma：白い縁の大きな丸。ふだんは primary を薄く、選んだ点は大きく明るく）。
+/// 色だけで伝えないよう、選んだ点は大きさも変え、中に名前の文字を出す
 class _Dot extends StatelessWidget {
   const _Dot({required this.label, required this.selected});
   final String label;
   final bool selected;
+
+  static double sizeFor(bool selected) => selected ? 44 : 40;
+
   @override
   Widget build(BuildContext context) => Container(
-    width: 32,
-    height: 32,
+    width: sizeFor(selected),
+    height: sizeFor(selected),
     alignment: Alignment.center,
     decoration: BoxDecoration(
       shape: BoxShape.circle,
-      color: (selected ? AppColors.accent : AppColors.primary).withValues(
-        alpha: 0.85,
-      ),
-      border: Border.all(color: Colors.white, width: 2),
+      color: selected
+          ? AppColors.inversePrimary.withValues(alpha: 0.6)
+          : AppColors.primary.withValues(alpha: 0.45),
+      border: Border.all(color: Colors.white, width: 3),
     ),
     child: Text(
       label,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 12,
-        fontWeight: FontWeight.bold,
+      style: AppText.labelMedium.copyWith(
+        color: selected ? AppColors.onPrimaryContainer : Colors.white,
+        fontWeight: FontWeight.w700,
       ),
+    ),
+  );
+}
+
+/// 動かす点を選ぶチップ（Figma の Filter chip の見た目）。選ぶとチェックの印が付く。
+/// FilterChip は読み上げで「チェックボックス」になるため、ボタン＋selected にする
+class _PointChip extends StatelessWidget {
+  const _PointChip({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    selected: selected,
+    child: OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        padding: EdgeInsets.only(left: selected ? 8 : 16, right: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: AppText.labelLarge.copyWith(fontSize: 16),
+        backgroundColor: selected ? AppColors.secondaryContainer : null,
+        foregroundColor: selected
+            ? AppColors.onSecondaryContainer
+            : AppColors.onSurfaceVariant,
+        side: selected
+            ? BorderSide.none
+            : const BorderSide(color: AppColors.outlineVariant),
+      ),
+      icon: selected ? const Icon(Icons.check_rounded, size: 18) : null,
+      label: Text(label),
     ),
   );
 }

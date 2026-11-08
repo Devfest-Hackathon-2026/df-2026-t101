@@ -88,103 +88,324 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
     super.dispose();
   }
 
+  // Figma S3「撮影中（カメラ）」（22:1124）。黒い背景のカメラの画面
   @override
   Widget build(BuildContext context) {
     final left = (maxSec - _sec).clamp(0, maxSec).ceil();
-    return AppPage(
-      title: _recording ? '撮っています（あと$left秒）' : 'カメラで撮る',
-      bottom: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (!_recording)
-            FilledButton.icon(
-              onPressed: _ready && _error == null ? _record : null,
-              icon: const Icon(
-                Icons.fiber_manual_record,
-                color: Color(0xFFE5484D),
-              ),
-              label: const Text('撮り始める（10秒）'),
-            )
-          else
-            FilledButton.icon(
-              onPressed: _sec >= 5 ? () => _eng.stopRecording() : null,
-              icon: const Icon(Icons.stop),
-              label: Text(_sec >= 5 ? '撮り終える' : '5秒以上撮ってください'),
-            ),
-          if (_cameras > 1 && !_recording) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => _eng.switchCamera(),
-              icon: const Icon(Icons.cameraswitch_outlined),
-              label: const Text('カメラを切り替える'),
-            ),
-          ],
-        ],
-      ),
-      children: [
-        AspectRatio(
-          aspectRatio: 3 / 4,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Stack(
-              fit: StackFit.expand,
+    const fg = AppColors.inverseOnSurface;
+    final title = _recording ? '撮っています（あと$left秒）' : 'カメラで撮る';
+    final shutterLabel = _recording
+        ? (_sec >= 5 ? '撮り終える' : '5秒以上撮ってください')
+        : '撮り始める（10秒）';
+    final VoidCallback? onShutter = _recording
+        ? (_sec >= 5 ? () => _eng.stopRecording() : null)
+        : (_ready && _error == null ? _record : null);
+
+    final (statusTone, statusText) = _error != null
+        ? (_Tone.error, _error!)
+        : _recording
+        ? (_handVisible
+              ? (_Tone.success, '手が見えています。そのまま、ゆっくり半周してください。')
+              : (_Tone.warning, '手が見えません。手と1円玉が画面に入るようにしてください。'))
+        : (_Tone.info, _status);
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: AppPage.maxWidth),
+            child: Column(
               children: [
-                HtmlElementView.fromTagName(
-                  tagName: 'div',
-                  onElementCreated: (Object el) {
-                    final div = el as web.HTMLDivElement;
-                    div.style.width = '100%';
-                    div.style.height = '100%';
-                    unawaited(_open(div));
-                  },
+                // 上：閉じる・録画中の札・残り秒数
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 16, 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.close_rounded),
+                        color: fg,
+                        tooltip: '閉じる',
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Semantics(
+                          header: true,
+                          label: title,
+                          child: ExcludeSemantics(
+                            child: _recording
+                                ? Row(
+                                    children: [
+                                      const _RecBadge(),
+                                      const Spacer(),
+                                      Text(
+                                        'あと$left秒',
+                                        style: AppText.titleLarge.copyWith(
+                                          color: fg,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Text(
+                                    title,
+                                    style: AppText.titleLarge.copyWith(
+                                      color: fg,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                if (_recording)
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: 12,
-                    child: LinearProgressIndicator(
-                      value: _sec / maxSec,
-                      minHeight: 8,
-                      borderRadius: BorderRadius.circular(4),
+                Expanded(
+                  // ListView だと、下まで送ったときにカメラの部品が作り直されるので使わない
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight: MediaQuery.sizeOf(context).height * 0.62,
+                            ),
+                            child: AspectRatio(
+                              aspectRatio: 3 / 4,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(28),
+                                child: ColoredBox(
+                                  color: AppColors.inverseSurface,
+                                  child: HtmlElementView.fromTagName(
+                                    tagName: 'div',
+                                    onElementCreated: (Object el) {
+                                      final div = el as web.HTMLDivElement;
+                                      div.style.width = '100%';
+                                      div.style.height = '100%';
+                                      unawaited(_open(div));
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 手が見えているか・進み具合の棒
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+                          child: Column(
+                            children: [
+                              _StatusChip(tone: statusTone, text: statusText),
+                              if (_recording) ...[
+                                const SizedBox(height: 12),
+                                LinearProgressIndicator(value: _sec / maxSec),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(0, 8, 0, 16),
+                          child: InfoCard(
+                            icon: Icons.info_outline_rounded,
+                            child: Text(
+                              'いつもの握った形のまま、手の甲を上にしてこぶしを置きます。指を無理に開かないでください。'
+                              '1円玉はこぶしの前（指の付け根の関節の前）3〜5cmに平らに置き、手と1円玉が画面いっぱいに写るくらい近づけます。'
+                              '親指側の低い所から、手の上を通って小指側まで、ゆっくり半周し、途中でこぶしの前（指の背と関節の出っ張り）も写します。'
+                              'PCのカメラで撮るときは、手は机に置いたまま、カメラ（ノートPCなど）の方を動かしてください。',
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                ),
+                // 下：カメラの切り替え・撮る／撮り終えるボタン
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 56,
+                        height: 56,
+                        child: _cameras > 1 && !_recording
+                            ? IconButton.filled(
+                                onPressed: () => _eng.switchCamera(),
+                                icon: const Icon(Icons.cameraswitch_rounded),
+                                tooltip: 'カメラを切り替える',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: AppColors.inverseSurface,
+                                  foregroundColor: fg,
+                                  fixedSize: const Size(56, 56),
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 40),
+                      _Shutter(
+                        recording: _recording,
+                        label: shutterLabel,
+                        onPressed: onShutter,
+                      ),
+                      const SizedBox(width: 40),
+                      const SizedBox(width: 56, height: 56),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                  child: ExcludeSemantics(
+                    child: Text(
+                      shutterLabel,
+                      textAlign: TextAlign.center,
+                      style: AppText.titleMedium.copyWith(color: fg),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        if (_error != null)
-          InfoCard(
-            color: const Color(0xFFFDECEA),
-            icon: Icons.error_outline,
-            child: Text(_error!),
-          )
-        else
-          InfoCard(
-            icon: _recording
-                ? (_handVisible ? Icons.check_circle : Icons.pan_tool_outlined)
-                : Icons.info_outline,
-            color: _recording && !_handVisible
-                ? const Color(0xFFFFF4E0)
-                : AppColors.card,
-            child: Text(
-              _recording
-                  ? (_handVisible
-                        ? '手が見えています。そのまま、ゆっくり半周してください。'
-                        : '手が見えません。手と1円玉が画面に入るようにしてください。')
-                  : _status,
+      ),
+    );
+  }
+}
+
+/// 「録画中」の札（赤い地に白い点と文字）
+class _RecBadge extends StatelessWidget {
+  const _RecBadge();
+  @override
+  Widget build(BuildContext context) {
+    final onError = Theme.of(context).colorScheme.onError;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+      decoration: BoxDecoration(
+        color: AppColors.error,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: onError, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text('録画中', style: AppText.labelLarge.copyWith(color: onError)),
+        ],
+      ),
+    );
+  }
+}
+
+enum _Tone { info, success, warning, error }
+
+/// カメラの下の状態の札（Figma の「手が見えています」）。色だけで伝えないよう、アイコンも変える
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.tone, required this.text});
+  final _Tone tone;
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final (bg, fg, ic, icon) = switch (tone) {
+      _Tone.info => (
+        AppColors.surfaceContainerHigh,
+        AppColors.onSurface,
+        AppColors.primary,
+        Icons.info_outline_rounded,
+      ),
+      _Tone.success => (
+        AppColors.successContainer,
+        AppColors.onSuccessContainer,
+        AppColors.success,
+        Icons.check_circle_rounded,
+      ),
+      _Tone.warning => (
+        AppColors.warningContainer,
+        AppColors.onWarningContainer,
+        AppColors.warning,
+        Icons.pan_tool_rounded,
+      ),
+      _Tone.error => (
+        AppColors.errorContainer,
+        AppColors.onErrorContainer,
+        AppColors.error,
+        Icons.error_outline_rounded,
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Icon(icon, size: 20, color: ic),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(text, style: AppText.bodyLarge.copyWith(color: fg)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 撮る／撮り終えるの丸いボタン（白い輪の中に、撮る前は赤い丸、撮っている間は赤い四角）。
+/// 押せないときは薄くし、ボタンの下の文で理由を出す
+class _Shutter extends StatelessWidget {
+  const _Shutter({
+    required this.recording,
+    required this.label,
+    required this.onPressed,
+  });
+  final bool recording;
+  final String label;
+  final VoidCallback? onPressed;
+  @override
+  Widget build(BuildContext context) {
+    final size = recording ? 32.0 : 60.0;
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: label,
+      child: Opacity(
+        opacity: onPressed == null ? 0.38 : 1,
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(
+            side: BorderSide(color: AppColors.inverseOnSurface, width: 4),
+          ),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPressed,
+            child: SizedBox(
+              width: 80,
+              height: 80,
+              child: Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    color: AppColors.error,
+                    borderRadius: BorderRadius.circular(recording ? 8 : 30),
+                  ),
+                ),
+              ),
             ),
           ),
-        const InfoCard(
-          child: Text(
-            'いつもの握った形のまま、手の甲を上にしてこぶしを置きます。指を無理に開かないでください。'
-            '1円玉はこぶしの前（指の付け根の関節の前）3〜5cmに平らに置き、手と1円玉が画面いっぱいに写るくらい近づけます。'
-            '親指側の低い所から、手の上を通って小指側まで、ゆっくり半周し、途中でこぶしの前（指の背と関節の出っ張り）も写します。'
-            'PCのカメラで撮るときは、手は机に置いたまま、カメラ（ノートPCなど）の方を動かしてください。',
-          ),
         ),
-      ],
+      ),
     );
   }
 }

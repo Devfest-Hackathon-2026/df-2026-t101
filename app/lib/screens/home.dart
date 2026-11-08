@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../data/api.dart';
+import '../data/files.dart';
 import '../data/session.dart';
 import '../paths.dart';
 import '../router.dart';
@@ -15,7 +19,18 @@ const caseStatusJa = {
   'approved': '確認済み',
 };
 
-/// S1 ホーム（ケース一覧）
+/// 状態の札の色とアイコン（Figma の M3/Status label。色だけで伝えないので、アイコンも変える）
+(StatusTone, IconData) _statusLook(String? status) => switch (status) {
+  'interviewing' => (StatusTone.neutral, Icons.chat_outlined),
+  'measuring' => (StatusTone.neutral, Icons.photo_camera_outlined),
+  'designing' => (StatusTone.neutral, Icons.view_in_ar_rounded),
+  'previewing' => (StatusTone.neutral, Icons.visibility_outlined),
+  'in_review' => (StatusTone.warning, Icons.hourglass_top_rounded),
+  'approved' => (StatusTone.success, Icons.check_circle_outline_rounded),
+  _ => (StatusTone.neutral, Icons.info_outline_rounded),
+};
+
+/// S1 ホーム（ケース一覧）。Figma「S1 ホーム（ケース一覧）」「S1 ホーム（空の状態）」
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -62,64 +77,268 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final empty = _error == null && _cases != null && _cases!.isEmpty;
     return AppPage(
       title: 'わたしの道具',
-      bottom: FilledButton.icon(
-        onPressed: _busy ? null : _create,
-        icon: const Icon(Icons.add),
-        label: const Text('新しく作る'),
-      ),
+      large: true,
+      actions: [
+        _AccountMenu(name: Session.instance.displayName),
+        const SizedBox(width: 4),
+      ],
+      floatingActionButton: empty
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _busy ? null : _create,
+              icon: const Icon(Icons.add_rounded, size: 24),
+              label: const Text('新しく作る'),
+            ),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${Session.instance.displayName} さん',
-                style: const TextStyle(color: AppColors.sub),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Session.instance.signOut(),
-              child: const Text('ログアウト'),
-            ),
-          ],
-        ),
         if (_error != null)
           ErrorCard(message: '読み込めませんでした（$_error）', onRetry: _load)
-        else if (_cases == null)
-          for (var i = 0; i < 3; i++)
-            Container(
-              height: 76,
-              margin: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEDEAE3),
-                borderRadius: BorderRadius.circular(16),
-              ),
-            )
-        else if (_cases!.isEmpty)
-          const InfoCard(
-            icon: Icons.brush_outlined,
-            child: Text('まだ道具がありません。やりたいことを教えてください。'),
-          )
-        else
+        else if (_cases == null) ...[
+          const SectionLabel('作りかけ・作った道具'),
+          for (var i = 0; i < 3; i++) const _CardSkeleton(),
+        ] else if (empty)
+          _EmptyState(onCreate: _busy ? null : _create)
+        else ...[
+          const SectionLabel('作りかけ・作った道具'),
           for (final c in _cases!)
-            Card(
-              margin: const EdgeInsets.symmetric(vertical: 6),
-              child: ListTile(
-                minVerticalPadding: 14,
-                leading: const Icon(Icons.back_hand_outlined),
-                title: Text('${c['title'] ?? '道具'}'),
-                subtitle: Text(
-                  '${caseStatusJa[c['status']] ?? c['status']}　${(c['updated_at'] ?? '').toString().split('.').first.replaceAll('T', ' ')}',
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
-                  await Navigator.of(context).pushNamed(continueRoute(c));
-                  _load();
-                },
-              ),
+            _CaseCard(
+              key: ValueKey(c['case_id']),
+              data: c,
+              onTap: () async {
+                await Navigator.of(context).pushNamed(continueRoute(c));
+                _load();
+              },
             ),
+          const SizedBox(height: 8),
+          const InfoCard(
+            tone: NoticeTone.info,
+            child: Text('PCで大きく見たいときは、同じGoogleアカウントでログインしてください。'),
+          ),
+        ],
       ],
     );
   }
+}
+
+/// 右上のアカウントのボタン（名前とログアウト）
+class _AccountMenu extends StatelessWidget {
+  const _AccountMenu({required this.name});
+  final String name;
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+    tooltip: 'アカウント',
+    icon: const Icon(Icons.account_circle_outlined),
+    onSelected: (v) {
+      if (v == 'logout') Session.instance.signOut();
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(
+        enabled: false,
+        child: Text('$name さん', style: AppText.titleSmall),
+      ),
+      const PopupMenuItem(
+        value: 'logout',
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.logout_rounded),
+          title: Text('ログアウト'),
+        ),
+      ),
+    ],
+  );
+}
+
+/// 空の状態（大きな手のアイコン＋「新しく作る」）
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onCreate});
+  final VoidCallback? onCreate;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 48),
+    child: Column(
+      children: [
+        Container(
+          width: 160,
+          height: 160,
+          decoration: BoxDecoration(
+            color: AppColors.secondaryContainer,
+            borderRadius: BorderRadius.circular(64),
+          ),
+          child: const Icon(
+            Icons.back_hand_outlined,
+            size: 80,
+            color: AppColors.onSecondaryContainer,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'まだ道具がありません',
+          textAlign: TextAlign.center,
+          style: AppText.headlineSmall,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'やりたいことを教えてください。質問に答えて手を撮ると、形ができます。',
+          textAlign: TextAlign.center,
+          style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: onCreate,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('新しく作る'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 読み込み中：カードの形の灰色の枠
+class _CardSkeleton extends StatelessWidget {
+  const _CardSkeleton();
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 96,
+    margin: const EdgeInsets.symmetric(vertical: 4),
+    decoration: BoxDecoration(
+      color: AppColors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(16),
+    ),
+  );
+}
+
+/// ケースのカード（Figma の M3/Case card）。左に最新の版の画像（views/iso.png）、なければ状態のアイコン
+class _CaseCard extends StatefulWidget {
+  const _CaseCard({super.key, required this.data, required this.onTap});
+  final Map<String, dynamic> data;
+  final VoidCallback onTap;
+  @override
+  State<_CaseCard> createState() => _CaseCardState();
+}
+
+class _CaseCardState extends State<_CaseCard> {
+  Uint8List? _thumb;
+  bool _rejected = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDesign();
+  }
+
+  /// 最新の版を読み、画像と「差し戻し」かどうかを取る。失敗してもカードはそのまま出す
+  Future<void> _loadDesign() async {
+    final c = widget.data;
+    final d = c['current_design_id'] as String?;
+    if (d == null) return;
+    try {
+      final r = await Api.instance.get('/v1/cases/${c['case_id']}/designs/$d');
+      final design = Map<String, dynamic>.from((r is Map && r['design'] != null) ? r['design'] : r);
+      final rejected = (design['approval'] as Map?)?['status'] == 'rejected';
+      final iso = ((design['files'] as Map?)?['views'] as Map?)?['iso'] as String?;
+      if (mounted && rejected) setState(() => _rejected = true);
+      if (iso == null) return;
+      final ref = await Files.resolve(iso);
+      final res = await http.get(Uri.parse(ref.url), headers: ref.headers);
+      if (res.statusCode >= 400 || res.bodyBytes.isEmpty) return;
+      if (mounted) setState(() => _thumb = res.bodyBytes);
+    } catch (_) {
+      // 画像がなくても一覧は使える
+    }
+  }
+
+  String _updated(Object? v) {
+    final t = DateTime.tryParse('${v ?? ''}')?.toLocal();
+    if (t == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '更新 ${t.month}/${t.day} ${two(t.hour)}:${two(t.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.data;
+    final status = c['status'] as String?;
+    var (tone, icon) = _statusLook(status);
+    var label = caseStatusJa[status] ?? '$status';
+    if (_rejected && status != 'approved') {
+      (tone, icon) = (StatusTone.error, Icons.error_outline_rounded);
+      label = '差し戻し';
+    }
+    final title = '${c['title'] ?? '道具'}';
+    final updated = _updated(c['updated_at']);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Semantics(
+        button: true,
+        label: '$title、$label、$updated',
+        excludeSemantics: true,
+        child: Material(
+          color: AppColors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              child: Row(
+                children: [
+                  _Thumb(bytes: _thumb, statusIcon: icon),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: AppText.titleMedium),
+                        const SizedBox(height: 4),
+                        StatusLabel(label: label, tone: tone, icon: icon),
+                        if (updated.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            updated,
+                            style: AppText.bodySmall.copyWith(
+                              color: AppColors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 56×56 の小さな画像。版の画像がなければ、状態のアイコンを出す
+class _Thumb extends StatelessWidget {
+  const _Thumb({required this.bytes, required this.statusIcon});
+  final Uint8List? bytes;
+  final IconData statusIcon;
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(12),
+    child: Container(
+      width: 56,
+      height: 56,
+      color: AppColors.surfaceContainerHighest,
+      child: bytes != null
+          ? Image.memory(
+              bytes!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Icon(statusIcon, color: AppColors.primary),
+            )
+          : Icon(statusIcon, color: AppColors.primary),
+    ),
+  );
 }

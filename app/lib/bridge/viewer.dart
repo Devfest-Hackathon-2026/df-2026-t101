@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import '../data/files.dart';
+import '../widgets/ui.dart';
 
 /// web/js/viewer.js が用意する window.jijoguViewer
 extension type _Viewer._(JSObject _) implements JSObject {
@@ -153,10 +154,11 @@ class _Viewer3DState extends State<Viewer3D> {
   Widget build(BuildContext context) {
     return Semantics(
       label: widget.label,
+      // Figma の 3D表示の面：surfaceContainerHigh・角丸28（three.js は背景を透かして描く）
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(28),
         child: ColoredBox(
-          color: const Color(0xFFF4F1EA),
+          color: AppColors.surfaceContainerHigh,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -174,7 +176,13 @@ class _Viewer3DState extends State<Viewer3D> {
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Text(_error!, textAlign: TextAlign.center),
+                    child: Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: AppText.bodyLarge.copyWith(
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                 ),
             ],
