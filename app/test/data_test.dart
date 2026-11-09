@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jijogu_app/data/api_error.dart';
-import 'package:jijogu_app/data/attachments.dart';
-import 'package:jijogu_app/data/mock_backend.dart';
-import 'package:jijogu_app/data/requirements.dart';
-import 'package:jijogu_app/paths.dart';
+import 'package:jijogu_app/app/paths.dart';
+import 'package:jijogu_app/core/api/api_error.dart';
+import 'package:jijogu_app/core/api/mock_backend.dart';
+import 'package:jijogu_app/core/models/attachments.dart';
+import 'package:jijogu_app/core/models/requirements.dart';
 
 void main() {
   group('選択式の答え（api.md §3.2 の名前）', () {

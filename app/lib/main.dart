@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'data/session.dart';
-import 'router.dart';
-import 'widgets/ui.dart';
+import 'package:jijogu_app/app/router.dart';
+import 'package:jijogu_app/core/session.dart';
+import 'package:jijogu_app/core/ui/ui.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

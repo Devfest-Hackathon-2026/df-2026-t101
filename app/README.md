@@ -4,11 +4,25 @@ Flutter Web の画面と、ブラウザの中で動く採寸エンジン（TypeS
 
 ## フォルダ
 
+`lib/` は機能ごとに分けています。画面とその画面だけで使う物は `features/<機能>/`、いくつもの機能で使う物は `core/` に置きます。
+
 | 場所 | 中身 |
 |---|---|
-| `lib/screens/` | 画面（S0 ログイン〜S10 ダウンロード。S9 は OT の確認） |
-| `lib/data/` | 生成APIの呼び出し（`api.dart`）、ログイン（`session.dart`）、Storage のファイル（`files.dart`）、モック（`mock_backend.dart`） |
-| `lib/bridge/` | 採寸エンジン（`window.jijoguMeasure`）と three.js（`window.jijoguViewer`）を `dart:js_interop` で呼ぶ所 |
+| `lib/main.dart` | 起動 |
+| `lib/app/` | 画面の行き先（`router.dart`）と URL（`paths.dart`） |
+| `lib/core/config.dart`・`session.dart` | 接続先などの設定、ログイン |
+| `lib/core/api/` | 生成APIの呼び出し（`api.dart`）、エラーの読み取り（`api_error.dart`）、モック（`mock_backend.dart`） |
+| `lib/core/models/` | 聞き取りの答え（`requirements.dart`）、取り付け具（`attachments.dart`） |
+| `lib/core/storage/` | Storage のファイル（`files.dart`） |
+| `lib/core/ui/` | 色・文字（`theme.dart`）、共通の部品（`widgets.dart`）、道具の太さの入力（`tool_fields.dart`）。`ui.dart` で両方を読み込む |
+| `lib/core/viewer/` | three.js の3D表示（`window.jijoguViewer` を `dart:js_interop` で呼ぶ） |
+| `lib/features/login/` | S0 ログイン |
+| `lib/features/home/` | S1 ホーム（ケースの一覧） |
+| `lib/features/interview/` | S2 聞き取り |
+| `lib/features/measure/` | S3〜S5 採寸：撮影の前（`capture_screen`）、カメラ（`live_capture_screen`）、1円玉の確認（`coin_screen`）、解析（`analyze_screen`）、結果の確認と点の修正（`measure_confirm_screen`・`point_editor`）、採寸エンジンの呼び出し（`measure_engine`、`window.jijoguMeasure`） |
+| `lib/features/design/` | S6〜S8 形を作る・直す、OT に確認を頼む |
+| `lib/features/review/` | S9 OT の確認 |
+| `lib/features/print/` | S10 ダウンロード |
 | `web_engine/src/` | 採寸エンジン：アプリの中のカメラ、MediaPipe、1円玉の自動検出（OpenCV.js、Web Worker）、集計、hand-mesh の呼び出し |
 | `web/js/` | `measure_engine.js`・`coin_worker.js`（web_engine をまとめたもの）、`viewer.js`（three.js） |
 | `web/demo/` | モックで使う3Dの見本。形を変えたら `scripts/make_demo_assets.py` で作り直す |
@@ -32,14 +46,14 @@ cd app
 flutter run -d chrome --dart-define=MOCK_API=true
 ```
 
-生成APIと hand-mesh の代わりに、`lib/data/mock_backend.dart` が [docs/api.md](../docs/api.md) の例の形で答えます。ログインは名前を入れるだけ（`AUTH_MODE=dev`）。
+生成APIと hand-mesh の代わりに、`lib/core/api/mock_backend.dart` が [docs/api.md](../docs/api.md) の例の形で答えます。ログインは名前を入れるだけ（`AUTH_MODE=dev`）。
 
 ### 手元の API につなぐ
 
 1. 生成API を `http://localhost:8080`、hand-mesh を `http://localhost:8081` で動かす（手順は [docs/notes/prototype-lessons.md](../docs/notes/prototype-lessons.md) と [hand_mesh/README.md](../hand_mesh/README.md)）
 2. `cd app && flutter run -d chrome`
 
-接続先は `--dart-define=API_BASE=...`・`HAND_MESH_BASE=...` で変えられます（[lib/config.dart](lib/config.dart)）。
+接続先は `--dart-define=API_BASE=...`・`HAND_MESH_BASE=...` で変えられます（[lib/core/config.dart](lib/core/config.dart)）。
 
 ### 本番（Firebase Hosting）
 

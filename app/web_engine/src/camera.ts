@@ -128,10 +128,6 @@ export async function switchCamera() {
   return { cameras: cam.devices.length, label: cam.devices[cam.deviceIndex]?.label ?? '' };
 }
 
-export function cameraStatus() {
-  return { hand: !!cam?.status.hand, recording: !!cam?.recording };
-}
-
 /** 録画（フレームをメモリに取っておく）。止めるか maxSec 秒で終わり、候補フレームを返す */
 export function startRecording(maxSec: number, onTick?: (sec: number, hand: boolean) => void): Promise<Candidate[]> {
   const c = cam;

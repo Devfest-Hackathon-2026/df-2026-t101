@@ -1,4 +1,4 @@
-// 採寸エンジン（docs/measurement.md）。動画（または写真2枚）をブラウザの中だけで解析し、採寸値のJSONを作る。
+// 採寸エンジン（docs/measurement.md）。動画をブラウザの中だけで解析し、採寸値のJSONを作る。
 // Flutter からは window.jijoguMeasure を dart:js_interop で呼ぶ。動画・フレームはこのモジュールのメモリの外に出さない。
 // 例外：角度の推定のため、手を切り抜いたフレーム（最大8枚）だけを、同意を得て hand-mesh に送る（§11）。
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
@@ -42,16 +42,14 @@ const st: {
   hand?: HandLandmarker;
   coinRef?: { cx: number; cy: number; major: number };  // 確かめた1円玉（動画で追いかける出発点）
   frames: Frame[];
-  mode: 'video' | 'photos';
   coinSeed?: { x: number; y: number };
-  coinSeeds: Map<number, { x: number; y: number }>;  // 写真モード：写真ごとの1円玉の位置
   coinManual: boolean;
   coinTapped: boolean;                // 1円玉をタップで指定した（自動検出から直した）
   source: 'live_camera' | 'file';
   duration: number;
   sampled: number;
   result?: any;
-} = { frames: [], mode: 'video', coinManual: false, coinTapped: false, source: 'live_camera', duration: 0, sampled: 0, coinSeeds: new Map() };
+} = { frames: [], coinManual: false, coinTapped: false, source: 'live_camera', duration: 0, sampled: 0 };
 
 const base = () => new URL('.', document.baseURI).href;
 
@@ -119,7 +117,7 @@ async function initOnce(): Promise<void> {
   startOpenCV();  // 待たない
 }
 
-function pickFile(accept: string, multiple = false): Promise<File[]> {
+function pickFile(accept: string): Promise<File[]> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (files: File[]) => {
@@ -132,7 +130,6 @@ function pickFile(accept: string, multiple = false): Promise<File[]> {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
-    input.multiple = multiple;
     input.onchange = () => finish(Array.from(input.files ?? []));
     // 選ばずに閉じたとき。これがないと待ったままになり、ボタンが押せないまま「選んでください」が残った（2026-11-09）。
     // cancel が来ないブラウザ（iPhone の Safari で左上の×で閉じたとき）のために、ページに戻ってきたら少し待って
@@ -211,21 +208,7 @@ function useCandidates(cands: Frame[], duration: number) {
   // 1秒あたりに残す枚数：取り出した枚数の半分（最大 KEEP_PER_SEC）。1秒に6枚なら3枚、3枚なら2枚
   const keep = Math.min(KEEP_PER_SEC, Math.max(1, Math.ceil(cands.length / Math.max(1, duration) / 2)));
   st.frames = [...bySec.values()].flatMap((fs) => fs.sort((a, b) => b.sharp - a.sharp).slice(0, keep)).sort((a, b) => a.t - b.t);
-  st.mode = 'video';
-  st.coinSeeds = new Map();
   st.coinSeed = undefined;
-}
-
-async function loadImages(files: File[]) {
-  st.frames = [];
-  for (const [i, f] of files.slice(0, 2).entries()) {
-    const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' });
-    st.frames.push({ t: i, canvas: canvasOf(bmp, bmp.width, bmp.height), sharp: 0 });
-    bmp.close();
-  }
-  st.mode = 'photos';
-  st.sampled = st.frames.length;
-  st.duration = 0;
 }
 
 const PICK_BACK_WAIT_MS = 2500;  // 選ぶ画面からページに戻ってから、選んだファイルが届くのを待つ時間
@@ -390,15 +373,12 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     // 崩れたフレームが多いと手が25%小さく測られ、ベルトのスリットがレールの台と重なった（2026-11-09。
     // IMG_0147 の比：崩れたフレーム 0.46〜1.01、ふつうのフレーム 1.18〜1.44。横から見たフレームは幅が縮むので大きく出る）
     if (G.dist2(f.lm[0], f.lm[9]) < PALM_MIN_PROPORTION * G.dist2(f.lm[5], f.lm[17])) { f.reject = 'HAND_POINTS_OFF'; continue; }
-    // 動画は前のフレームの中心で追いかける。写真は1枚ずつ別の向きなので、写真ごとにタップした位置を使う
-    const tapped = st.coinSeeds.get(i);
-    const { coin } = st.mode === 'photos'
-      ? await findCoin(f, { near: tapped ? { x: tapped.x * f.canvas.width, y: tapped.y * f.canvas.height } : undefined })
-      : await findCoin(f, { prev });
+    // 前のフレームの1円玉の中心で追いかける
+    const { coin } = await findCoin(f, { prev });
     if (!coin) { f.reject = 'NO_COIN'; continue; }
     const s = coin.major / COIN_MM;
     // 1円玉の大きさが急に変わったら、別の物に乗り換えたとみなす。カメラを動かして撮るので、距離の変化の分（35%まで）は許す（11/9）
-    if (st.mode === 'video' && prevS && Math.abs(s - prevS) / prevS > 0.35) { f.reject = 'COIN_JUMP'; continue; }
+    if (prevS && Math.abs(s - prevS) / prevS > 0.35) { f.reject = 'COIN_JUMP'; continue; }
     f.coin = coin; f.s = s; prevS = s;
     f.coinOnHand = onBackOfHand({ x: coin.cx, y: coin.cy }, f.lm);
     prev = { cx: coin.cx, cy: coin.cy, major: coin.major };
@@ -408,14 +388,14 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   }
   progress?.('まとめています', n, n);
   const ok = st.frames.filter((f) => f.s);
-  if (ok.length < (st.mode === 'photos' ? 2 : 1)) {
+  if (!ok.length) {
     const why: Record<string, string> = { NO_HAND: '手が見つからない', MULTIPLE_HANDS: '手が2つ以上写っている', HAND_AT_EDGE: '手が画面の端にかかっている', HAND_POINTS_OFF: '手首の点がずれた（真上から撮ったときに起きやすい。横からも撮ってください）',NO_COIN: '1円玉が見つからない', COIN_JUMP: '1円玉の大きさが急に変わった' };
     const counts: Record<string, number> = {};
     for (const f of st.frames) if (f.reject) counts[f.reject] = (counts[f.reject] ?? 0) + 1;
     const detail = Object.entries(counts).map(([k, v]) => `${why[k] ?? k}：${v}枚`).join('、');
     throw new Error(`手と1円玉が両方写ったフレームが足りませんでした（${detail}）。撮り直してください。`);
   }
-  if (st.mode === 'video' && ok.length < 10) warnings.add('FEW_FRAMES');
+  if (ok.length < 10) warnings.add('FEW_FRAMES');
   if (st.coinManual) warnings.add('COIN_MANUAL');
   // 1円玉は手の甲のまん中に置く（2026-11-09）。机の上の1円玉はこぶしの高さの分だけカメラから遠く、小さく写るので、
   // 手が1.2〜1.5倍に大きく測られる（実測：こぶしの高さ 6〜7cm が約10cm に出た）。半分より多くのフレームで机の上なら知らせる
@@ -426,7 +406,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   const topFrames = [...ok].sort((a, b) => b.palmArea! - a.palmArea!).slice(0, Math.max(1, Math.ceil(ok.length * 0.2)));
   for (const f of ok) if (f.palmArea! > 0.7 * maxArea) f.side = 'top';
   const views = new Set(ok.map((f) => f.side).filter(Boolean) as string[]);
-  if (st.mode === 'video' && views.size < 3) warnings.add('VIEW_BIASED');
+  if (views.size < 3) warnings.add('VIEW_BIASED');
 
   const fingers: any = {};
   const anglesA: any = {}, anglesB: any = {};
@@ -434,8 +414,8 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     const [a, b, c, d] = G.CHAIN[fg];
     const segLen = (i: number, j: number) => ok.map((f) => G.dist2(f.lm![i], f.lm![j]) / f.s!);
     const raw = [segLen(a, b), segLen(b, c), segLen(c, d)];
-    const lengths = raw.map((xs) => G.topMedian(xs, 0.2, st.mode === 'photos' ? 1 : 3));
-    raw.forEach((xs, k) => { if (st.mode === 'video' && G.iqr(xs) > 0.2 * lengths[k]) warnings.add('LENGTH_UNSTABLE'); });
+    const lengths = raw.map((xs) => G.topMedian(xs, 0.2, 3));
+    raw.forEach((xs, k) => { if (G.iqr(xs) > 0.2 * lengths[k]) warnings.add('LENGTH_UNSTABLE'); });
     // 角度A：その指が長く写ったフレーム（横向き）の2Dの角度の中央値
     const lat = [...ok].sort((x, y) => y.fingerLen![fg] - x.fingerLen![fg]).slice(0, Math.max(1, Math.ceil(ok.length * 0.2)));
     const ang2 = (f: Frame) => {
@@ -484,7 +464,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     mcpPos[fg] = [r1(G.median(xs)), r1(Math.max(0, G.median(ys)))];
   }
   // 手の甲の4区間（§7.1。倍率に使う）：長く写ったフレームの上位20%の中央値
-  const palm = palmSegments(ok, (f) => f.lm!, (f) => f.s!, st.mode === 'photos' ? 1 : 3);
+  const palm = palmSegments(ok, (f) => f.lm!, (f) => f.s!, 3);
   // 比較用の太さ：隣り合う指のPIPの間隔（§7.3。生成APIはメッシュから出し直す）
   const gap = (i: number, j: number) => G.median(topFrames.map((f) => G.dist2(f.lm![i], f.lm![j]) / f.s!));
   const g1 = gap(6, 10), g2 = gap(10, 14), g3 = gap(14, 18);
@@ -519,9 +499,9 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     schema_version: '2.2',
     hand_side: 'right',
     capture: {
-      mode: st.mode,
+      mode: 'video',
       source: st.source,
-      duration_s: st.mode === 'video' ? r1(clamp(st.duration, 0.1, MAX_SECONDS)) : undefined,
+      duration_s: r1(clamp(st.duration, 0.1, MAX_SECONDS)),
       frames_sampled: Math.min(90, Math.max(1, st.sampled)),
       frames_used: Math.min(60, ok.length),   // schemas/measurement.schema.json の上限（1秒あたり1〜3枚×最大25秒）
       mesh_consent: true,
@@ -641,11 +621,11 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 const r4 = (x: number) => Math.round(x * 10000) / 10000;
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 
-function keepCoin(f: Frame, index: number, coin: Ellipse | null) {
+/** 確かめた1円玉を、動画で追いかける出発点にする */
+function keepCoin(f: Frame, coin: Ellipse | null) {
   if (!coin) return;
-  const c = { x: coin.cx / f.canvas.width, y: coin.cy / f.canvas.height };
-  st.coinSeeds.set(index, c);
-  if (index === 0) { st.coinSeed = c; st.coinRef = { cx: coin.cx, cy: coin.cy, major: coin.major }; }
+  st.coinSeed = { x: coin.cx / f.canvas.width, y: coin.cy / f.canvas.height };
+  st.coinRef = { cx: coin.cx, cy: coin.cy, major: coin.major };
   st.coinManual = false;
 }
 
@@ -655,7 +635,7 @@ const api = {
   /** 動画を選ぶ（スマホではカメラが開く）。最初のフレームを返す */
   async pickVideo(progress?: (stage: string, i: number, n: number) => void) {
     // capture を付けると iPhone ではカメラが開く。撮った動画をライブラリから選べるように付けない（2026-11-09）
-    const files = await pickFile('video/*', false);
+    const files = await pickFile('video/*');
     if (!files.length) return JSON.stringify({ cancelled: true });
     await loadVideoFile(files[0], progress);
     st.source = 'file';
@@ -681,32 +661,23 @@ const api = {
   },
   stopRecording() { Cam.stopRecording(); },
   stopCamera() { Cam.stopCamera(); },
-  cameraStatus() { return JSON.stringify(Cam.cameraStatus()); },
-  /** 写真2枚（上から・親指側の横から）を選ぶ */
-  async pickPhotos() {
-    const files = await pickFile('image/*', true);
-    if (files.length < 2) return JSON.stringify({ cancelled: true, message: '写真を2枚選んでください' });
-    await loadImages(files);
-    st.source = 'file';
-    return JSON.stringify({ frames: st.frames.length, first: toJpeg(st.frames[0].canvas), width: st.frames[0].canvas.width, height: st.frames[0].canvas.height });
-  },
-  /** i枚目のフレームで1円玉を自動で探す（タップなし）。楕円を重ねた画像を返す */
-  async autoCoin(index = 0) {
-    const f = st.frames[index];
+  /** 最初のフレームで1円玉を自動で探す（タップなし）。楕円を重ねた画像を返す */
+  async autoCoin() {
+    const f = st.frames[0];
     await paint();
     await init();
     const { coin, small } = await findCoin(f);
-    keepCoin(f, index, coin);
+    keepCoin(f, coin);
     return JSON.stringify({ ok: !!coin, too_small: small, auto: true, major_px: coin?.major ?? null, image: drawOverlay(f, { coin, landmarks: false }) });
   },
   /** 自動で違う物を選んだとき、1円玉をタップした位置（0〜1）で探し直す */
-  async setCoin(x: number, y: number, index = 0) {
-    const f = st.frames[index];
+  async setCoin(x: number, y: number) {
+    const f = st.frames[0];
     await paint();
     await init();
     const tap = { x: x * f.canvas.width, y: y * f.canvas.height };
     const { coin, small } = await findCoin(f, { near: tap });
-    keepCoin(f, index, coin);
+    keepCoin(f, coin);
     if (coin) st.coinTapped = true;
     return JSON.stringify({ ok: !!coin, too_small: small, major_px: coin?.major ?? null, image: drawOverlay(f, { coin, landmarks: false, tap }) });
   },
@@ -725,14 +696,8 @@ const api = {
   async applyManualPoints(json: string) {
     return JSON.stringify(applyManualPoints(JSON.parse(json)));
   },
-  /** i枚目のフレームの画像（写真モードで2枚目の1円玉を指定するため） */
-  async frameImage(index: number) {
-    const f = st.frames[index];
-    if (!f) throw new Error('その写真はありません');
-    return JSON.stringify({ first: toJpeg(f.canvas), width: f.canvas.width, height: f.canvas.height });
-  },
   /** 動画とフレームを捨てる */
-  reset() { Cam.stopCamera(); st.frames = []; st.result = undefined; st.coinSeed = undefined; st.coinRef = undefined; st.coinSeeds = new Map(); st.coinTapped = false; st.coinManual = false; },
+  reset() { Cam.stopCamera(); st.frames = []; st.result = undefined; st.coinSeed = undefined; st.coinRef = undefined; st.coinTapped = false; st.coinManual = false; },
 };
 
 /** Dart から扱いやすいよう、失敗も JSON（{"error": {...}}）で返す */
@@ -743,7 +708,6 @@ const safe = (fn: (...a: any[]) => Promise<string>) => async (...a: any[]) => {
 (window as any).jijoguMeasure = {
   init: safe(async () => { await api.init(); return '{}'; }),
   pickVideo: safe(api.pickVideo),
-  pickPhotos: safe(api.pickPhotos),
   autoCoin: safe(api.autoCoin),
   setCoin: safe(api.setCoin),
   startCamera: safe(api.startCamera),
@@ -751,8 +715,6 @@ const safe = (fn: (...a: any[]) => Promise<string>) => async (...a: any[]) => {
   record: safe(api.record),
   stopRecording: api.stopRecording,
   stopCamera: api.stopCamera,
-  cameraStatus: api.cameraStatus,
-  frameImage: safe(api.frameImage),
   analyze: safe(api.analyze),
   callHandMesh: safe(api.callHandMesh),
   useMockHandMesh: safe(api.useMockHandMesh),

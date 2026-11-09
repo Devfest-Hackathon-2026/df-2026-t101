@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jijogu_app/data/api_error.dart';
-import 'package:jijogu_app/data/attachments.dart';
-import 'package:jijogu_app/data/mock_backend.dart';
-import 'package:jijogu_app/data/requirements.dart';
+import 'package:jijogu_app/core/api/api_error.dart';
+import 'package:jijogu_app/core/api/mock_backend.dart';
+import 'package:jijogu_app/core/models/attachments.dart';
+import 'package:jijogu_app/core/models/requirements.dart';
 
 /// S7 で取り付け具を切り替え・足す・直す（ADR-0014 §4・§5）。画面の決め方は純粋な関数で、流れはモックで確かめる
 void main() {

@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jijogu_app/data/attachments.dart';
-import 'package:jijogu_app/data/mock_backend.dart';
-import 'package:jijogu_app/data/requirements.dart';
+import 'package:jijogu_app/core/api/mock_backend.dart';
+import 'package:jijogu_app/core/models/attachments.dart';
+import 'package:jijogu_app/core/models/requirements.dart';
 
 /// S10 の行・S9 の取り付け具の一覧（ADR-0014 §5）。行の決め方は純粋な関数で、流れはモックで確かめる
 void main() {
