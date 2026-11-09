@@ -58,3 +58,6 @@ firebase-debug.log
 scad/library/
 # 出力したSTL・画像の置き場（本番のケースの手から作ったもの＝個人データ。git に入れない）
 /3Dモデル/
+
+# Claude Code の作業メモ（あげない）
+.superpowers/
