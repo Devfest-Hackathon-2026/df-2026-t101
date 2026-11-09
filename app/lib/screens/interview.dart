@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../data/api.dart';
+import '../data/attachments.dart' show toolJa;
 import '../data/requirements.dart';
 import '../router.dart';
+import '../widgets/tool_fields.dart';
 import '../widgets/ui.dart';
 
 /// S2 やりたいこと（選択式の7問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
@@ -20,17 +22,21 @@ const _shaftJa = {
   'unknown': 'わからない',
 };
 
-/// Q3 の選択肢の1行目と2行目（Figma S2a Q3 の並び）
-const _shaftRows = <String, (String, String)>{
-  'thin': ('細い', '約6mm'),
-  'medium': ('ふつう', '約8.5mm'),
-  'thick': ('太い', '約11.5mm'),
-  'unknown': ('わからない', '道具ごとの目安にします（あとで確かめます）'),
+/// まとめの「やりたいこと」
+const _actJa = {
+  'draw': '筆で絵を描く',
+  'write': 'ペンで字を書く',
+  'eat': 'スプーンで食べる',
+  'other': 'その他',
 };
+
+/// 同じ道具が2つあるときの呼び分け
+const _actShort = {'draw': '絵を描く', 'write': '字を書く', 'eat': '食べる', 'other': 'その他'};
 
 class _InterviewScreenState extends State<InterviewScreen> {
   final a = Answers();
   int _q = 0; // 0〜6：選択式、7：チャット、8：まとめ
+  int _t = 0; // 質問3・4で答えている道具（a.tools の番号）
   bool _mmInput = false;
   final _chat = <(bool, String)>[]; // (自分か, 文)
   final _input = TextEditingController();
@@ -77,11 +83,61 @@ class _InterviewScreenState extends State<InterviewScreen> {
     super.dispose();
   }
 
+  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら今までの7問
+  List<(int, int)> get _steps => interviewSteps(a.tools.length);
+
+  int get _pos => _steps.indexOf((_q, _t)).clamp(0, _steps.length - 1);
+
+  void _go(int q, [int t = 0]) {
+    if (t != _t || q == 0) _mmInput = false;
+    _q = q;
+    _t = t;
+  }
+
+  void _next() {
+    final s = _steps;
+    final i = _pos + 1;
+    if (i < s.length) {
+      _go(s[i].$1, s[i].$2);
+    } else {
+      _go(7);
+    }
+  }
+
+  void _prev() {
+    final p = _steps[_pos - 1];
+    _go(p.$1, p.$2);
+  }
+
+  ToolAnswer get _tool => a.tools[_t];
+
+  /// 今の問いに答えてあるか（質問3・4は今の道具だけを見る）
+  bool get _answered => switch (_q) {
+    2 => _tool.toolDmm != null || _tool.shaftSize != null,
+    3 => _tool.shaftShape != null,
+    _ => a.isAnswered(_q),
+  };
+
+  /// 道具の呼び名（同じ道具が2つあれば、やりたいことを添える）
+  String _toolName(int i) {
+    final t = a.tools[i];
+    final name = toolJa[t.toolType] ?? '道具';
+    final same = a.tools.where((o) => o.toolType == t.toolType).length > 1;
+    return same ? '$name（${_actShort[t.activity] ?? 'その他'}）' : name;
+  }
+
   void _set(VoidCallback f) {
     setState(f);
+    final at = (_q, _t);
     Future<void>.delayed(const Duration(milliseconds: 200), () {
-      if (mounted && _q < 7 && a.isAnswered(_q) && !(_q == 2 && _mmInput)) {
-        setState(() => _q++);
+      // 質問1はいくつでも選べるので、自動では進まない
+      if (mounted &&
+          _q > 0 &&
+          _q < 7 &&
+          (_q, _t) == at &&
+          _answered &&
+          !(_q == 2 && _mmInput)) {
+        setState(_next);
       }
     });
   }
@@ -184,38 +240,41 @@ class _InterviewScreenState extends State<InterviewScreen> {
     if (_q == 7) return _chatPage();
     if (_q == 8) return _summaryPage();
     final (title, choices) = _question(_q);
+    final pos = _pos;
+    final total = interviewTotal(a.tools.length);
     return AppPage(
       title: 'やりたいこと',
-      onBack: _q == 0
+      onBack: pos == 0
           ? () => Navigator.of(context).pop()
-          : () => setState(() => _q--),
+          : () => setState(_prev),
       bottom: _q == 2 && _mmInput
           ? _wide(
               FilledButton(
                 onPressed: () => setState(() {
                   _mmInput = false;
-                  a.shaftSize = null;
-                  _q++;
+                  _tool.toolDmm ??= 8.5;
+                  _tool.shaftSize = null;
+                  _next();
                 }),
-                child: Text('${(a.toolDmm ?? 8.5).toStringAsFixed(1)}mmで決める'),
+                child: Text('${(_tool.toolDmm ?? 8.5).toStringAsFixed(1)}mmで決める'),
               ),
             )
-          : (a.isAnswered(_q)
+          : (_answered
                 ? _wide(
                     FilledButton(
-                      onPressed: () => setState(() => _q++),
+                      onPressed: () => setState(_next),
                       child: const Text('次へ'),
                     ),
                   )
                 : null),
       children: [
-        // 進み具合（Figma：「質問 1 / 7」＋ M3 の進み具合の棒）
+        // 進み具合（Figma：「質問 1 / 7」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
         Text(
-          '質問 ${_q + 1} / 7',
+          '質問 ${pos + 1} / $total',
           style: AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant),
         ),
         const SizedBox(height: 8),
-        LinearProgressIndicator(value: (_q + 1) / 7),
+        LinearProgressIndicator(value: (pos + 1) / total),
         const SizedBox(height: 12),
         Semantics(
           header: true,
@@ -238,27 +297,35 @@ class _InterviewScreenState extends State<InterviewScreen> {
           selected: sel,
           onTap: () => _set(f),
         );
+    // 質問1：押すたびに選ぶ／外す（選んだ順に道具が並ぶ）
+    Widget m(String label, String act, String sub) => ChoiceButton(
+      label: label,
+      sub: sub,
+      multi: true,
+      selected: a.hasActivity(act),
+      onTap: () => setState(() => a.toggleActivity(act)),
+    );
+    // 質問3・4の見出し。道具が2つ以上なら道具の名前を前に付ける
+    final tool = a.tools.length > 1 && (q == 2 || q == 3)
+        ? '${_toolName(_t)}：'
+        : '';
     switch (q) {
       case 0:
         return (
           '何をしたいですか',
           [
-            c('絵を描く（筆）', a.activity == 'draw', () {
-              a.activity = 'draw';
-              a.toolType = 'brush';
-            }, '筆を挟むクリップを作ります'),
-            c('字を書く（ペン）', a.activity == 'write', () {
-              a.activity = 'write';
-              a.toolType = 'pen';
-            }, 'ペンを挟むクリップを作ります'),
-            c('食べる（スプーン）', a.activity == 'eat', () {
-              a.activity = 'eat';
-              a.toolType = 'spoon';
-            }, 'スプーンを挟むクリップを作ります'),
-            c('その他', a.activity == 'other', () {
-              a.activity = 'other';
-              a.toolType = 'brush';
-            }, 'あとのチャットで教えてください'),
+            const SizedBox(height: 6),
+            Text(
+              '使う道具をすべて選んでください（いくつでも）。',
+              style: AppText.bodyLarge.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 6),
+            m('絵を描く（筆）', 'draw', '筆を挟むクリップを作ります'),
+            m('字を書く（ペン）', 'write', 'ペンを挟むクリップを作ります'),
+            m('食べる（スプーン）', 'eat', 'スプーンを挟むクリップを作ります'),
+            m('その他', 'other', 'あとのチャットで教えてください'),
           ],
         );
       case 1:
@@ -271,7 +338,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 2:
         return (
-          '道具の柄の太さ（挟む所）',
+          '$tool道具の柄の太さ（挟む所）',
           [
             const SizedBox(height: 6),
             Text(
@@ -281,14 +348,14 @@ class _InterviewScreenState extends State<InterviewScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            for (final e in _shaftRows.entries)
+            for (final e in shaftRows.entries)
               c(
                 e.value.$1,
-                a.toolDmm == null && a.shaftSize == e.key,
+                _tool.toolDmm == null && _tool.shaftSize == e.key,
                 () {
                   _mmInput = false;
-                  a.shaftSize = e.key;
-                  a.toolDmm = null;
+                  _tool.shaftSize = e.key;
+                  _tool.toolDmm = null;
                 },
                 e.value.$2,
               ),
@@ -298,11 +365,11 @@ class _InterviewScreenState extends State<InterviewScreen> {
               ChoiceButton(
                 label: 'mmで入れる',
                 sub: 'おすすめ。定規で測った太さを入れます',
-                selected: a.toolDmm != null,
+                selected: _tool.toolDmm != null,
                 onTap: () => setState(() {
                   _mmInput = true;
-                  a.toolDmm ??= 8.5;
-                  a.shaftSize = null;
+                  _tool.toolDmm ??= 8.5;
+                  _tool.shaftSize = null;
                 }),
               ),
             const SizedBox(height: 2),
@@ -314,13 +381,13 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 3:
         return (
-          '柄の形は',
+          '$tool柄の形は',
           [
-            c('丸い', a.shaftShape == 'round', () => a.shaftShape = 'round'),
+            c('丸い', _tool.shaftShape == 'round', () => _tool.shaftShape = 'round'),
             c(
               '平たい',
-              a.shaftShape == 'flat',
-              () => a.shaftShape = 'flat',
+              _tool.shaftShape == 'flat',
+              () => _tool.shaftShape = 'flat',
               '平たい柄のクリップは準備中です',
             ),
           ],
@@ -375,98 +442,11 @@ class _InterviewScreenState extends State<InterviewScreen> {
     }
   }
 
-  /// 「mmで入れる」を選んだときのカード（Figma の mm input (selected)）。＋−の大きなボタンで0.5mmずつ
-  Widget _mmCard() {
-    final v = a.toolDmm ?? 8.5;
-    Widget b(IconData i, String tip, double d) => IconButton.filled(
-      tooltip: tip,
-      iconSize: 28,
-      style: IconButton.styleFrom(fixedSize: const Size(64, 64)),
-      onPressed: () => setState(() => a.toolDmm = (v + d).clamp(3.5, 20.0)),
-      icon: Icon(i),
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-        decoration: BoxDecoration(
-          color: AppColors.secondaryContainer,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Semantics(
-              inMutuallyExclusiveGroup: true,
-              checked: true,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'mmで入れる',
-                          style: AppText.bodyLarge.copyWith(
-                            color: AppColors.onSecondaryContainer,
-                          ),
-                        ),
-                        Text(
-                          'おすすめ。定規で測った太さを入れます',
-                          style: AppText.supporting,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const ExcludeSemantics(
-                    child: Icon(
-                      Icons.radio_button_checked_rounded,
-                      size: 20,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                b(Icons.remove_rounded, '0.5mm細く', -0.5),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Semantics(
-                    liveRegion: true,
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: v.toStringAsFixed(1),
-                            style: AppText.displaySmall.copyWith(
-                              color: AppColors.onSecondaryContainer,
-                            ),
-                          ),
-                          TextSpan(
-                            text: ' mm',
-                            style: AppText.titleMedium.copyWith(
-                              color: AppColors.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                b(Icons.add_rounded, '0.5mm太く', 0.5),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  /// 「mmで入れる」を選んだときのカード（S7 の取り付け具を足す画面と同じ部品）
+  Widget _mmCard() => ToolDmmCard(
+    value: _tool.toolDmm ?? 8.5,
+    onChanged: (v) => setState(() => _tool.toolDmm = v),
+  );
 
   Widget _chatPage() {
     final required = a.activity == 'other';
@@ -597,21 +577,27 @@ class _InterviewScreenState extends State<InterviewScreen> {
   }
 
   Widget _summaryPage() {
-    String act() => switch (a.activity) {
-      'draw' => '筆で絵を描く',
-      'write' => 'ペンで字を書く',
-      'eat' => 'スプーンで食べる',
-      _ => 'その他',
-    };
-    final tool = a.toolDmm != null
-        ? '${a.toolDmm!.toStringAsFixed(1)}mm（mmで入力）'
-        : '${_shaftJa[a.shaftSize]}';
-    final rows = <(String, String, int)>[
-      ('やりたいこと', act(), 0),
-      ('着ける手', a.handSide == 'left' ? '左手' : '右手', 1),
-      ('柄の太さ', tool, 2),
-      ('柄の形', a.shaftShape == 'flat' ? '平たい' : '丸い', 3),
-      ('着け外し', a.donningBy == 'self' ? '自分でできる' : '家族や支援者がする', 4),
+    final one = a.tools.length == 1;
+    String thick(ToolAnswer t) => t.toolDmm != null
+        ? '${t.toolDmm!.toStringAsFixed(1)}mm（mmで入力）'
+        : '${_shaftJa[t.shaftSize]}';
+    String shape(ToolAnswer t) => t.shaftShape == 'flat' ? '平たい' : '丸い';
+    // (見出し, 答え, 戻る質問, 道具の番号)。道具が2つ以上なら、道具ごとに「道具・太さ・形」の1行
+    final rows = <(String, String, int, int)>[
+      (
+        'やりたいこと',
+        a.tools.map((t) => _actJa[t.activity] ?? 'その他').join('、'),
+        0,
+        0,
+      ),
+      ('着ける手', a.handSide == 'left' ? '左手' : '右手', 1, 0),
+      if (one) ...[
+        ('柄の太さ', thick(a.tools[0]), 2, 0),
+        ('柄の形', shape(a.tools[0]), 3, 0),
+      ] else
+        for (final (i, t) in a.tools.indexed)
+          (_toolName(i), '柄の太さ ${thick(t)}・${shape(t)}', 2, i),
+      ('着け外し', a.donningBy == 'self' ? '自分でできる' : '家族や支援者がする', 4, 0),
       (
         '指の形',
         switch (a.fingerState) {
@@ -620,8 +606,13 @@ class _InterviewScreenState extends State<InterviewScreen> {
           _ => 'ほぼ伸ばせる',
         },
         5,
+        0,
       ),
-      ('撮影', a.captureBy == 'self' ? '自分（片手）' : '家族や支援者', 6),
+      ('撮影', a.captureBy == 'self' ? '自分（片手）' : '家族や支援者', 6, 0),
+    ];
+    final guessed = [
+      for (final (i, t) in a.tools.indexed)
+        if (t.toolDmm == null && t.shaftShape != 'flat') _toolName(i),
     ];
     return AppPage(
       title: 'まとめ',
@@ -656,7 +647,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
           ),
           child: Column(
             children: [
-              for (final (i, (label, value, q)) in rows.indexed) ...[
+              for (final (i, (label, value, q, t)) in rows.indexed) ...[
                 if (i > 0) const Divider(height: 1, thickness: 1),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
@@ -688,7 +679,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                         tooltip: '「$label」を直す',
                         icon: const Icon(Icons.edit_rounded),
                         color: AppColors.onSurfaceVariant,
-                        onPressed: () => setState(() => _q = q),
+                        onPressed: () => setState(() => _go(q, t)),
                       ),
                     ],
                   ),
@@ -698,16 +689,28 @@ class _InterviewScreenState extends State<InterviewScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (a.shaftShape == 'flat')
+        if (one && a.tools[0].shaftShape == 'flat')
           const InfoCard(
             tone: NoticeTone.warning,
             child: Text('平たい柄のクリップは準備中です。丸い柄の道具を使うか、家族やOTと相談してください。'),
           ),
-        if (a.toolDmm == null)
-          const InfoCard(
+        // 道具が2つ以上：平たい柄の道具だけクリップを作らない（ADR-0014 §1）
+        if (!one)
+          for (final t in a.tools)
+            if (t.shaftShape == 'flat')
+              InfoCard(
+                tone: NoticeTone.warning,
+                child: Text(
+                  '${toolJa[t.toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください',
+                ),
+              ),
+        if (guessed.isNotEmpty)
+          InfoCard(
             tone: NoticeTone.warning,
             icon: Icons.straighten_rounded,
-            child: Text('太さを推定で作ります。刷る前に、道具の太さを定規で確かめてください。'),
+            child: Text(
+              '${one ? '' : '${guessed.join('・')}の'}太さを推定で作ります。刷る前に、道具の太さを定規で確かめてください。',
+            ),
           ),
         if (_notes.isNotEmpty) ...[
           const SizedBox(height: 4),

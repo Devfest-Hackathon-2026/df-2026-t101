@@ -79,6 +79,7 @@ flowchart TD
 | 部品選び `select` | LOW | `requirements`、カタログ（部品と種類の説明） | §3.2 |
 | 寸法決め `dimension` | MEDIUM | `requirements`、手の要約（§3.3）、選んだ部品の引数の定義、基準値（baseline） | §3.3 |
 | 画像での確認 `review` | LOW（2026-11-07 に MEDIUM から変えた。画像4枚の呼び出しは混み具合で6〜108秒とぶれ、MEDIUM では120秒の期限切れが続いたため。AIの確認ができなかったときは生成を失敗にせず `needs_attention` で終える） | 画像4枚、`requirements`、現在の引数、手の要約、前回までの指摘 | §3.4 |
+| 取り付け具の角度 `attachment`（取り付け具を足すときだけ。§3.3） | LOW | `requirements`、手の要約、その取り付け具 | `{angle_deg, reason_ja}` |
 | 言葉での微調整 `refine` | LOW | ユーザーの指示、現在の引数、引数の定義、言葉と引数の対応表 | §3.5 |
 
 ### 3.1 聞き取り `interview`（任意のチャット）
@@ -163,6 +164,8 @@ flowchart TD
 - 引数ごとに `source` を付ける：`measured`（採寸値そのまま）、`rule`（固定の式）、`interview`（聞き取りの値）、`ai`（Geminiが要望を見て調整）、`default`（既定値）
 - `ai` で基準値から動かした引数には、必ず理由を書く。動かしてよい幅は引数の定義に書いてある
 - **クリップの角度 `c_clip.angle_deg`**（道具の立て具合＝机に対する傾き）は、60／70／80度から、やりたいこと（`activity`）と道具から選び、理由を書く。目安：筆＝70度（立て気味）、ペン＝60度（少し寝かせる）。基準値と違う角度を選ぶときは、チャットのメモの根拠を書く。ユーザーはプレビューで角度を変えられる（[ADR-0013](adr/0013-clip-angle-variants.md)。2026-11-08 に 0／20／40 から変えた）
+- **取り付け具が複数あるとき**（[ADR-0014](adr/0014-multiple-attachments.md)）：主の取り付け具の角度は上の `c_clip.angle_deg` で答える。ほかの取り付け具（`attachment_id`・`tool_type`・`activity`・`tool_d_mm`）は入力の `$attachments` で渡し、出力の任意の `attachments`（`[{attachment_id, angle_deg, reason_ja}]`）に、取り付け具ごとの角度（60／70／80）と理由を返す。目安は 筆70・ペン60・スプーン60。取り付け具が1つなら `attachments` は出さない。プロンプトは `dimension.v2.md`（v1 は古い版の記録用に残す）
+- **取り付け具を足すとき**：寸法決め全体をやり直さず、小さな呼び出し `attachment_angle`（思考レベル LOW、`attachment.v1.md`）で、その取り付け具1つの角度だけを選ぶ。入力は `requirements`・手の要約・その取り付け具、出力は `{"angle_deg": 60|70|80, "reason_ja": "…"}`（両方必須）
 - **クリップの内径は道具の太さで決まる**（`tool_d_mm − CLIP_INTERFERENCE_MM`）。Geminiは `tool_d_mm` も `inner_d_mm` も変えない。クリップの形（`wall_mm`・`opening_ratio`・`height_mm`・`grip_ribs`・`tpu_sleeve`）も固定で、先に作っておいた固定STLから選ぶ（[ADR-0012](adr/0012-c-clip-dovetail.md) の 4.、2026-11-08）。Geminiが決めるのは `angle_deg` と `count` だけ
 - 手の3Dメッシュそのものは**渡さない**（頂点が約9,000あり、Geminiが数値の列から形を読み取ることは期待できず、トークンも多いため）。代わりに、手の要約を渡す：手首→中指の付け根の長さ（`|0-9|`）、手の幅（`|5-17|`）、手のひらの皮膚の高さ、関節の曲がり角（握りこぶしの程度）、倍率 k と警告（`MESH_SCALE_INCONSISTENT` など）、点を手で直したか
 - 着け外しを家族や介護する人がする場合（チャットのメモ）は、ベルトの扱いやすさ（本数・幅）を理由に入れてよい（クリップの押し込みやすさは固定の形なので変えられない）

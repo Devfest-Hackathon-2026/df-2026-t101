@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../data/api.dart';
+import '../data/attachments.dart';
 import '../data/download.dart';
+import '../router.dart';
 import '../widgets/ui.dart';
 
 const _partJa = {'cover': 'カバー', 'c_clip': 'C字クリップ', 'tpu_sleeve': 'TPUの筒'};
@@ -89,16 +91,35 @@ class _PrintScreenState extends State<PrintScreen> {
     final approved = d?['approval']?['status'] == 'approved';
     final ready = print.isNotEmpty && (approved || demo);
     final strapCount = _strapCount(d);
-    final angle = d?['clip_angle_deg'];
+    final rows = d == null ? <PrintRow>[] : printRows(d, _case?['requirements'] as Map<String, dynamic>?);
+    final multi = d != null && showSwapGuide(d);
     final colorHex = '${d?['style']?['color'] ?? ''}';
     final comment = '${d?['approval']?['comment_ja'] ?? ''}'.trim();
+    final canAdd = d != null &&
+        canAddFromPrint(d, (_case?['requirements'] as Map?)?.cast<String, dynamic>(), ready: ready);
     return AppPage(
       title: '印刷と使い方',
       bottom: ready
-          ? OutlinedButton(
-              onPressed: () =>
-                  Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
-              child: const Text('ホームへ戻る'),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // カバーを刷ったあとで、別の道具のクリップを足す（ADR-0014 §4）
+                if (canAdd) ...[
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context)
+                        .pushNamed(AppRouter.design(widget.caseId, widget.designId)),
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('取り付け具を足す（形の画面へ）'),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                OutlinedButton(
+                  onPressed: () =>
+                      Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
+                  child: const Text('ホームへ戻る'),
+                ),
+              ],
             )
           : (demo
                 ? FilledButton(
@@ -119,6 +140,13 @@ class _PrintScreenState extends State<PrintScreen> {
             icon: Icons.lock_outline_rounded,
             child: Text('OTの確認が済むとダウンロードできます。'),
           ),
+        // 取り付け具を足した・太さを直した版（ADR-0014 §4）
+        if (d != null && coverKept(d))
+          const InfoCard(
+            tone: NoticeTone.success,
+            icon: Icons.check_circle_outline_rounded,
+            child: Text('カバーは前の版と同じです。刷ってあるカバーをそのまま使えます'),
+          ),
         if (approved) ...[
           const SizedBox(height: 4),
           _ApprovedCard(
@@ -129,22 +157,20 @@ class _PrintScreenState extends State<PrintScreen> {
         ],
         if (ready) ...[
           const _Heading(icon: Icons.download_rounded, text: '部品ごとのダウンロード'),
-          for (final e in print.entries)
+          for (final r in rows)
             _PartCard(
-              partId: e.key,
-              name: e.key == 'c_clip' && angle != null
-                  ? '${_partJa[e.key]}（$angle度）'
-                  : (_partJa[e.key] ?? e.key),
-              fileName: '${e.value}'.split('/').last,
-              howTo: _partHowTo[e.key],
-              onDownload: () => _dl(e.key, '${e.value}'),
-              downloadLabel: '${_partJa[e.key] ?? e.key}をダウンロード',
+              partId: r.partId,
+              name: r.name,
+              fileName: r.path.split('/').last,
+              howTo: _partHowTo[r.partId],
+              onDownload: () => _dl(r.key, r.path),
+              downloadLabel: '${multi ? r.name : (_partJa[r.partId] ?? r.key)}をダウンロード',
             ),
           const SizedBox(height: 6),
           FilledButton.icon(
             onPressed: () async {
-              for (final e in print.entries) {
-                await _dl(e.key, '${e.value}');
+              for (final r in rows) {
+                await _dl(r.key, r.path);
               }
             },
             icon: const Icon(Icons.download_rounded),
@@ -173,6 +199,10 @@ class _PrintScreenState extends State<PrintScreen> {
             ),
           ),
           const _Heading(icon: Icons.edit_rounded, text: '組み立て方'),
+          if (multi)
+            const _Panel(
+              child: _Lines(['クリップは差し替えて使います。使う道具のクリップをレールに差し込みます']),
+            ),
           const _Panel(
             child: _Steps([
               'カバーの内側にフェルトを貼ります。',

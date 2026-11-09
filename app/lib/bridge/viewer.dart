@@ -164,6 +164,7 @@ class _Viewer3DState extends State<Viewer3D> {
         ].any((x) => x);
     if (old.handPath != widget.handPath ||
         partsChanged ||
+        old.toolDmm != widget.toolDmm || // 取り付け具を切り替えると道具の棒の太さが変わる（S7）
         jsonEncode(old.tool) != jsonEncode(widget.tool) ||
         jsonEncode(old.landmarks) != jsonEncode(widget.landmarks)) {
       unawaited(_render());

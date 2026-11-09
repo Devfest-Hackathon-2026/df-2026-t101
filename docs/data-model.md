@@ -62,7 +62,7 @@ settings/filaments
 | `demo` | boolean | デモのケースか。ケースを作るときに `settings/runtime.demo_mode` が `true` なら `true`。`true` のケースは、OTの確認なしで印刷用STLを作れる（[api.md §3.11](api.md#311-post-v1casescase_iddesignsdesign_idprepare-printデモのケースだけ)） |
 | `mesh_consent_at` | timestamp / null | メッシュ復元のためにフレームを送ること、手の形の3Dデータを保存することに同意した日時（`POST /consent`）。`hand-mesh` と `PUT measurement` が確かめる |
 | `consent_text_version` | string | 同意した文の版。今の版は `mesh-consent-2`（手のメッシュを保存することを足した版）。古い版の同意しかなければ、`hand-mesh` と `PUT measurement` は受け付けない |
-| `requirements` | map | 選択式の質問の答え（`activity`、`tool_type`、`hand_side`、**道具の太さ `tool_d_mm`** と出どころ `tool_d_source`（`user`＝数値で入れた／`category`＝区分から推定）、`tool_shaft_size`（測れないときの区分）、`tool_shaft_shape`、`finger_state`、`donning_by`、`capture_by`）、「その他」のときのやりたいことの説明（`activity_ja`）、チャットのメモ（`notes`）、仮に置いた値（`assumptions`）。スキーマは `schemas/requirements.schema.json`。列挙値は [api.md §3.2](api.md#32-put-v1casescase_idrequirements) |
+| `requirements` | map | 選択式の質問の答え（`activity`、`tool_type`、`hand_side`、**道具の太さ `tool_d_mm`** と出どころ `tool_d_source`（`user`＝数値で入れた／`category`＝区分から推定）、`tool_shaft_size`（測れないときの区分）、`tool_shaft_shape`、`finger_state`、`donning_by`、`capture_by`）、**道具の一覧 `tools`**（1〜4個。各要素は `activity`・`tool_type`・`tool_d_mm`・`tool_d_source`・`tool_shaft_size`・`tool_shaft_shape`・`assumptions`。上の個別の項目は主な道具＝最初の丸い柄、なければ先頭の値。古いケースには `tools` がない）、「その他」のときのやりたいことの説明（`activity_ja`）、チャットのメモ（`notes`）、仮に置いた値（`assumptions`）。スキーマは `schemas/requirements.schema.json`。列挙値は [api.md §3.2](api.md#32-put-v1casescase_idrequirements) |
 | `turn_count` | number | 任意のチャットの往復の数（最大3） |
 | `measurement` | map | 採寸結果（[measurement.md §12](measurement.md#12-出力するjsonmeasurement22)、2.2）。`capture.mesh_id` と、点を直したときの `manual_points`（代表のフレームの番号・点の番号・直した位置のpx）を含む。動画・フレームの画像は含まない |
 | `measurement_id` | string | 最新の採寸のID（保存のたびに新しく作る。例：`m_02`）。実寸の手のメッシュのファイル名にも使う |
@@ -88,7 +88,7 @@ settings/filaments
 |---|---|---|
 | `revision` | number | 1から始まる版の番号 |
 | `parent_design_id` | string | 直す元にした版（最初の版は空） |
-| `origin` | string | `initial` ／ `refine_text` ／ `refine_params` ／ `refine_clip_angle` ／ `refine_style` |
+| `origin` | string | `initial` ／ `refine_text` ／ `refine_params` ／ `refine_clip_angle` ／ `refine_tool_d`（取り付け具の柄の太さの直し）／ `refine_add_attachment`（取り付け具を足す）／ `refine_style` |
 | `status` | string | `queued` → `running` → `ready` ／ `needs_attention` ／ `failed` |
 | `progress` | map | `{ step, round, max_rounds, message_ja }`。`step` は `selecting`／`dimensioning`／`shelling`（カバーの殻の計算）／`rendering`／`reviewing`。画面の進み具合の表示に使う |
 | `parts` | array<map> | 部品選びの結果 `{ part_id, variant, reason_ja }` |
@@ -96,7 +96,7 @@ settings/filaments
 | `review` | map | `{ rounds: [ { round, verdict, checks, issues, changes } ], final_verdict, unresolved_issues }` |
 | `warnings` | array<string> | 範囲チェックと採寸の警告 |
 | `style` | map | `{ color, pattern }`。色だけの変更は、版を作らずにここだけ書き換える（`geometry_hash` に色は入らない） |
-| `files` | map | Storageのパス（§3）。`{ parts: { cover: { preview_stl }, c_clip: { preview_stl }, tpu_sleeve: { preview_stl } }, views: { front, side, top, iso }, print: { cover, c_clip, tpu_sleeve } }`。`print` は読める場所にできたときだけ入る。部品ごとに分けるのは、カバーとクリップを別々に刷り（材料・向きが違う）、角度違いのクリップだけを刷り直せるようにするため |
+| `files` | map | Storageのパス（§3）。`{ parts: { cover: { preview_stl }, c_clip: { preview_stl }, tpu_sleeve: { preview_stl } }, views: { front, side, top, iso }, print: { cover, c_clip, c_clip_a2, …, tpu_sleeve } }`。`print` は読める場所にできたときだけ入る。取り付け具ごとに1つで、キーは `attachments[i].print_key`、ファイル名はプレビューと同じ元に `.stl`（1つだけなら `c_clip_{角度}.stl`）。部品ごとに分けるのは、カバーとクリップを別々に刷り（材料・向きが違う）、角度違いのクリップだけを刷り直せるようにするため |
 | `approval` | map | `{ status: none ／ requested ／ approved ／ rejected, reviewer_email, requested_at, decided_at, comment_ja, checklist, geometry_hash, print_sha256 }`（`print_sha256` は部品ごとの map）。確認対象のハッシュと印刷ファイルのハッシュを承認に結び付ける |
 | `geometry_hash` | string | OTに頼んだとき（デモのケースは印刷用データを作ったとき）に記録する。部品・引数・`cover_shell_sha256`・固定値の版を正規化したJSONのSHA-256（色は除く）。殻は手のメッシュから作るので、殻のファイルのハッシュを入れる。承認のときに、OT画面が見ていた版と同じかを確かめる |
 | `hand_measurement_id` | string | この版が使った採寸のID。実寸の手のメッシュ `cases/{caseId}/hand/{hand_measurement_id}.glb` を指す |
@@ -106,6 +106,7 @@ settings/filaments
 | `clip_angle_deg` | number | C字クリップの角度（道具の立て具合。60／70／80。2026-11-08 に 0／20／40 から変えた）。角度だけを変えた版は、カバーのファイルを前の版と共有する |
 | `tool` | map | 道具の軸（実際の手の座標、mm）：`center`（クリップの輪の中心）、`axis`（先の向き。単位ベクトル）、`tip_mm`（先までの長さ、100）、`rear_mm`（後ろまで、50）、`diameter_mm`。S7の3D表示はこの値で道具の棒を描く（クリップの形から推定しない。2026-11-08） |
 | `clip` | map | 使ったクリップ：`source`（`library`＝先に作っておいた固定STL、`generated`＝その場で描いた）、`variant`（例 `c_clip_d0850_a20`）、`tool_d_mm`（刻みに丸めた太さ）、`angle_deg`（[ADR-0012](adr/0012-c-clip-dovetail.md) の 4.、2026-11-08） |
+| `attachments` | array<map> | 取り付け具（道具ごとのC字クリップ）の一覧。1〜4個で、`attachments[0]` が主な取り付け具（[ADR-0014](adr/0014-multiple-attachments.md)）。1つの要素は `{ id, tool_index, tool_type, activity, tool_d_mm, tool_d_source, angle_deg, angle_source, reason_ja, primary, print_key, files: { preview_stl }, tool, clip, checks }`。`id` は `a1`・`a2`…（`requirements.tools` の何番目か＋1）。`print_key` は印刷用のファイルの地図のキー（主は `c_clip`、ほかは `c_clip_a2`。Firestore の地図のキーなので `.`・`:` を使わない）。`tool`・`clip` は上の `tool`・`clip` と同じ形、`checks` はそのクリップの R6f・R6h の結果。主な取り付け具の値は、今までの項目（`params` の `c_clip`、`clip_angle_deg`、`clip`、`tool`、`files.parts.c_clip`）と同じ。平たい柄の道具と、作れなかった取り付け具は入らない（`review.unresolved_issues` で知らせる）。2026-11-09 より前の版にはない |
 | `print_prepared_at` / `print_sha256` | timestamp / map | 印刷用STLを作った日時と、部品ごとのファイルのSHA-256 |
 | `input_snapshot` | map | その版の採寸・要件・手のモデル。ケースの現在値が変わっても書き換えない |
 | `model` | map | `{ id, location }` |
@@ -147,14 +148,14 @@ settings/filaments
 
 ```
 cases/{caseId}/designs/{designId}/cover.preview.stl          … カバー本体のプレビュー用（手の座標系、円の分割48）
-cases/{caseId}/designs/{designId}/c_clip_{angle}.preview.stl … C字クリップのプレビュー用（レールに差し込んだ位置。angle は 60／70／80）
+cases/{caseId}/designs/{designId}/c_clip_{angle}.preview.stl … C字クリップのプレビュー用（レールに差し込んだ位置。angle は 60／70／80）。取り付け具が2つ以上の版は c_clip_{tool}_{angle}.preview.stl（同じ道具が2つなら _d0900 のように太さを足す。ADR-0014）
 cases/{caseId}/designs/{designId}/tpu_sleeve.preview.stl     … TPUの筒（選んだときだけ）
 cases/{caseId}/designs/{designId}/views/front.png  … 確認用画像（768×768。手のメッシュ・カバー・クリップ・道具の棒を重ねたもの）
 cases/{caseId}/designs/{designId}/views/side.png
 cases/{caseId}/designs/{designId}/views/top.png
 cases/{caseId}/designs/{designId}/views/iso.png
 cases/{caseId}/designs/{designId}/print/cover.stl           … 印刷用（刷る向きに置き直したもの、円の分割128）。承認のときに internal/ からコピーする。デモのケースは prepare-print で直接ここに作る
-cases/{caseId}/designs/{designId}/print/c_clip_{angle}.stl
+cases/{caseId}/designs/{designId}/print/c_clip_{angle}.stl      … 取り付け具が2つ以上のときは c_clip_{道具}_{角度}.stl を取り付け具の数だけ
 cases/{caseId}/designs/{designId}/print/tpu_sleeve.stl
 cases/{caseId}/hand/{measurementId}.glb            … 実寸の手のメッシュ（手の座標系、mm）。PUT measurement のときに生成APIが書く
 cases/{caseId}/hand/raw/{meshId}.glb               … 未補正の手のメッシュ（hand-mesh が書く。関節の位置を extras.joints_mm に入れる）。だれも読めない

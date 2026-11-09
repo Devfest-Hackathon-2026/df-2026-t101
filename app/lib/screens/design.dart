@@ -6,8 +6,11 @@ import 'package:flutter/services.dart';
 
 import '../bridge/viewer.dart';
 import '../data/api.dart';
+import '../data/attachments.dart';
 import '../data/files.dart';
+import '../data/requirements.dart' show ToolAnswer;
 import '../router.dart';
+import '../widgets/tool_fields.dart';
 import '../widgets/ui.dart';
 
 const _stepJa = {
@@ -44,12 +47,14 @@ class DesignScreen extends StatefulWidget {
     required this.caseId,
     this.designId,
     this.autoStart = false,
-    this.recommendedAngle,
+    this.recommendedAngles = const {},
+    this.attachmentId,
   });
   final String caseId;
   final String? designId;
   final bool autoStart;
-  final int? recommendedAngle; // AIが選んだ角度（版をまたいで「おすすめ」を出すため）
+  final Map<String, int> recommendedAngles; // 取り付け具ごとにAIが選んだ角度（版をまたいで「おすすめ」を出すため）
+  final String? attachmentId; // 選んでいる取り付け具（新しい版でも同じものを見せるため）
   @override
   State<DesignScreen> createState() => _DesignScreenState();
 }
@@ -65,7 +70,8 @@ class _DesignScreenState extends State<DesignScreen> {
   bool _errorRetry = false;
   String? _busy; // 微調整中の文
   bool _showHand = true;
-  late int? _recommendedAngle = widget.recommendedAngle;
+  late Map<String, int> _recommended = {...widget.recommendedAngles};
+  late String? _attId = widget.attachmentId; // 選んでいる取り付け具（最初は主な取り付け具）
   String? _clarify;
   final _instruction = TextEditingController();
   Timer? _poll;
@@ -119,11 +125,14 @@ class _DesignScreenState extends State<DesignScreen> {
   void _setDesign(Map<String, dynamic> d) {
     setState(() {
       _design = d;
-      _recommendedAngle ??= _angleParam(d)?['source'] == 'ai'
-          ? (_angleParam(d)?['value'] as num?)?.toInt()
-          : null;
+      _recommended = recommendedAngles(d, _recommended);
+      _attId = selectAttachment(_attachments(d), _attId);
     });
   }
+
+  /// 版の取り付け具（古い版は1つ。道具の名前はケースの要求から）
+  List<Map<String, dynamic>> _attachments(Map<String, dynamic> d) =>
+      viewAttachments(d, (_case?['requirements'] as Map?)?.cast<String, dynamic>());
 
   /// 版が処理中か（APIの status は `queued` → `running`。data-model.md §2.5）
   static bool _inProgress(Object? status) =>
@@ -225,7 +234,11 @@ class _DesignScreenState extends State<DesignScreen> {
       if (r['clarify_ja'] != null) {
         setState(() => _clarify = '${r['clarify_ja']}');
       } else {
-        _setDesign(Map<String, dynamic>.from(r['design']));
+        final before = _attachments(d);
+        final nd = Map<String, dynamic>.from(r['design']);
+        // 足したときは足した取り付け具を、それ以外は今の取り付け具を選んだままにする
+        _attId = selectionAfter(before, _attachments(nd), _attId);
+        _setDesign(nd);
         if (r['design']['design_id'] != d['design_id'] && mounted) {
           // 新しい版：パスも新しい版にする（戻るでケース一覧へ）
           final nid = r['design']['design_id'];
@@ -235,7 +248,8 @@ class _DesignScreenState extends State<DesignScreen> {
               builder: (_) => DesignScreen(
                 caseId: _cid,
                 designId: nid,
-                recommendedAngle: _recommendedAngle,
+                recommendedAngles: _recommended,
+                attachmentId: _attId,
               ),
             ),
           );
@@ -404,12 +418,24 @@ class _DesignScreenState extends State<DesignScreen> {
     final demo = _case?['demo'] == true;
     final color = '${d['style']?['color'] ?? '#2A9D8F'}';
     final parts = Map<String, dynamic>.from(d['files']?['parts'] ?? {});
-    final angle = (_angleParam(d)?['value'] as num?)?.toInt();
+    // 選んでいる取り付け具。角度・寸法・3D表示のクリップと道具の棒はこの取り付け具のもの
+    final atts = _attachments(d);
+    final att = atts.firstWhere((a) => a['id'] == _attId, orElse: () => atts.first);
+    final multi = atts.length > 1;
+    final label = attachmentLabel(att, atts);
+    final attId = att['id'] as String?;
+    final angle =
+        (att['angle_deg'] as num?)?.toInt() ??
+        (_angleParam(d)?['value'] as num?)?.toInt();
     final toolD =
-        (_param('c_clip', 'tool_d_mm') ??
+        ((att['tool_d_mm'] as num?) ??
+                _param('c_clip', 'tool_d_mm') ??
                 _case?['requirements']?['tool_d_mm'] ??
                 8.5)
             .toDouble();
+    final clipPath = (att['files'] as Map?)?['preview_stl'];
+    final tool = (att['tool'] as Map?) ?? (att['primary'] == true ? d['tool'] as Map? : null);
+    final addBlocked = addBlockedReason(d, (_case?['requirements'] as Map?)?.cast<String, dynamic>());
     final approval = '${d['approval']?['status'] ?? 'none'}';
     final issues = (d['review']?['unresolved_issues'] as List? ?? []);
     final locked = approval == 'requested';
@@ -469,8 +495,17 @@ class _DesignScreenState extends State<DesignScreen> {
             icon: Icons.reply_rounded,
             child: Text('差し戻されました：${d['approval']?['comment_ja'] ?? ''}'),
           ),
+        // 取り付け具を足した・太さを直した版（ADR-0014 §4）
+        if (coverKept(d))
+          const InfoCard(
+            tone: NoticeTone.success,
+            icon: Icons.check_circle_outline_rounded,
+            child: Text('カバーは前の版と同じです。刷ってあるカバーをそのまま使えます'),
+          ),
         if (_busy != null) BusyCard(text: _busy!),
         if (_error != null) ErrorCard(message: _error!),
+        // 取り付け具の切り替え（2つ以上のときだけ。ADR-0014 §5）
+        if (multi) _attachmentTabs(atts, attId),
         // 3D表示（three.js）
         SizedBox(
           height: 326,
@@ -490,12 +525,18 @@ class _DesignScreenState extends State<DesignScreen> {
               : Viewer3D(
                   handPath: d['hand_overlay']?['mesh_path'],
                   parts: [
+                    // クリップは選んでいる取り付け具のもの
                     for (final e in parts.entries)
-                      PartFile(e.key, '${e.value['preview_stl']}'),
+                      PartFile(
+                        e.key,
+                        e.key == 'c_clip' && clipPath != null
+                            ? '$clipPath'
+                            : '${e.value['preview_stl']}',
+                      ),
                   ],
                   color: color,
                   toolDmm: toolD,
-                  tool: (d['tool'] as Map?)?.cast<String, dynamic>(),
+                  tool: tool?.cast<String, dynamic>(),
                   handSide: _case?['requirements']?['hand_side'] as String?,
                   showHand: _showHand,
                   label: '3Dの表示。カバーとクリップと道具を、手に着けた形で見られます。ドラッグで回せます',
@@ -516,10 +557,12 @@ class _DesignScreenState extends State<DesignScreen> {
             onChanged: (v) => setState(() => _showHand = v),
           ),
         ),
-        _mainDims(d, toolD, angle),
+        _mainDims(d, toolD, angle, att),
         _summary(d),
-        // クリップの角度（ADR-0013）
-        const _Heading('クリップの角度'),
+        // クリップの角度（ADR-0013）。取り付け具が2つ以上なら、選んでいる取り付け具の角度
+        _Heading(multi ? 'クリップの角度（$label）' : 'クリップの角度'),
+        if (multi && '${att['reason_ja'] ?? ''}'.isNotEmpty)
+          Text('${att['reason_ja']}', style: _noteStyle),
         IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -531,15 +574,16 @@ class _DesignScreenState extends State<DesignScreen> {
                   child: _AngleButton(
                     angle: a,
                     selected: a == angle,
-                    recommended: a == _recommendedAngle,
+                    recommended: a == _recommended[attId],
                     position: i == 0
                         ? _GroupPos.first
                         : (i == 2 ? _GroupPos.last : _GroupPos.middle),
                     onTap: () {
                       if (a != angle && _busy == null) {
-                        _refine({
-                          'clip_angle_deg': a,
-                        }, 'クリップを$a度で描き直しています（カバーはそのままです）');
+                        _refine(
+                          withAttachment({'clip_angle_deg': a}, d, attId),
+                          '${multi ? '$labelの' : ''}クリップを$a度で描き直しています（カバーはそのままです）',
+                        );
                       }
                     },
                   ),
@@ -550,6 +594,23 @@ class _DesignScreenState extends State<DesignScreen> {
         ),
         if (locked)
           Text('OTに頼んだあとに角度を変えると、新しい版になり、もう一度確認を頼みます。', style: _noteStyle),
+        // 取り付け具（道具ごとのクリップ）の太さを直す・足す（ADR-0014 §4）
+        OutlinedButton.icon(
+          onPressed: idle ? () => _openToolSheet(d, fix: att, label: label) : null,
+          icon: const Icon(Icons.straighten_rounded),
+          label: Text('$labelの柄の太さを直す'),
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        ),
+        OutlinedButton.icon(
+          onPressed: idle && addBlocked == null ? () => _openToolSheet(d) : null,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('取り付け具を足す'),
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        ),
+        Text(
+          addBlocked ?? 'カバーはそのままで、別の道具のクリップを足せます。足すと新しい版になります。',
+          style: _noteStyle,
+        ),
         const _Heading('言葉で直す'),
         Wrap(
           spacing: 8,
@@ -566,7 +627,10 @@ class _DesignScreenState extends State<DesignScreen> {
                 label: t,
                 onPressed: !idle
                     ? null
-                    : () => _refine({'instruction': t}, '「$t」に合わせて直しています'),
+                    : () => _refine(
+                        withAttachment({'instruction': t}, d, attId),
+                        '「$t」に合わせて直しています',
+                      ),
               ),
           ],
         ),
@@ -602,9 +666,10 @@ class _DesignScreenState extends State<DesignScreen> {
               icon: const Icon(Icons.send_rounded),
               onPressed: !idle || _instruction.text.trim().isEmpty
                   ? null
-                  : () => _refine({
-                      'instruction': _instruction.text.trim(),
-                    }, '「${_instruction.text.trim()}」に合わせて直しています'),
+                  : () => _refine(
+                      withAttachment({'instruction': _instruction.text.trim()}, d, attId),
+                      '「${_instruction.text.trim()}」に合わせて直しています',
+                    ),
             ),
           ],
         ),
@@ -617,7 +682,7 @@ class _DesignScreenState extends State<DesignScreen> {
         if (_numberParams(d).isNotEmpty) ...[
           const _Heading('数値で細かく直す'),
           OutlinedButton.icon(
-            onPressed: idle ? () => _openNumbers(d) : null,
+            onPressed: idle ? () => _openNumbers(d, attId) : null,
             icon: const Icon(Icons.tune_rounded),
             label: const Text('カバーの厚み・空気穴などを直す'),
             style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
@@ -678,16 +743,17 @@ class _DesignScreenState extends State<DesignScreen> {
   );
 
   /// 主な寸法（Figma：2列のタイル）
-  Widget _mainDims(Map<String, dynamic> d, double toolD, int? angle) {
+  Widget _mainDims(Map<String, dynamic> d, double toolD, int? angle, Map<String, dynamic> att) {
     final t = _param('cover', 'cover_thickness_mm');
-    final inner = _param('c_clip', 'inner_d_mm');
+    // params の c_clip は主な取り付け具の値なので、主でないときは内径を出さない
+    final inner = att['primary'] == false ? null : _param('c_clip', 'inner_d_mm');
     final tiles = [
       _DimTile('カバーの厚み', '${t ?? '—'} mm'),
       _DimTile('道具の太さ', '${toolD.toStringAsFixed(1)} mm'),
       if (inner != null) _DimTile('クリップの内径', '$inner mm'),
       _DimTile('クリップの角度', '${angle ?? '—'}度'),
     ];
-    final estimated = _case?['requirements']?['tool_d_source'] == 'category';
+    final estimated = att['tool_d_source'] == 'category';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -766,7 +832,7 @@ class _DesignScreenState extends State<DesignScreen> {
   ];
 
   /// 数値で直す画面を下から出す（いつも出しておくと画面が長くなるので、開いたときだけ。2026-11-08）
-  Future<void> _openNumbers(Map<String, dynamic> d) async {
+  Future<void> _openNumbers(Map<String, dynamic> d, String? attId) async {
     final changes = await showModalBottomSheet<List<Map<String, dynamic>>>(
       context: context,
       isScrollControlled: true,
@@ -776,7 +842,199 @@ class _DesignScreenState extends State<DesignScreen> {
       builder: (_) => _NumberSheet(params: _numberParams(d)),
     );
     if (changes == null || changes.isEmpty || !mounted) return;
-    await _refine({'param_changes': changes}, '値に合わせて作り直しています');
+    await _refine(
+      withAttachment({'param_changes': changes}, d, attId),
+      '値に合わせて作り直しています',
+    );
+  }
+
+  /// 取り付け具の切り替え（道具の名前のボタン）。押しても版は変わらず、3D表示と角度の表示だけが変わる
+  Widget _attachmentTabs(List<Map<String, dynamic>> atts, String? selected) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const _SubLabel('見るクリップ（道具ごと）'),
+      const SizedBox(height: 4),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final a in atts)
+            ChoiceChip(
+              label: Text(attachmentLabel(a, atts), style: AppText.titleMedium),
+              selected: a['id'] == selected,
+              materialTapTargetSize: MaterialTapTargetSize.padded,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              tooltip: '${attachmentLabel(a, atts)}のクリップを見る',
+              onSelected: (_) => setState(() => _attId = a['id'] as String?),
+            ),
+        ],
+      ),
+    ],
+  );
+
+  /// 取り付け具を足す／太さを直す画面を下から出す（fix があれば、その取り付け具の太さを直す）
+  Future<void> _openToolSheet(
+    Map<String, dynamic> d, {
+    Map<String, dynamic>? fix,
+    String? label,
+  }) async {
+    final t = await showModalBottomSheet<ToolAnswer>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.surfaceContainerLow,
+      builder: (_) => _ToolSheet(
+        fixLabel: fix == null ? null : label,
+        fixToolType: fix?['tool_type'] as String?,
+        fixToolD: (fix?['tool_d_mm'] as num?)?.toDouble(),
+      ),
+    );
+    if (t == null || !mounted) return;
+    if (fix == null) {
+      await _refine(
+        {'add_attachment': t.toJson()},
+        '${toolJa[t.toolType] ?? '道具'}のクリップを足しています（カバーはそのままです）',
+      );
+    } else {
+      final v = toolDOf(t);
+      await _refine(
+        withAttachment({'tool_d_mm': v}, d, fix['id'] as String?),
+        '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しています（カバーはそのままです）',
+      );
+    }
+  }
+}
+
+/// 取り付け具を足す画面（道具・太さ・形）／太さを直す画面（太さだけ）。決めた答えを返す（送るのは呼び出し側）
+class _ToolSheet extends StatefulWidget {
+  const _ToolSheet({this.fixLabel, this.fixToolType, this.fixToolD});
+  final String? fixLabel; // 太さを直す取り付け具の呼び名（null なら足す）
+  final String? fixToolType;
+  final double? fixToolD;
+  bool get fix => fixLabel != null;
+  @override
+  State<_ToolSheet> createState() => _ToolSheetState();
+}
+
+class _ToolSheetState extends State<_ToolSheet> {
+  late final ToolAnswer _t = widget.fix
+      ? (ToolAnswer()
+          ..toolType = widget.fixToolType
+          ..toolDmm = widget.fixToolD ?? 8.5)
+      : ToolAnswer();
+  late bool _mmInput = widget.fix;
+
+  bool get _ok {
+    if (!canSubmitTool(_t, fixOnly: widget.fix)) return false;
+    // 太さを直すときは、今の太さから変えたときだけ押せる
+    return !widget.fix || widget.fixToolD == null || (toolDOf(_t) - widget.fixToolD!).abs() > 1e-9;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final flat = flatNotice(_t);
+    Widget choice(String label, bool sel, VoidCallback f, [String? sub]) =>
+        ChoiceButton(label: label, sub: sub, selected: sel, onTap: () => setState(f));
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => Column(
+        children: [
+          Expanded(
+            child: ListView(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    widget.fix ? '${widget.fixLabel}の柄の太さを直す' : '取り付け具を足す',
+                    style: AppText.titleLarge,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.fix
+                      ? 'このクリップだけを描き直します。カバーはそのままです。新しい版になります'
+                      : 'カバーはそのままで、別の道具のクリップを足します。新しい版になります',
+                  style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant),
+                ),
+                if (!widget.fix) ...[
+                  const SectionLabel('道具'),
+                  for (final (type, label) in const [('brush', '筆'), ('pen', 'ペン'), ('spoon', 'スプーン')])
+                    choice(label, _t.toolType == type, () {
+                      _t.toolType = type;
+                      _t.activity = toolActivity[type];
+                    }),
+                ],
+                const SectionLabel('柄の太さ（挟む所）'),
+                // 太さを直すときは mm だけ（区分の目安を送ると、推定の太さを人が入れた値として残してしまう）
+                if (!widget.fix)
+                  for (final e in shaftRows.entries)
+                    choice(
+                      e.value.$1,
+                      _t.toolDmm == null && _t.shaftSize == e.key,
+                      () {
+                        _mmInput = false;
+                        _t.shaftSize = e.key;
+                        _t.toolDmm = null;
+                      },
+                      e.value.$2,
+                    ),
+                if (_mmInput)
+                  ToolDmmCard(
+                    value: _t.toolDmm ?? 8.5,
+                    onChanged: (v) => setState(() => _t.toolDmm = v),
+                  )
+                else
+                  choice('mmで入れる', _t.toolDmm != null, () {
+                    _mmInput = true;
+                    _t.toolDmm ??= 8.5;
+                    _t.shaftSize = null;
+                  }, 'おすすめ。定規で測った太さを入れます'),
+                if (!widget.fix) ...[
+                  const SectionLabel('柄の形'),
+                  choice('丸い', _t.shaftShape == 'round', () => _t.shaftShape = 'round'),
+                  choice('平たい', _t.shaftShape == 'flat', () => _t.shaftShape = 'flat'),
+                  if (flat != null) ...[
+                    const SizedBox(height: 8),
+                    InfoCard(tone: NoticeTone.warning, child: Text(flat)),
+                  ],
+                ],
+              ],
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      child: const Text('やめる'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _ok ? () => Navigator.of(context).pop(_t) : null,
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      child: Text(widget.fix ? 'この太さで直す' : '足す'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../bridge/viewer.dart';
 import '../data/api.dart';
+import '../data/attachments.dart';
 import '../data/session.dart';
 import '../router.dart';
 import '../widgets/ui.dart';
@@ -424,6 +425,43 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
+  bool _hasAttachments(Map<String, dynamic> d) => d['attachments'] is List && (d['attachments'] as List).isNotEmpty;
+
+  Widget _attachmentsPanel(Map<String, dynamic> d) {
+    final l = reviewAttachments(d, _case?['requirements'] as Map<String, dynamic>?);
+    return _Panel(
+      icon: Icons.attach_file_rounded,
+      title: '取り付け具（クリップ）',
+      children: [
+        for (final a in l)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${a.title}　${a.summary}', style: AppText.titleMedium),
+                for (final c in a.checks)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        StatusLabel(
+                          label: '${c.rule} ${c.resultJa}',
+                          tone: c.ok ? StatusTone.success : StatusTone.warning,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(c.messageJa, style: AppText.bodyMedium)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _unresolvedPanel(List<Map<String, dynamic>> issues) => _Panel(
     icon: Icons.auto_awesome_rounded,
     title: 'AIの確認で解決しなかった点',
@@ -572,6 +610,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                             child: _Column(
                               children: [
                                 _paramsPanel(d),
+                                if (_hasAttachments(d)) _attachmentsPanel(d),
                                 if (_unresolved.isNotEmpty)
                                   _unresolvedPanel(_unresolved),
                                 _Panel(
@@ -706,6 +745,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
               if (_warnings.isNotEmpty) _warningsPanel(),
               if (angles.isNotEmpty) _anglesPanel(angles),
               _paramsPanel(d),
+              if (_hasAttachments(d)) _attachmentsPanel(d),
               if (_unresolved.isNotEmpty) _unresolvedPanel(_unresolved),
               _Panel(
                 icon: Icons.check_circle_outline_rounded,

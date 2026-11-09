@@ -475,18 +475,22 @@ class ChoiceButton extends StatelessWidget {
     this.sub,
     required this.selected,
     required this.onTap,
+    this.multi = false,
   });
   final String label;
   final String? sub;
   final bool selected;
   final VoidCallback onTap;
 
+  /// いくつでも選べる問い（丸ではなく四角の印。読み上げも「どれか1つ」にしない）
+  final bool multi;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Semantics(
-        inMutuallyExclusiveGroup: true,
+        inMutuallyExclusiveGroup: !multi,
         checked: selected,
         button: true,
         child: Material(
@@ -526,9 +530,12 @@ class ChoiceButton extends StatelessWidget {
                         width: 48,
                         height: 48,
                         child: Icon(
-                          selected
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_unchecked_rounded,
+                          switch ((multi, selected)) {
+                            (false, true) => Icons.radio_button_checked_rounded,
+                            (false, false) => Icons.radio_button_unchecked_rounded,
+                            (true, true) => Icons.check_box_rounded,
+                            (true, false) => Icons.check_box_outline_blank_rounded,
+                          },
                           color: selected
                               ? AppColors.primary
                               : AppColors.onSurfaceVariant,
