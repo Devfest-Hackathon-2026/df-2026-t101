@@ -11,7 +11,7 @@ import numpy as np
 
 from .consts import fixed
 
-CLIP_PLATE_MM = 2.0
+CLIP_PLATE_MM = 2.5    # 舌の上の板の厚み（c_clip.scad と同じ。2026-11-08 に 2.0 から）。いまは計算に使っていない
 CLIP_LAT_MM = 20.0     # 輪の中心を、レールの上面の中心から親指側へ出す量
 CLIP_DOWN_MM = 6.0     # 手のひら側へ下げる量
 CLIP_FWD_MM = 5.0      # 指先側へ進める量

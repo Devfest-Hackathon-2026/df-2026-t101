@@ -4,7 +4,8 @@ import 'dart:math';
 import 'api.dart';
 
 /// 画面だけを通すためのモック（`--dart-define=MOCK_API=true`）。応答の形は docs/api.md の例に合わせる。
-/// 3Dの見本は `web/demo/`（手 hand.glb、カバー cover.stl、クリップ c_clip_{角度}.stl）
+/// 3Dの見本は `web/demo/`（手 hand.glb、カバー cover.stl、クリップ c_clip_{60,70,80}.stl、刷る向きは *.print.stl、画像 iso.png）。
+/// 形を変えたら `scripts/make_demo_assets.py` で作り直す
 class MockBackend {
   MockBackend._();
   static final instance = MockBackend._();
@@ -80,6 +81,7 @@ class MockBackend {
           '${b['message']}',
         ];
         c['requirements'] = {...?c['requirements'], 'notes': notes};
+        c['turn_count'] = notes.length;
         return {
           'turn': {
             'status': 'done',
@@ -160,7 +162,7 @@ class MockBackend {
             {
               'part_id': 'c_clip',
               'name': 'angle_deg',
-              'value': 20,
+              'value': 70,
               'source': 'rule',
             },
           ],
@@ -227,8 +229,8 @@ class MockBackend {
       if (method == 'POST' && act == 'prepare-print') {
         d['print_prepared_at'] = DateTime.now().toIso8601String();
         d['files']['print'] = {
-          'cover': 'demo/cover.stl',
-          'c_clip': 'demo/c_clip_${_angleOf(d)}.stl',
+          'cover': 'demo/cover.print.stl',
+          'c_clip': 'demo/c_clip_${_angleOf(d)}.print.stl',
         };
         return {
           'design': d,
@@ -242,8 +244,8 @@ class MockBackend {
         };
         c['status'] = b['decision'] == 'approve' ? 'approved' : 'previewing';
         d['files']['print'] = {
-          'cover': 'demo/cover.stl',
-          'c_clip': 'demo/c_clip_${_angleOf(d)}.stl',
+          'cover': 'demo/cover.print.stl',
+          'c_clip': 'demo/c_clip_${_angleOf(d)}.print.stl',
         };
         return {
           'approval': d['approval'],
@@ -309,9 +311,10 @@ class MockBackend {
           'name': 'angle_deg',
           'value': angle,
           'unit': 'deg',
-          'range': [0, 40],
-          'choices': [0, 20, 40],
-          'baseline': 20,
+          'range': null,
+          // catalog.json と同じ（2026-11-08 に 0／20／40 から変えた）
+          'choices': [60, 70, 80],
+          'baseline': 70,
           'source': 'ai',
           'reason_ja': '絵を描くので、筆を立て気味の70度をおすすめします。少し寝かせたいときは60度も選べます',
           'clamped': false,

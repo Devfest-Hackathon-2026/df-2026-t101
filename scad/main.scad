@@ -42,7 +42,7 @@ c_clip_tool_d_mm = 8.5;
 c_clip_wall_mm = 2.0;
 c_clip_opening_ratio = 0.75;
 c_clip_height_mm = 20;     // catalog.json の既定（固定）と同じ。2026-11-08 に 12 から
-c_clip_angle_deg = 20;
+c_clip_angle_deg = 70;     // catalog.json の既定と同じ（60／70／80。2026-11-08 に 0／20／40 から）
 c_clip_grip_ribs = true;
 c_clip_tpu_sleeve = false;
 

@@ -1,7 +1,7 @@
 """C字クリップの固定STLのライブラリ（ADR-0012 の補足、2026-11-08）。
 
 クリップは毎回 OpenSCAD で描かず、**先に作っておいたSTL**から選んで持ってくる。
-形は道具の太さ（4.0〜16.0mm を 0.25mm 刻み）と角度（0／20／40度）だけで決まり、
+形は道具の太さ（4.0〜16.0mm を 0.25mm 刻み）と角度（60／70／80度）だけで決まり、
 壁の厚さ・開きの幅・輪の高さ・内側の溝は catalog.json の既定値で固定する（AI は変えない）。
 
 - 置き場所：`scad/library/c_clip/`（コンテナのビルドで作る。git には入れない）。環境変数 `CLIP_LIBRARY_DIR` で変えられる
@@ -76,7 +76,7 @@ def lookup(clip: dict, base: Path | None = None) -> dict | None:
     if not matches_fixed(clip):
         return None
     d = snap_d(clip["tool_d_mm"])
-    angle = int(clip.get("angle_deg", 20))
+    angle = int(clip.get("angle_deg", 70))
     if d is None or angle not in ANGLES:
         return None
     name = variant(d, angle)
