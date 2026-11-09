@@ -71,7 +71,7 @@ flowchart LR
 |---|---|---|---|
 | Flutter Web アプリ（`app/`） | Firebase Hosting | 画面と遷移、ログイン、生成中の進み具合の読み取り（`GET designs/{id}` を2秒ごと）、APIの呼び出し、採寸エンジンの呼び出しと結果の表示 | Firestore・Storageへの書き込み、Geminiの呼び出し、フレームの処理 |
 | 採寸エンジン（`app/web_engine/` のTypeScriptを、`app/web/js/measure_engine.js` の1ファイルにまとめる） | ブラウザ | アプリ内カメラでの録画（スマホは背面、PCはWebカメラ。握った形のこぶしを撮る）、フレームの取り出し、ぼけの判定、MediaPipeの呼び出し、1円玉の自動検出の呼び出しと縮尺、フレームごとの値、集計（[measurement.md §2〜§7](measurement.md)）、切り抜いたフレームを `hand-mesh` に送ること、S5で直した手首と指の付け根の5点から手の甲の長さを出し直すこと。Dartからは `dart:js_interop` で呼び、結果をJSONで返す。写真モードの計算も持つ | 手のメッシュの実寸化・手のモデルの組み立て（生成APIが行う） |
-| 1円玉の自動検出（`app/web_engine/src/coin_worker.ts` → `app/web/js/coin_worker.js`） | ブラウザ（Web Worker） | OpenCV.jsで、画像の中の楕円から1円玉を探す（手の上の丸を外し、手の大きさから大きさの見当をつける）。Web Workerで動かし、画面を止めない | 寸法の計算 |
+| 1円玉の自動検出（`app/web_engine/src/coin_worker.ts` → `app/web/js/coin_worker.js`） | ブラウザ（Web Worker） | OpenCV.jsで、画像の中の楕円から1円玉を探す（指先と爪のまわりの丸を外し、手の甲に置いた1円玉を先に選び、手の大きさから大きさの見当をつける）。Web Workerで動かし、画面を止めない | 寸法の計算 |
 | MediaPipe（Hand Landmarker） | ブラウザ（WebAssembly） | フレームから21点を返す（`numHands: 2`。2つ以上見つかったら、そのフレームを捨てる）。Interactive Segmenterは使わない（CPUで1回約5秒かかり画面が止まる。GPUでは空のマスクが返った） | 寸法の計算 |
 | three.js ビューア（`app/web/js/stl_viewer.js`） | ブラウザ | STLの表示、手のメッシュ（GLB）の表示（S5）、手のメッシュにカバーとクリップと道具の棒を重ねる表示（S7。どれも手の座標系なので、そのまま重なる）、回転・拡大、色の変更 | 形を変えること |
 | 生成API（`api/`） | Cloud Run | IDトークンの検証、回数制限、同意の記録、`hand-mesh` の結果トークンと手のメッシュのハッシュの検証、聞き取り、手のモデル（`handmodel`：手の甲の4区間の倍率で実寸化、カバーの目印＝切る面・レールの位置・スリットの範囲）、カバーの殻と内側を守る立体の計算（距離場とマーチングキューブ）、スリット・空気穴・レールの位置の計算、基準値の計算、Geminiの呼び出し、範囲チェック、OpenSCADの実行、描いたあとの検査（手のひら側に材料がない・手首を覆わないなど、装具にしないための検査を含む）、Firestore・Storageへの書き込み、OTの確認の受け付け | 映像を受け取ること（受け取る口を作らない）、手の姿勢を作り直すこと（MHRのモデルとGPUは `hand-mesh` だけが持つ） |
@@ -98,7 +98,7 @@ sequenceDiagram
   participant API as 生成API
   U->>App: 同意して進む（手のメッシュを保存することも含む）
   App->>API: POST /consent（mesh-consent-2）
-  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（15〜20秒。カメラは固定して手を回す）
+  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（15〜20秒。1円玉は手の甲、手は動かさずカメラを半周）
   App->>EN: 候補フレーム（メモリ内）
   EN->>MP: 最初のフレーム
   EN->>CV: 最初のフレームと手の21点
