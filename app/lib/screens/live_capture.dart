@@ -40,7 +40,7 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
       setState(() {
         _ready = true;
         _cameras = (r['cameras'] as num?)?.toInt() ?? 1;
-        _status = '手と1円玉が画面に入るように構えてください';
+        _status = '1円玉を手の甲に置き、こぶし全体が画面に入るように構えてください';
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -106,8 +106,8 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
         ? (_Tone.error, _error!)
         : _recording
         ? (_handVisible
-              ? (_Tone.success, '手が見えています。カメラは動かさずに、こぶしをゆっくり回してください。')
-              : (_Tone.warning, '手が見えません。手と1円玉が画面に入るようにしてください。'))
+              ? (_Tone.success, '手が見えています。手は動かさずに、スマホをこぶしのまわりでゆっくり半周させてください。')
+              : (_Tone.warning, '手が見えません。こぶし全体が画面に入るようにしてください。'))
         : (_Tone.info, _status);
 
     return Scaffold(

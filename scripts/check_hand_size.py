@@ -44,21 +44,31 @@ def surface_metrics(glb: bytes, hand_side: str | None = None) -> dict:
     s = rel @ d
     perp = np.linalg.norm(rel - s[:, None] * d, axis=1)
     skin = Vc[np.argmax(np.where((s > 0) & (perp < 3.0), s, -np.inf))]
-    def knuckle_peak(p, r=18.0):
-        """付け根の出っ張りのてっぺん：関節のまわりで、指先側（+y）と手の甲側（−z）の間の45度にいちばん出ている点"""
-        near = Vc[np.linalg.norm(Vc - np.asarray(p), axis=1) < r]
+    mcp = {f: np.asarray(Jc[f][0], dtype=float) for f in ("index", "middle", "ring", "pinky")}
+    M = np.stack(list(mcp.values()))
+    owner = np.argmin(np.linalg.norm(Vc[:, None, :] - M[None, :, :], axis=2), axis=1)   # どの指の付け根に一番近いか
+
+    def knuckle_peak(f, r=16.0):
+        """付け根の出っ張りのてっぺん：その指の付け根に一番近い頂点（隣の指の出っ張りは拾わない）のうち、
+        指先側（+y）と手の甲側（−z）の間の45度にいちばん出ている点"""
+        i = list(mcp).index(f)
+        sel = (owner == i) & (np.linalg.norm(Vc - mcp[f], axis=1) < r)
+        near = Vc[sel]
         return near[np.argmax(near @ np.array([0.0, 1.0, -1.0]) / np.sqrt(2.0))]
 
-    # 手首側：メッシュは手首の5mm先で切ってあるので、切り口のふちの手の甲側の点に、切った分（5mm）を足す
-    y0 = float(Vc[:, 1].min())
-    edge = Vc[Vc[:, 1] < y0 + 4.0]
-    wrist_edge = edge[np.argmin(edge[:, 2])]
-    mcp9_top = knuckle_peak(Jc["middle"][0])
-    mcp5_top, mcp17_top = knuckle_peak(Jc["index"][0]), knuckle_peak(Jc["pinky"][0])
+    # 手首側：メッシュは手首の少し先で切ってある。中指の中手骨の線の上（x が手首と中指の付け根の間）で、手首に近い所の
+    # いちばん手の甲側の皮膚の点を取り、そこから手首の関節までの y の差を足す（定規は手首のしわ＝手首の関節の真上から測る）
+    w, m9 = np.asarray(Jc["wrist"], dtype=float), mcp["middle"]
+    xs = sorted([w[0], m9[0]])
+    band = Vc[(Vc[:, 1] < w[1] + 15.0) & (Vc[:, 0] > xs[0] - 8.0) & (Vc[:, 0] < xs[1] + 8.0)]
+    wrist_top = band[np.argmin(band[:, 2])]
+    mcp9_top = knuckle_peak("middle")
+    mcp5_top, mcp17_top = knuckle_peak("index"), knuckle_peak("pinky")
     return {
         "height_mm": round(z_table - float(skin[2]), 1),
-        "dorsal_mm": round(float(np.linalg.norm(wrist_edge - mcp9_top)) + max(0.0, y0 - float(Jc["wrist"][1])), 1),
+        "dorsal_mm": round(float(np.linalg.norm(wrist_top - mcp9_top)) + max(0.0, float(wrist_top[1] - w[1])), 1),
         "width_mm": round(float(np.linalg.norm(mcp5_top - mcp17_top)), 1),
+        "joint_width_mm": round(float(np.linalg.norm(mcp["index"] - mcp["pinky"])), 1),
         "joint_wrist_to_middle_mcp_mm": round(float(np.linalg.norm(Jc["wrist"] - Jc["middle"][0])), 1),
         "scale_factor": ex.get("scale_factor"),
     }
@@ -103,7 +113,9 @@ def main() -> None:
         print(f"   採寸（関節の中心どうし）：手首→人差し指 {palm.get('wrist_to_index_mcp_mm')}・中指 {palm.get('wrist_to_middle_mcp_mm')}・"
               f"小指 {palm.get('wrist_to_pinky_mcp_mm')}・付け根の幅 {palm.get('hand_width_mcp_mm')} mm")
     print(f"   3Dの手（表面）：こぶしの高さ {mt['height_mm']}・手首→中指の付け根 {mt['dorsal_mm']}・付け根の幅 {mt['width_mm']} mm"
-          f"（関節の中心どうしの 手首→中指 {mt['joint_wrist_to_middle_mcp_mm']} mm）")
+          f"（関節の中心どうし：手首→中指 {mt['joint_wrist_to_middle_mcp_mm']}・付け根の幅 {mt['joint_width_mm']} mm）")
+    if mt["dorsal_mm"] < mt["joint_wrist_to_middle_mcp_mm"] or mt["width_mm"] < mt["joint_width_mm"] * 0.8:
+        print("   注意：表面の値が関節の値より小さく、点を拾い間違えたおそれがあります。係数の案は使わないでください")
     ratios = []
     for name, ruler, key in (("こぶしの高さ", a.height, "height_mm"), ("手首→中指の付け根", a.dorsal, "dorsal_mm"),
                              ("付け根の幅", a.width, "width_mm")):
