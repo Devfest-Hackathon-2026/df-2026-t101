@@ -1,5 +1,8 @@
 // 1円玉の自動検出（OpenCV.js）。タップしなくても、画像の中の楕円から1円玉を探す。
-// 手の21点が分かっていれば、手の上の丸（爪・関節）を外し、手の大きさから1円玉の大きさの見当をつける。
+// 手の21点が分かっていれば、指と関節の上の丸（爪・関節）を外し、手の大きさから1円玉の大きさの見当をつける。
+// 1円玉は手の甲のまん中に置く（2026-11-09）。測る点（手首と指の付け根）と同じ高さにあるので、机に置いたとき
+// のように、カメラからの距離の差で手が大きく測られることがない。手の上の丸は、指先と爪のまわりだけを外し、
+// それ以外（手の甲・横から見た手の甲のふくらみ）は、楕円にきれいに乗ったものを受け付けて、机の上の丸より先に選ぶ。
 // cv は OpenCV.js のモジュール（読み込みは engine.ts）。ここは画像処理だけで、DOM に触らない（Node でも試せる）。
 
 export type CoinEllipse = {
@@ -8,6 +11,7 @@ export type CoinEllipse = {
   ratio: number; angle: number; // 短径÷長径、傾き（度）
   areaRatio: number; momentMajor: number; pixels: number; // ほかの方法の結果と同じ形にするため
   fitErr: number; coverage: number; score: number;
+  onHand?: boolean;             // 手の甲の上にあるか
 };
 
 export type CoinHints = {
@@ -30,6 +34,29 @@ function inPolygon(p: { x: number; y: number }, poly: { x: number; y: number }[]
   }
   return inside;
 }
+
+/** 手の甲の範囲：手首・親指の根元・4本の指の付け根の凸包を、重心から1.3倍に広げたもの。
+ * 横から見たときは手の甲の面が点の外へふくらんで見えるので、少し広げる。指（PIP から先）と爪はこの外になる */
+export function backOfHandPoly(hand: { x: number; y: number }[]) {
+  const ids = [0, 1, 5, 9, 13, 17];
+  const pts = ids.map((i) => hand[i]);
+  const c = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
+  return hull(pts).map((p) => ({ x: c.x + (p.x - c.x) * 1.3, y: c.y + (p.y - c.y) * 1.3 }));
+}
+
+/** 手全体の凸包を、重心から scale 倍に広げたもの */
+function handHull(hand: { x: number; y: number }[], scale: number) {
+  const c = hand.reduce((a, p) => ({ x: a.x + p.x / hand.length, y: a.y + p.y / hand.length }), { x: 0, y: 0 });
+  return hull(hand).map((p) => ({ x: c.x + (p.x - c.x) * scale, y: c.y + (p.y - c.y) * scale }));
+}
+
+/** 点が手の上か（手の21点は同じ座標のpx）。横から見ると手の甲は点の外へふくらんで写るので、凸包を1.25倍に広げて見る。
+ * 机の上の1円玉を使っていないかを知らせるため（解析の警告 COIN_OFF_HAND） */
+export function onBackOfHand(p: { x: number; y: number }, hand?: { x: number; y: number }[]) {
+  return !!hand && hand.length === 21 && (inPolygon(p, backOfHandPoly(hand)) || inPolygon(p, handHull(hand, 1.25)));
+}
+
+const NAIL_IDS = [3, 4, 7, 8, 11, 12, 15, 16, 19, 20];   // 指先と、その1つ手前の関節（爪と指先の丸）
 
 /** 凸包（Andrew の方法） */
 function hull(pts: { x: number; y: number }[]) {
@@ -68,13 +95,23 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
     }
 
     // 手（縮めた座標）：凸包を少し広げたもの。手のひらの幅（人差し指と小指の付け根の間）
-    let handPoly: { x: number; y: number }[] | undefined, palmW: number | undefined;
+    let handPoly: { x: number; y: number }[] | undefined, backPoly: { x: number; y: number }[] | undefined, palmW: number | undefined;
+    let nails: { x: number; y: number }[] = [];
     if (hints.hand?.length === 21) {
       const hp = hints.hand.map((p) => ({ x: p.x * k, y: p.y * k }));
-      const c = hp.reduce((a, p) => ({ x: a.x + p.x / 21, y: a.y + p.y / 21 }), { x: 0, y: 0 });
-      handPoly = hull(hp).map((p) => ({ x: c.x + (p.x - c.x) * 1.12, y: c.y + (p.y - c.y) * 1.12 }));
+      handPoly = handHull(hp, 1.25);
+      backPoly = backOfHandPoly(hp);
       palmW = Math.hypot(hp[5].x - hp[17].x, hp[5].y - hp[17].y);
+      // 握りこぶしを真上から見ると、指先は手のひらの下に隠れ、その点は手の甲の範囲の中に来る。隠れた指先の爪は
+      // 写らないので外さない（外すと、手の甲のまん中の1円玉まで外してしまった。11/9 の動画）
+      nails = NAIL_IDS.map((i) => hp[i]).filter((q) => !inPolygon(q, backPoly!));
     }
+    // 指先と爪のまわり（人差し指と小指の付け根の間の18%）は外す。手の甲・手の横は1円玉の候補（'back'）、手の外は 'off'。
+    // 横から見ると手の甲は点の外へふくらんで写り、付け根の幅も縮むので、手の甲の範囲だけに絞ると1円玉を取りこぼした（11/9 の動画）
+    const nailR = palmW ? Math.max(6, palmW * 0.18) : 0;
+    const where = (p: { x: number; y: number }) =>
+      nails.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < nailR) ? 'finger'
+        : (backPoly && inPolygon(p, backPoly)) || (handPoly && inPolygon(p, handPoly)) ? 'back' : 'off';
     const L = Math.max(W, H) * k;
     const minMajor = Math.max(10, (hints.minMajor ?? 14) * k), maxMajor = L * 0.3;
 
@@ -103,9 +140,13 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
         const fitErr = err / n, coverage = bins.reduce((s, x) => s + x, 0) / 36;
         if (fitErr > 0.06 || coverage < 0.75) continue;
         const center = { x: e.center.x, y: e.center.y };
-        if (handPoly && inPolygon(center, handPoly)) continue; // 手の上の丸（爪・関節）
-        // 点数（小さいほどよい）
-        let score = fitErr * 10 + (1 - coverage) * 2;
+        const at = where(center);
+        if (at === 'finger') continue; // 指と関節の上の丸（爪・関節）
+        // 手の上は、関節の出っ張りや皮膚の模様と間違えないよう、楕円にきれいに乗ったものだけ。明るい肌との境目で輪郭が
+        // 途切れやすいので、ぐるりの覆いは机の上と同じ（0.75）にする（0.85 にしたら、真上からの1円玉まで落ちた。11/9 の動画）
+        if (at === 'back' && fitErr > 0.035) continue;
+        // 点数（小さいほどよい）。手の甲の上の1円玉を、机の上の1円玉より先に選ぶ
+        let score = fitErr * 10 + (1 - coverage) * 2 + (at === 'back' ? -0.5 : 0);
         if (palmW) {
           // 1円玉（20mm）は、人差し指と小指の付け根の間（大人で約55〜65mm）の約1/3
           const r = (2 * a) / palmW;
@@ -115,14 +156,15 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
         if (hints.prev) {
           const dp = Math.hypot(center.x - hints.prev.cx * k, center.y - hints.prev.cy * k) / L;
           const ds = Math.abs(Math.log((2 * a) / (hints.prev.major * k)));
-          if (ds > 0.25) continue; // 大きさが急に変わったものは別の物
+          // 大きさが急に変わったものは別の物。カメラを動かして撮るので、距離の変化の分（約1.5倍まで）は許す
+          if (ds > 0.4) continue;
           score += dp * 4 + ds * 3;
         }
         if (hints.near) score += (Math.hypot(center.x - hints.near.x * k, center.y - hints.near.y * k) / L) * 8;
         cands.push({
           cx: center.x / k, cy: center.y / k, major: (2 * a) / k, minor: (2 * b) / k, ratio: b / a, angle: e.angle,
           areaRatio: 1, momentMajor: (2 * a) / k, pixels: Math.round(Math.PI * a * b / (k * k)),
-          fitErr, coverage, score,
+          fitErr, coverage, score, onHand: at === 'back',
         });
       } finally {
         cnt.delete();
@@ -138,7 +180,7 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
       for (let r = minMajor / 2; r <= maxMajor / 2; r *= 1.3) radii.push(r);
       const center = hints.near ? { x: hints.near.x * k, y: hints.near.y * k } : hints.prev ? { x: hints.prev.cx * k, y: hints.prev.cy * k } : { x: sw / 2, y: sh / 2 };
       const spots = roundSpots(grayF, sw, sh, center, radii, 12, hints.near || hints.prev ? sw / 4 : Infinity)
-        .filter((sp) => !(handPoly && inPolygon(sp, handPoly)));
+        .filter((sp) => where(sp) !== 'finger');
       for (const sp of spots.slice(0, 8)) {
         const half = Math.ceil(sp.r * 2.6);
         const x0 = Math.max(0, Math.round(sp.x) - half), y0 = Math.max(0, Math.round(sp.y) - half);
@@ -150,18 +192,20 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
         if (!e || e.major < minMajor || e.major > maxMajor || e.ratio < 0.35) continue;
         if (e.areaRatio < 0.85 || e.areaRatio > 1.15 || Math.abs(e.momentMajor - e.major) / e.major > 0.05) continue;
         const c = { x: e.cx + x0, y: e.cy + y0 };
-        if (handPoly && inPolygon(c, handPoly)) continue;
+        const at = where(c);
+        if (at === 'finger') continue;
         const fitErr = Math.abs(e.areaRatio - 1) * 0.3 + Math.abs(e.momentMajor - e.major) / e.major;
-        let score = fitErr * 10 + 0.15;  // 輪郭の方法より少しだけ後に回す
+        let score = fitErr * 10 + 0.15 + (at === 'back' ? -0.5 : 0);  // 輪郭の方法より少しだけ後に回す。手の甲の上を先に
         if (palmW) { const r = e.major / palmW; if (r < 0.12 || r > 0.8) continue; score += Math.abs(Math.log(r / 0.33)) * 0.6; }
         if (hints.prev) {
           const ds = Math.abs(Math.log(e.major / (hints.prev.major * k)));
-          if (ds > 0.25) continue;
+          if (ds > 0.4) continue;
           score += (Math.hypot(c.x - hints.prev.cx * k, c.y - hints.prev.cy * k) / L) * 4 + ds * 3;
         }
         if (hints.near) score += (Math.hypot(c.x - hints.near.x * k, c.y - hints.near.y * k) / L) * 8;
         cands.push({ cx: c.x / k, cy: c.y / k, major: e.major / k, minor: e.minor / k, ratio: e.ratio, angle: (e.angle * 180) / Math.PI,
-          areaRatio: e.areaRatio, momentMajor: e.momentMajor / k, pixels: Math.round(e.pixels / (k * k)), fitErr, coverage: 1, score });
+          areaRatio: e.areaRatio, momentMajor: e.momentMajor / k, pixels: Math.round(e.pixels / (k * k)), fitErr, coverage: 1, score,
+          onHand: at === 'back' });
       }
     } finally {
       smallRgba.delete();

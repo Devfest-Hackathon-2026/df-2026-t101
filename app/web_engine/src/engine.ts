@@ -3,6 +3,7 @@
 // 例外：角度の推定のため、手を切り抜いたフレーム（最大8枚）だけを、同意を得て hand-mesh に送る（§11）。
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import type { CoinEllipse, CoinHints } from './coin_cv';
+import { onBackOfHand } from './coin_cv';
 import * as G from './geometry';
 import * as Cam from './camera';
 import type { P2, P3, Finger } from './geometry';
@@ -15,6 +16,7 @@ type Frame = {
   lm?: P2[];            // 画像のpx
   world?: P3[];         // メートル（推定値。長さには使わない）
   coin?: Ellipse;       // 画像のpx
+  coinOnHand?: boolean; // 1円玉が手の甲の上にあったか（机の上なら、手が大きく測られる）
   s?: number;           // px/mm
   palmArea?: number;    // mm²
   fingerLen?: Record<Finger, number>;
@@ -25,6 +27,11 @@ type Frame = {
 
 const SAMPLE_FPS = 6;
 const KEEP_PER_SEC = 3;
+// 長さの補正係数（measurement.md §10.3）。生成APIが倍率に掛ける。1円玉は手の甲の皮膚の上、測る点は関節の中心で、
+// 1円玉がカメラに近い分だけ手が約5%小さく出た（11/9、1人・動画1本：定規の手首→中指 90mm（表面）＝関節で約81mm、採寸 76.6mm）。
+// 仮の値。本番で撮り直し、scripts/check_hand_size.py で3Dの手の表面の寸法と定規を比べて決め直す
+const LENGTH_FACTOR = 1.05;
+const LENGTH_FACTOR_SOURCE = '2026-11-09-provisional';
 const MAX_SECONDS = 25;          // 撮影の目安は15〜20秒（2026-11-08 に5〜10秒から）。動画ファイルは25秒までを使う
 const MAX_CANDIDATES = 60;       // 候補の画像は60枚まで（メモリ対策。camera.ts と同じ）
 const ANALYSIS_LONG_SIDE = 1280;
@@ -255,7 +262,7 @@ function detectHand(f: Frame) {
 }
 
 /**
- * 1円玉を探す。まず OpenCV で画像全体から楕円を探す（手の上は外し、手の大きさから1円玉の大きさの見当をつける）。
+ * 1円玉を探す。まず OpenCV で画像全体から楕円を探す（指と関節の上は外し、手の甲の上を先に選び、手の大きさから1円玉の大きさの見当をつける）。
  * near（タップした点）があれば、その近くのものだけ。prev（前のフレームの1円玉）があれば、近くて大きさが近いもの。
  * 見つからなければ、タップした点か前の中心のまわりで、色で領域を広げる方法を使う。
  */
@@ -269,7 +276,8 @@ async function findCoin(f: Frame, opt: { near?: { x: number; y: number }; prev?:
   if (list) {
     const c = list.find((c) =>
       (!opt.near || Math.hypot(c.cx - opt.near.x, c.cy - opt.near.y) < Math.max(0.08 * L, c.major)) &&
-      (!opt.prev || Math.hypot(c.cx - opt.prev.cx, c.cy - opt.prev.cy) < 0.2 * L));
+      // 前のフレームの近く。手の上の1円玉はカメラの動きと一緒に動くので、手の上なら位置の差は問わない（11/9）
+      (!opt.prev || c.onHand || Math.hypot(c.cx - opt.prev.cx, c.cy - opt.prev.cy) < 0.2 * L));
     if (c) { coin = c; via = 'opencv'; }
   }
   const seed = opt.near ?? (opt.prev ? { x: opt.prev.cx, y: opt.prev.cy } : undefined);
@@ -365,8 +373,10 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
       : await findCoin(f, { prev });
     if (!coin) { f.reject = 'NO_COIN'; continue; }
     const s = coin.major / COIN_MM;
-    if (st.mode === 'video' && prevS && Math.abs(s - prevS) / prevS > 0.15) { f.reject = 'COIN_JUMP'; continue; }
+    // 1円玉の大きさが急に変わったら、別の物に乗り換えたとみなす。カメラを動かして撮るので、距離の変化の分（35%まで）は許す（11/9）
+    if (st.mode === 'video' && prevS && Math.abs(s - prevS) / prevS > 0.35) { f.reject = 'COIN_JUMP'; continue; }
     f.coin = coin; f.s = s; prevS = s;
+    f.coinOnHand = onBackOfHand({ x: coin.cx, y: coin.cy }, f.lm);
     prev = { cx: coin.cx, cy: coin.cy, major: coin.major };
     const w = f.world;
     if (w.length === 21) f.side = w[5].z < w[17].z ? 'thumb_side' : 'pinky_side';
@@ -383,6 +393,9 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   }
   if (st.mode === 'video' && ok.length < 10) warnings.add('FEW_FRAMES');
   if (st.coinManual) warnings.add('COIN_MANUAL');
+  // 1円玉は手の甲のまん中に置く（2026-11-09）。机の上の1円玉はこぶしの高さの分だけカメラから遠く、小さく写るので、
+  // 手が1.2〜1.5倍に大きく測られる（実測：こぶしの高さ 6〜7cm が約10cm に出た）。半分より多くのフレームで机の上なら知らせる
+  if (ok.filter((f) => f.coinOnHand).length * 2 < ok.length) warnings.add('COIN_OFF_HAND');
 
   // 手の甲が真上に近いフレーム（手のひらの見かけの面積の上位20%）
   const maxArea = Math.max(...ok.map((f) => f.palmArea!));
@@ -495,7 +508,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     scale: { reference: 'jp_1yen', diameter_mm: 20.0, method: st.coinManual ? 'coin_manual' : st.coinTapped ? 'coin_tapped' : 'coin_auto', px_per_mm_median: r2(G.median(sVals)), px_per_mm_iqr: r2(G.iqr(sVals)) },
     fingers,
     palm: { mcp_positions_mm: mcpPos, ...palm, segments_source: 'auto' },
-    calibration: { length_factor: 1.0, source: 'default' },
+    calibration: { length_factor: LENGTH_FACTOR, source: LENGTH_FACTOR_SOURCE },
     manual_points: [] as any[],
     quality: { warnings: [...warnings], views_covered: [...views] },
     method_version: 'measure-2.2',

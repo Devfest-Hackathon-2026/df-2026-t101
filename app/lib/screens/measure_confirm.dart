@@ -277,6 +277,14 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
                     '手の3Dの曲がり角と、画像からの見積もりが15度以上違う関節があります。作業療法士に確かめてもらいます。',
                   ),
                 ),
+              if (warnings.contains('COIN_OFF_HAND'))
+                const InfoCard(
+                  tone: NoticeTone.warning,
+                  child: Text(
+                    '1円玉が手の甲の上にないフレームが多く、手が実物より大きく測られているおそれがあります。'
+                    '1円玉を手の甲のまん中に置いて、撮り直してください。',
+                  ),
+                ),
               if (warnings.contains('FEW_FRAMES') ||
                   warnings.contains('VIEW_BIASED'))
                 const InfoCard(

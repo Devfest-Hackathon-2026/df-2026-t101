@@ -43,6 +43,7 @@ const _warningJa = {
   'VIEW_BIASED': ('見えていない向きがあります', true),
   'POINTS_MANUAL': ('手首と付け根の点を手で直しました', false),
   'COIN_MANUAL': ('1円玉を手で指定しました', false),
+  'COIN_OFF_HAND': ('1円玉が手の甲の上になく、手が大きめに測られているおそれがあります', true),
   'ABDUCTION_UNKNOWN': ('指の開きの向きが決まらず、0度にしました（比較用）', false),
   'FINGERS_SPREAD': ('指の間隔が広く、比較用の太さを仮の比で出しました', false),
 };
