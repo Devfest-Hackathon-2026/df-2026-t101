@@ -108,7 +108,10 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
     }
     // 指先と爪のまわり（人差し指と小指の付け根の間の18%）は外す。手の甲・手の横は1円玉の候補（'back'）、手の外は 'off'。
     // 横から見ると手の甲は点の外へふくらんで写り、付け根の幅も縮むので、手の甲の範囲だけに絞ると1円玉を取りこぼした（11/9 の動画）
-    const nailR = palmW ? Math.max(6, palmW * 0.18) : 0;
+    // タップした（near）ときは、手の点からの絞り込み（爪のまわりを外す・手の上を厳しく・手の幅との比）をかけない。
+    // 握りこぶしでは手の点がずれやすく、はっきり写った1円玉までタップしても外していた（2026-11-09）。形の条件は残す
+    const tapped = !!hints.near;
+    const nailR = palmW && !tapped ? Math.max(6, palmW * 0.18) : 0;
     const where = (p: { x: number; y: number }) =>
       nails.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < nailR) ? 'finger'
         : (backPoly && inPolygon(p, backPoly)) || (handPoly && inPolygon(p, handPoly)) ? 'back' : 'off';
@@ -144,13 +147,13 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
         if (at === 'finger') continue; // 指と関節の上の丸（爪・関節）
         // 手の上は、関節の出っ張りや皮膚の模様と間違えないよう、楕円にきれいに乗ったものだけ。明るい肌との境目で輪郭が
         // 途切れやすいので、ぐるりの覆いは机の上と同じ（0.75）にする（0.85 にしたら、真上からの1円玉まで落ちた。11/9 の動画）
-        if (at === 'back' && fitErr > 0.035) continue;
+        if (at === 'back' && fitErr > 0.035 && !tapped) continue;
         // 点数（小さいほどよい）。手の甲の上の1円玉を、机の上の1円玉より先に選ぶ
         let score = fitErr * 10 + (1 - coverage) * 2 + (at === 'back' ? -0.5 : 0);
         if (palmW) {
           // 1円玉（20mm）は、人差し指と小指の付け根の間（大人で約55〜65mm）の約1/3
           const r = (2 * a) / palmW;
-          if (r < 0.12 || r > 0.8) continue;
+          if ((r < 0.12 || r > 0.8) && !tapped) continue;
           score += Math.abs(Math.log(r / 0.33)) * 0.6;
         }
         if (hints.prev) {
@@ -196,7 +199,7 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
         if (at === 'finger') continue;
         const fitErr = Math.abs(e.areaRatio - 1) * 0.3 + Math.abs(e.momentMajor - e.major) / e.major;
         let score = fitErr * 10 + 0.15 + (at === 'back' ? -0.5 : 0);  // 輪郭の方法より少しだけ後に回す。手の甲の上を先に
-        if (palmW) { const r = e.major / palmW; if (r < 0.12 || r > 0.8) continue; score += Math.abs(Math.log(r / 0.33)) * 0.6; }
+        if (palmW) { const r = e.major / palmW; if ((r < 0.12 || r > 0.8) && !tapped) continue; score += Math.abs(Math.log(r / 0.33)) * 0.6; }
         if (hints.prev) {
           const ds = Math.abs(Math.log(e.major / (hints.prev.major * k)));
           if (ds > 0.4) continue;
