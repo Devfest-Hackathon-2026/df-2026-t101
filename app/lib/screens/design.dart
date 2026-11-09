@@ -76,6 +76,9 @@ class _DesignScreenState extends State<DesignScreen> {
   final _instruction = TextEditingController();
   Timer? _poll;
   int _pollCount = 0;
+  // 通信が切れたあと、サーバーで続いている作業を進み具合から追いかけている。スマホを裏に回したり画面を消したりすると、
+  // 待っている通信が切れ、「通信できませんでした」で止まって見えた。サーバーは最後まで作っていた（2026-11-09）
+  bool _detached = false;
 
   String get _cid => widget.caseId;
 
@@ -165,7 +168,12 @@ class _DesignScreenState extends State<DesignScreen> {
         }
         final c = await Api.instance.get('/v1/cases/$_cid');
         final id = c['current_design_id'];
-        if (id == null) return;
+        final busy = c['active_operation'] != null;
+        if (id == null) {
+          // 版ができる前に切れた（サーバーに届かなかった）：作業がなければ、通信のエラーとして見せる
+          if (_detached && !busy && mounted) _detachedFailed();
+          return;
+        }
         final r = await Api.instance.get('/v1/cases/$_cid/designs/$id');
         final d = Map<String, dynamic>.from(r['design'] ?? r);
         final p = Map<String, dynamic>.from(d['progress'] ?? {});
@@ -175,9 +183,20 @@ class _DesignScreenState extends State<DesignScreen> {
           _round = (p['round'] as num?)?.toInt();
           _progressIso = _isoPath(d) ?? _progressIso;
         });
-        if (!_inProgress(d['status']) && !_generating) {
+        if (!_inProgress(d['status']) && !busy && (!_generating || _detached)) {
           _poll?.cancel();
-          _setDesign(d);
+          final shown = _design?['design_id'];
+          final wasDetached = _detached;
+          setState(() {
+            _detached = false;
+            _generating = false;
+            _busy = null;
+          });
+          if (wasDetached && shown != null && id != shown) {
+            _openVersion(id as String); // 微調整で新しい版ができていた
+          } else {
+            _setDesign(d);
+          }
         }
       } catch (_) {
         /* 接続が切れても失敗と決めない（screens.md S6 復旧） */
@@ -206,6 +225,10 @@ class _DesignScreenState extends State<DesignScreen> {
       final c = await Api.instance.get('/v1/cases/$_cid');
       setState(() => _case = Map<String, dynamic>.from(c));
     } on ApiError catch (e) {
+      if (e.code == 'NETWORK') {
+        _followServer();
+        return;
+      }
       _poll?.cancel();
       setState(() {
         _error = e.code == 'AI_UNAVAILABLE'
@@ -214,8 +237,44 @@ class _DesignScreenState extends State<DesignScreen> {
         _errorRetry = true;
       });
     } finally {
-      if (mounted) setState(() => _generating = false);
+      if (mounted && !_detached) setState(() => _generating = false);
     }
+  }
+
+  /// 待っていた通信が切れた。サーバーでは作業が続いているので、エラーにせず進み具合を読み続ける
+  void _followServer() {
+    if (!mounted) return;
+    setState(() {
+      _detached = true;
+      _error = null;
+    });
+    _startPolling();
+  }
+
+  void _detachedFailed() {
+    _poll?.cancel();
+    setState(() {
+      _detached = false;
+      _generating = false;
+      _busy = null;
+      _error = '通信できませんでした。インターネットの接続を確かめて、もう一度試してください。';
+      _errorRetry = true;
+    });
+  }
+
+  /// 新しい版を開く（パスも新しい版にする。戻るでケース一覧へ）
+  void _openVersion(String nid) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        settings: RouteSettings(name: AppRouter.design(_cid, nid)),
+        builder: (_) => DesignScreen(
+          caseId: _cid,
+          designId: nid,
+          recommendedAngles: _recommended,
+          attachmentId: _attId,
+        ),
+      ),
+    );
   }
 
   Future<void> _refine(Map<String, dynamic> body, String busyText) async {
@@ -240,25 +299,17 @@ class _DesignScreenState extends State<DesignScreen> {
         _attId = selectionAfter(before, _attachments(nd), _attId);
         _setDesign(nd);
         if (r['design']['design_id'] != d['design_id'] && mounted) {
-          // 新しい版：パスも新しい版にする（戻るでケース一覧へ）
-          final nid = r['design']['design_id'];
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              settings: RouteSettings(name: AppRouter.design(_cid, nid)),
-              builder: (_) => DesignScreen(
-                caseId: _cid,
-                designId: nid,
-                recommendedAngles: _recommended,
-                attachmentId: _attId,
-              ),
-            ),
-          );
+          _openVersion(r['design']['design_id'] as String); // 新しい版
         }
       }
     } on ApiError catch (e) {
+      if (e.code == 'NETWORK') {
+        _followServer();
+        return;
+      }
       setState(() => _error = e.message);
     } finally {
-      if (mounted) setState(() => _busy = null);
+      if (mounted && !_detached) setState(() => _busy = null);
     }
   }
 
