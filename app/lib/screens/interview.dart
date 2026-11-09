@@ -41,6 +41,34 @@ class _InterviewScreenState extends State<InterviewScreen> {
   bool _busy = false;
   String? _error;
   int _turns = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  /// 前に答えた内容を戻す（開き直すと、前の答えが空に戻っていた。2026-11-09）
+  Future<void> _load() async {
+    try {
+      final c = Map<String, dynamic>.from(
+        await Api.instance.get('/v1/cases/${widget.caseId}'),
+      );
+      final r = Map<String, dynamic>.from(c['requirements'] as Map? ?? {});
+      if (!mounted) return;
+      setState(() {
+        a.loadFrom(r);
+        _notes = List<String>.from(r['notes'] as List? ?? []);
+        _turns = (c['turn_count'] as num?)?.toInt() ?? 0;
+        if (a.isComplete) _q = 8; // 全部答えてあれば、まとめから（鉛筆のボタンで直せる）
+      });
+    } catch (_) {
+      // 読めなくても、最初から答えれば進める
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -146,6 +174,13 @@ class _InterviewScreenState extends State<InterviewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return AppPage(
+        title: 'やりたいこと',
+        onBack: () => Navigator.of(context).pop(),
+        children: const [BusyCard(text: '前に答えた内容を読み込んでいます')],
+      );
+    }
     if (_q == 7) return _chatPage();
     if (_q == 8) return _summaryPage();
     final (title, choices) = _question(_q);

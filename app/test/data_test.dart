@@ -29,6 +29,29 @@ void main() {
       expect(a.toJson()['tool_shaft_size'], 'thick');
       expect(a.isAnswered(2), isTrue);
     });
+    test('保存済みの答えを戻す（mmで入れたとき）', () {
+      final a = Answers()
+        ..loadFrom({
+          'activity': 'draw', 'tool_type': 'brush', 'hand_side': 'left',
+          'tool_d_mm': 9.5, 'tool_d_source': 'user', 'tool_shaft_size': null,
+          'tool_shaft_shape': 'round', 'donning_by': 'helper',
+          'finger_state': 'fist', 'capture_by': 'self', 'notes': ['筆は細め'],
+        });
+      expect(a.toolDmm, 9.5);
+      expect(a.shaftSize, isNull);
+      expect(a.handSide, 'left');
+      expect(a.isComplete, isTrue);
+    });
+    test('区分で答えたときは、サーバーが入れた目安の mm ではなく区分として戻す', () {
+      final a = Answers()
+        ..loadFrom({
+          'tool_d_mm': 11.5, 'tool_d_source': 'category', 'tool_shaft_size': 'thick',
+        });
+      expect(a.toolDmm, isNull);
+      expect(a.shaftSize, 'thick');
+      expect(a.toJson()['tool_shaft_size'], 'thick');
+      expect(a.isComplete, isFalse);
+    });
   });
 
   group('APIのエラー（api.md §5）', () {

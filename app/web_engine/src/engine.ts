@@ -486,7 +486,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
       source: st.source,
       duration_s: st.mode === 'video' ? r1(clamp(st.duration, 0.1, MAX_SECONDS)) : undefined,
       frames_sampled: Math.min(90, Math.max(1, st.sampled)),
-      frames_used: Math.min(45, ok.length),
+      frames_used: Math.min(60, ok.length),   // schemas/measurement.schema.json の上限（1秒あたり1〜3枚×最大25秒）
       mesh_consent: true,
       mesh_frames_sent: Math.max(1, Math.min(8, meshFrames.length)),
       mesh_id: '',
