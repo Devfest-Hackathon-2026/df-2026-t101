@@ -588,6 +588,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   color: color,
                   toolDmm: toolD,
                   tool: tool?.cast<String, dynamic>(),
+                  toolType: att['tool_type'] as String?,
                   handSide: _case?['requirements']?['hand_side'] as String?,
                   showHand: _showHand,
                   label: '3Dの表示。カバーとクリップと道具を、手に着けた形で見られます。ドラッグで回せます',
@@ -1761,21 +1762,9 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
     }
   }
 
-  num? _param(String part, String name) {
-    for (final p in (widget.design['params'] as List? ?? [])) {
-      if (p['part_id'] == part && p['name'] == name) return p['value'] as num?;
-    }
-    return null;
-  }
-
   /// 頼む版の画像と番号（Figma：surfaceContainerHighest の箱）
   Widget _versionBox() {
-    final t = _param('cover', 'cover_thickness_mm');
-    final a = _param('c_clip', 'angle_deg');
-    final sub = [
-      if (t != null) 'カバー ${t}mm',
-      if (a != null) 'クリップ ${a.toInt()}度',
-    ].join('・');
+    final sub = versionSummary(widget.design);
     final iso = _isoPath(widget.design);
     return MergeSemantics(
       child: Container(

@@ -190,6 +190,23 @@ List<PrintRow> printRows(Map<String, dynamic> design, Map<String, dynamic>? requ
   return rows;
 }
 
+/// OTに頼むときの版の要約。取り付け具が2つ以上なら道具ごとの角度を並べる（「カバー 2.5mm・筆 70度・ペン 60度」）。
+/// 1つ・古い版は今までどおり「カバー 2.5mm・クリップ 70度」
+String versionSummary(Map<String, dynamic> design) {
+  num? cover;
+  for (final p in (design['params'] as List? ?? const [])) {
+    if (p is Map && p['part_id'] == 'cover' && p['name'] == 'cover_thickness_mm') cover = p['value'] as num?;
+  }
+  final atts = attachmentsOf(design);
+  return [
+    if (cover != null) 'カバー ${_g(cover)}mm',
+    if (atts.length == 1 && atts.first['angle_deg'] != null) 'クリップ ${_g(atts.first['angle_deg'])}度',
+    if (atts.length > 1)
+      for (final a in atts)
+        if (a['angle_deg'] != null) '${attachmentLabel(a, atts)} ${_g(a['angle_deg'])}度',
+  ].join('・');
+}
+
 /// 「クリップは差し替えて使います」の案内を出すか（取り付け具が2つ以上のとき）
 bool showSwapGuide(Map<String, dynamic> design) => attachmentsOf(design).length >= 2;
 
