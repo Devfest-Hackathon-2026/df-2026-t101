@@ -44,7 +44,7 @@ curl http://localhost:8081/healthz
 | `AUTH_MODE` | `dev` | `dev`：`X-User` ヘッダーをユーザーIDとして使う（開発専用）。`firebase`：`Authorization: Bearer <IDトークン>` を確かめる |
 | `STORE_BACKEND` | `local` | `local`：`LOCAL_STORE_DIR`（既定はリポジトリ直下の `.localstore/`）。`gcp`：Cloud Storage（`STORAGE_BUCKET`）と Firestore |
 | `MESH_RESULT_HMAC_KEY` | なし | 結果トークンの鍵。**`AUTH_MODE=dev` のときだけ、なくても `dev-only-key` で動く**。それ以外で未設定なら起動しない（Secret Manager から渡す） |
-| `HAND_MESH_BACKEND` | （なし＝auto） | `sam3d`：本物だけ（読み込み中・失敗の間は `503 MESH_UNAVAILABLE`）。`mock`：モックだけ（カプセルから作ったそれらしい手）。未指定：本物を試し、だめならモック |
+| `HAND_MESH_BACKEND` | （なし＝auto） | `sam3d`：本物だけ（読み込み中・失敗の間は `503 MESH_UNAVAILABLE`）。`mock`：モックだけ（カプセルから作ったそれらしい手）。未指定：本物を試し、だめならモック。**モックは `AUTH_MODE=dev` のときだけ**（それ以外で `mock` を指定すると起動せず、未指定でもモックに切り替えない。生成APIも本番ではモックの手を `MEASUREMENT_INVALID` で断る） |
 | `HAND_MESH_HF_REPO` | `facebook/sam-3d-body-vith` | 重みのリポジトリ |
 | `HAND_MESH_CHECKPOINT_DIR` | なし | `model_config.yaml`・`model.ckpt`・`assets/mhr_model.pt` を置いたフォルダ。指定すると Hugging Face を見ない |
 | `MESH_MAX_EXECUTION_SECONDS` | `60` | 1回の処理の打ち切り |

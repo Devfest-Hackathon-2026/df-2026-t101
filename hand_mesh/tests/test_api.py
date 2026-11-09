@@ -193,6 +193,23 @@ def test_sam3d_strict_missing_weights(client, local, monkeypatch, tmp_path):
         client.app.state.backends = old
 
 
+def test_mock_only_in_dev(monkeypatch, tmp_path):
+    """本番（AUTH_MODE が dev 以外）では、モックの手を作らない：mock は起動せず、auto はモックに切り替えない。"""
+    from backends import BackendManager, BackendUnavailable
+
+    with pytest.raises(ValueError):
+        BackendManager("mock", allow_mock=False)
+    monkeypatch.setenv("HAND_MESH_CHECKPOINT_DIR", str(tmp_path))   # 重みがない
+    prod = BackendManager("auto", allow_mock=False)
+    prod.start(background=False)
+    assert prod.active is None and prod.settled()
+    with pytest.raises(BackendUnavailable):
+        prod.current()
+    dev = BackendManager("auto", allow_mock=True)
+    dev.start(background=False)
+    assert dev.current().name == "mock" and dev.fallback_reason
+
+
 # --- 合成・トークン・角度の計算 -------------------------------------------------
 
 

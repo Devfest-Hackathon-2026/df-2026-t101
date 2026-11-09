@@ -334,12 +334,20 @@ class BackendManager:
     auto : try SAM 3D Body in the background; on failure fall back to mock (logged).
     sam3d: SAM 3D Body only; while loading/failed, /v1/hand returns MESH_UNAVAILABLE.
     mock : mock only.
+
+    モックの手は本物と同じ署名が付くので、AUTH_MODE=dev のときだけ使える（本番で作り物の手から
+    カバーを作らないため）。dev 以外では mock を指定すると起動せず、auto はモックに切り替えない。
     """
 
-    def __init__(self, requested: Optional[str] = None):
+    def __init__(self, requested: Optional[str] = None, allow_mock: Optional[bool] = None):
         self.requested = (requested or os.environ.get("HAND_MESH_BACKEND") or "auto").strip().lower()
         if self.requested not in ("auto", "sam3d", "mock"):
-            raise ValueError(f"HAND_MESH_BACKEND must be sam3d|mock (got {self.requested!r})")
+            raise ValueError(f"HAND_MESH_BACKEND must be auto|sam3d|mock (got {self.requested!r})")
+        if allow_mock is None:
+            allow_mock = os.environ.get("AUTH_MODE", "dev").strip().lower() == "dev"
+        self.allow_mock = allow_mock
+        if self.requested == "mock" and not allow_mock:
+            raise ValueError("HAND_MESH_BACKEND=mock は AUTH_MODE=dev のときだけ使えます")
         self.sam3d: Optional[Sam3dBackend] = None
         self.active = None
         self.fallback_reason: Optional[str] = None
@@ -363,7 +371,7 @@ class BackendManager:
             self.active = self.sam3d
             log.info("hand-mesh backend: sam3d (%s)", self.sam3d.device)
         except BackendUnavailable as e:
-            if self.requested == "auto":
+            if self.requested == "auto" and self.allow_mock:
                 self.fallback_reason = str(e)
                 self.active = MockBackend(reason=str(e))
                 log.warning("SAM 3D Body unavailable -> FALLING BACK TO MOCK backend. Reason: %s", e)

@@ -315,6 +315,35 @@ def test_token_interop_with_hand_mesh():
     assert tokens.verify(t, "c_other") is None
 
 
+def _glb_with_extras(extras: dict) -> bytes:
+    """小さな球の GLB の最上位に extras を入れる（geometry は偽物に差し替えているので、ここで組む）"""
+    import struct
+    data = trimesh.creation.icosphere(subdivisions=1).export(file_type="glb")
+    clen = struct.unpack_from("<I", data, 12)[0]
+    js = json.loads(data[20:20 + clen])
+    js["extras"] = extras
+    jb = json.dumps(js, separators=(",", ":")).encode()
+    jb += b" " * ((4 - len(jb) % 4) % 4)
+    rest = data[20 + clen:]
+    return struct.pack("<III", 0x46546C67, 2, 20 + len(jb) + len(rest)) + struct.pack("<II", len(jb), 0x4E4F534A) + jb + rest
+
+
+def test_mock_mesh_rejected_outside_dev():
+    """hand-mesh のモックの手は、本番（allow_mock=False）では署名が合っていても受け付けない"""
+    from app import measure
+    from app.errors import ApiError
+    for model, ok_in_prod in (("mock", False), ("sam-3d-body", True)):
+        raw = _glb_with_extras({"model": model, "joints_mm": {}})
+        token = {"mesh_sha256": hashlib.sha256(raw).hexdigest()}
+        measure.check_mesh(raw, token, allow_mock=True)          # 開発ではどちらも通る
+        if ok_in_prod:
+            measure.check_mesh(raw, token, allow_mock=False)
+        else:
+            with pytest.raises(ApiError) as e:
+                measure.check_mesh(raw, token, allow_mock=False)
+            assert e.value.code == "MEASUREMENT_INVALID"
+
+
 def test_hand_side_cannot_change_after_measurement(client):
     """採寸のあとで聞き取りの左右を変えると 409（保存したメッシュを逆向きに正準化してしまうため。11/8）"""
     cid, raw, mesh_id = _setup_case(client)

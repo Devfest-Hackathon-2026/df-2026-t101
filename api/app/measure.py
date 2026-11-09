@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import statistics
+import struct
 from functools import lru_cache
 
 import numpy as np
@@ -82,11 +83,29 @@ def validate(m: dict, case: dict, case_id: str) -> tuple[dict, list[str]]:
     return t, warnings
 
 
-def check_mesh(raw: bytes | None, token: dict) -> None:
+def check_mesh(raw: bytes | None, token: dict, allow_mock: bool = False) -> None:
     if raw is None:
         raise ApiError("MEASUREMENT_INVALID", details=[{"field": "capture.mesh_id", "constraint": "mesh exists"}])
     if hashlib.sha256(raw).hexdigest() != token["mesh_sha256"]:
         raise ApiError("MEASUREMENT_INVALID", details=[{"field": "capture.mesh_id", "constraint": "mesh_sha256"}])
+    # モックの手（hand-mesh の開発用）は本物と同じ署名が付くので、本番では受け付けない。
+    # model はハッシュで守られた GLB の extras にあるので書き換えられない
+    if not allow_mock and _glb_model(raw) == "mock":
+        raise ApiError("MEASUREMENT_INVALID", "手の3Dが本物の計算で作られていません。撮り直してください",
+                       details=[{"field": "capture.mesh_id", "constraint": "model != mock"}])
+
+
+def _glb_model(raw: bytes) -> str | None:
+    """GLB の最初の塊（JSON）の extras.model。形の計算（geometry）を読み込まずに見る"""
+    try:
+        magic, _, _ = struct.unpack_from("<III", raw, 0)
+        clen, ctype = struct.unpack_from("<II", raw, 12)
+        if magic != 0x46546C67 or ctype != 0x4E4F534A:
+            return None
+        js = json.loads(raw[20:20 + clen].decode("utf-8"))
+    except Exception:  # noqa: BLE001 - 読めないメッシュは、このあとの形の計算で MEASUREMENT_INVALID になる
+        return None
+    return (js.get("extras") or {}).get("model")
 
 
 def flexion_from_joints(joints: dict, hand_side: str) -> dict:

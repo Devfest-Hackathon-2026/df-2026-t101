@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends
 
 from .. import measure, ops
 from ..auth import User, current_user
+from ..config import settings
 from ..errors import ApiError
 from ..store import db, files, now
 from .common import owned_case
@@ -21,7 +22,7 @@ def put_measurement(case_id: str, body: dict = Body(...), user: User = Depends(c
     token, extra_warnings = measure.validate(body, case, case_id)
     mesh_id = body["capture"]["mesh_id"]
     raw = files.get(f"cases/{case_id}/hand/raw/{mesh_id}.glb")
-    measure.check_mesh(raw, token)
+    measure.check_mesh(raw, token, allow_mock=settings.auth_mode == "dev")
     hand_side = body["hand_side"]
     if (case.get("requirements") or {}).get("hand_side") not in (None, hand_side):
         raise ApiError("MEASUREMENT_INVALID", details=[{"field": "hand_side", "constraint": "== requirements.hand_side"}])
