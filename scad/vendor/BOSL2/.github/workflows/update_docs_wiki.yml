@@ -1,0 +1,154 @@
+# Brings the wiki up to date with the library, rendered by BelfrySCAD's own
+# evaluator rather than by launching the OpenSCAD binary once per image.
+#
+# Incremental: docsgen keeps a hash per source file and re-renders only what
+# changed, so a run after a small edit costs minutes rather than the ~35 a
+# full render takes. Use Regenerate Docs Wiki when every image has to be
+# rebuilt regardless -- after a renderer change, say, which the hashes
+# cannot see.
+name: Update Docs Wiki
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_wiki:
+        description: "Push the generated docs to the live wiki (overwrites it)"
+        type: boolean
+        default: true
+  # Called by weekly_release.yml, and only when it actually creates a
+  # release -- most weeks it finds one already exists for the latest tag and
+  # does nothing.
+  #
+  # A call, not an event, on purpose. GitHub raises no event for anything
+  # done with the default GITHUB_TOKEN, to stop workflows setting each other
+  # off in a loop, and that job creates its release with exactly that token.
+  # So `release: published` below never sees the weekly one. A workflow_call
+  # runs inside the caller's own run, raises no event, and needs no PAT.
+  workflow_call:
+    inputs:
+      publish_to_wiki:
+        type: boolean
+        default: true
+
+  # Still useful for a release published by hand or by anything holding a
+  # PAT; the weekly path comes through workflow_call above.
+  release:
+    types: [published]
+
+jobs:
+  UpdateDocsWiki:
+    # macOS for a real GL implementation. This job actually renders; on
+    # Linux the offscreen renderer falls back to EGL against software Mesa,
+    # which is slower and one more way for CI output to differ from what a
+    # developer sees locally. CheckDocs stays on ubuntu because -T renders
+    # nothing at all.
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Clone Wiki
+      uses: actions/checkout@v5
+      with:
+        repository: BelfrySCAD/BOSL2.wiki
+        path: BOSL2.wiki
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    # BelfrySCAD replaces openscad-docsgen AND the OpenSCAD binary. Gone
+    # with them: the AppImage download, libfuse2, imageio, python3-pil, and
+    # xvfb -- the renderer is offscreen, so there is no X server for a
+    # virtual display to stand in for. gifsicle went too; APNG is always
+    # used, so no GIF is ever written to optimise.
+    - name: Install BelfrySCAD
+      run: pip install belfryscad
+
+    - name: Generate Docs
+      env:
+        OPENSCADPATH: ${{ github.workspace }}/..
+      run: belfryscad --docsgen
+
+    # Uploaded whether or not the wiki gets published, and on failure too,
+    # so a partial or unpublished run can still be inspected.
+    - name: Upload generated docs
+      if: always()
+      uses: actions/upload-artifact@v6
+      with:
+        name: bosl2-wiki
+        # Hidden files included deliberately. The publish step mirrors this
+        # artifact over the wiki with rsync --delete, and .source_hashes --
+        # docsgen's record of what it has already rendered -- is a dotfile.
+        # Left out, every publish would delete it and the next incremental
+        # run would have to render the whole library again. .gitignore too.
+        # .git is excluded: the wiki clone's history is not ours to ship,
+        # and the publish step clones the wiki itself.
+        include-hidden-files: true
+        path: |
+          BOSL2.wiki
+          !BOSL2.wiki/.git
+          !BOSL2.wiki/.git/**
+
+  PublishToWiki:
+    needs: UpdateDocsWiki
+    # `inputs` is empty on a release event, so testing it alone would skip
+    # the publish on precisely the run that must not skip it.
+    if: ${{ github.event_name == 'release' || inputs.publish_to_wiki }}
+    # ubuntu because this job only moves files -- the render job stays on
+    # macOS for its GL. It used to have to be Linux, because the publish was
+    # a Docker action and GitHub runs those on Linux only; that action is
+    # gone now, so this is a choice rather than a constraint.
+    runs-on: ubuntu-latest
+    steps:
+    - name: Fetch the generated docs
+      uses: actions/download-artifact@v7
+      with:
+        name: bosl2-wiki
+        path: BOSL2.wiki
+
+    - name: Upload Docs to Wiki
+      env:
+        GH_PAT: ${{ secrets.GH_PAT }}
+      run: |
+        # Not SwiftDocOrg/github-wiki-publish-action: its entrypoint copies
+        # only `find "$path" -maxdepth 1 -type f -name '*.md'`, so it has
+        # never published an image or anything in a subdirectory. Every run
+        # looked successful and pushed markdown alone, which is why the
+        # wiki's images were still the ones from before BelfrySCAD rendered
+        # them.
+        #
+        # A wiki is an ordinary git repo, so this just is one: clone, mirror
+        # the generated tree over it, commit, push. rsync --delete makes the
+        # wiki match what was generated, which also retires an image whose
+        # example was removed or marked NORENDER -- the action could not do
+        # that either.
+        set -euo pipefail
+        wiki=$(mktemp -d)
+        git clone --depth 1 \
+          "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.wiki.git" "$wiki"
+        # --checksum, not rsync's default size-and-mtime quick check: an
+        # image that changes without changing size is otherwise skipped
+        # silently, which is precisely the failure this step exists to fix.
+        # Hashing ~80MB costs seconds.
+        #
+        # --exclude '.git/' protects the clone's own history: rsync does not
+        # delete what it excludes, unless asked with --delete-excluded.
+        # Verified both, rather than trusted: a local run of this exact
+        # command updated a same-size file, removed a stale one, and left
+        # .git intact.
+        rsync -a --checksum --delete --exclude '.git/' BOSL2.wiki/ "$wiki"/
+        cd "$wiki"
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add -A
+        if git diff --cached --quiet; then
+          echo "Wiki already matches the generated docs; nothing to publish."
+          exit 0
+        fi
+        git commit -m "Update docs from ${GITHUB_SHA:0:8}"
+        git push origin HEAD:master
+        echo "Published:"
+        git show --stat --oneline HEAD | tail -5

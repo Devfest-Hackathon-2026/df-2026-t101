@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "requirements.schema.json",
+  "description": "選択式の質問の答え（docs/api.md §3.2、screens.md S2a）。サーバーが tool_d_source・notes・assumptions を足す",
+  "type": "object",
+  "required": ["activity", "tool_type", "hand_side", "tool_shaft_shape", "finger_state", "donning_by", "capture_by"],
+  "additionalProperties": false,
+  "properties": {
+    "activity": { "enum": ["draw", "write", "eat", "other"] },
+    "tool_type": { "enum": ["brush", "pen", "spoon"] },
+    "hand_side": { "enum": ["right", "left"] },
+    "tool_d_mm": { "type": ["number", "null"], "minimum": 3.5, "maximum": 20, "description": "道具の太さ（挟む所、mm）。測れないときは null にして tool_shaft_size を送る" },
+    "tool_shaft_size": { "enum": ["thin", "medium", "thick", "unknown", null] },
+    "tool_shaft_shape": { "enum": ["round", "flat"] },
+    "finger_state": { "enum": ["fist", "bent", "straight"] },
+    "donning_by": { "enum": ["self", "helper"] },
+    "capture_by": { "enum": ["self", "helper"] },
+    "tools": {
+      "type": "array", "minItems": 1, "maxItems": 4,
+      "description": "道具の一覧（1〜4個）。省略すると、上の activity〜tool_shaft_shape から1つの道具として扱う。サーバーが各要素に tool_d_source・assumptions を足す",
+      "items": {
+        "type": "object",
+        "required": ["activity", "tool_type", "tool_shaft_shape"],
+        "additionalProperties": false,
+        "properties": {
+          "activity": { "enum": ["draw", "write", "eat", "other"] },
+          "tool_type": { "enum": ["brush", "pen", "spoon"] },
+          "tool_d_mm": { "type": ["number", "null"], "minimum": 3.5, "maximum": 20 },
+          "tool_shaft_size": { "enum": ["thin", "medium", "thick", "unknown", null] },
+          "tool_shaft_shape": { "enum": ["round", "flat"] }
+        }
+      }
+    }
+  }
+}

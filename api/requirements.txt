@@ -1,0 +1,22 @@
+# 生成API（docs/architecture.md §4.3）。バージョンは固定する
+fastapi==0.162.0
+uvicorn==0.54.0
+python-multipart==0.0.33
+pydantic==2.14.3
+httpx==0.28.1
+jsonschema==4.26.0
+# Gemini（Agent Platform）
+google-genai==2.34.0
+# Firebase の認証・Firestore・Storage
+firebase-admin==7.7.0
+google-cloud-firestore==2.34.1
+google-cloud-storage==3.17.1
+# 手のメッシュ・殻（距離場とマーチングキューブ）・検査
+numpy==2.5.4
+scipy==1.18.1
+trimesh==5.2.0
+networkx==3.7
+scikit-image==0.26.0
+pillow==13.0.0
+# テスト
+pytest==9.2.0

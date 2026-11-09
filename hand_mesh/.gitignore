@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# model weights (never commit; SAM License, gated on Hugging Face)
+checkpoints/
+vendor/sam-3d-body/checkpoints/
+*.ckpt
+*.pt

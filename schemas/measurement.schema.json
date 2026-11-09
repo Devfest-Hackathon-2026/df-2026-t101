@@ -1,0 +1,456 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "measurement.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "hand_side",
+    "capture",
+    "scale",
+    "fingers",
+    "palm",
+    "calibration",
+    "quality"
+  ],
+  "$defs": {
+    "lengths": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 100
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "radii": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 20
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "mcp_position": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": -150,
+          "maximum": 150
+        },
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200
+        }
+      ],
+      "items": false
+    },
+    "manual_point_frame": {
+      "type": "object",
+      "required": [
+        "frame_index",
+        "view",
+        "px_per_mm",
+        "points"
+      ],
+      "description": "確認の画面で点を直したフレーム1枚分（§13）",
+      "properties": {
+        "frame_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 44,
+          "description": "使ったフレームの中の番号"
+        },
+        "view": {
+          "enum": [
+            "thumb_side",
+            "top",
+            "pinky_side"
+          ]
+        },
+        "px_per_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 20,
+          "description": "そのフレームの1円玉の縮尺"
+        },
+        "points": {
+          "type": "object",
+          "description": "直したあとの手首（0）と指の付け根（5・9・13・17）の位置（そのフレームのpx）。直さなかった点も入れる",
+          "required": [
+            "0",
+            "5",
+            "9",
+            "13",
+            "17"
+          ],
+          "additionalProperties": false,
+          "patternProperties": {
+            "^(0|5|9|13|17)$": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 4096
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "moved": {
+          "type": "array",
+          "items": {
+            "enum": [
+              0,
+              5,
+              9,
+              13,
+              17
+            ]
+          },
+          "uniqueItems": true,
+          "description": "実際に動かした点"
+        }
+      }
+    },
+    "finger": {
+      "type": "object",
+      "required": [
+        "lengths_mm",
+        "flexion_deg",
+        "abduction_deg",
+        "angle_method"
+      ],
+      "properties": {
+        "lengths_mm": {
+          "$ref": "#/$defs/lengths",
+          "description": "基節・中節・末節（関節の中心どうし）。倍率の確かめと比較用（握りこぶしでは隠れて推定になりやすい）"
+        },
+        "radii_mm": {
+          "$ref": "#/$defs/radii",
+          "description": "任意。比較用（関節の間隔から出したもの）。生成APIはメッシュから出し直す"
+        },
+        "flexion_deg": {
+          "type": "object",
+          "required": [
+            "mcp",
+            "pip",
+            "dip"
+          ],
+          "description": "hand-mesh が返した、合成したメッシュの関節からの角度",
+          "properties": {
+            "mcp": {
+              "type": "number",
+              "minimum": -45,
+              "maximum": 135
+            },
+            "pip": {
+              "type": "number",
+              "minimum": -45,
+              "maximum": 135
+            },
+            "dip": {
+              "type": "number",
+              "minimum": -45,
+              "maximum": 135
+            }
+          }
+        },
+        "abduction_deg": {
+          "type": "number",
+          "minimum": -40,
+          "maximum": 40
+        },
+        "angle_method": {
+          "enum": [
+            "mesh_recovery"
+          ]
+        },
+        "angles_alt_deg": {
+          "type": "object",
+          "description": "比較用の方法A・Bの角度（OT画面に出す）"
+        },
+        "iqr": {
+          "type": "object",
+          "description": "各値の四分位範囲（同じ形）"
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "2.2"
+    },
+    "hand_side": {
+      "enum": [
+        "right",
+        "left"
+      ]
+    },
+    "capture": {
+      "type": "object",
+      "required": [
+        "mode",
+        "frames_used",
+        "mesh_consent",
+        "mesh_frames_sent",
+        "mesh_id",
+        "mesh_result_token"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "video",
+            "photos"
+          ]
+        },
+        "source": {
+          "enum": [
+            "live_camera",
+            "file"
+          ],
+          "description": "アプリの中のカメラか、動画ファイル（予備）か"
+        },
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 25,
+          "description": "撮影の目安は15〜20秒（2026-11-08 に5〜10秒から）。少しはみ出しても受け付ける"
+        },
+        "frames_sampled": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90,
+          "description": "候補は60枚まで（1秒に6枚、長く撮るときは減らす）"
+        },
+        "frames_used": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "description": "1秒あたり上位1〜3枚×最大25秒"
+        },
+        "mesh_consent": {
+          "const": true,
+          "description": "メッシュ復元のために切り抜いたフレームを送ること、手の形の3Dデータを保存することに同意した（同意しないと採寸に進めない）"
+        },
+        "mesh_frames_sent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "mesh_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,64}$",
+          "description": "hand-mesh が保存した生メッシュの番号（§11）"
+        },
+        "mesh_result_token": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "hand-mesh が返した署名付きの結果トークン（§11）"
+        }
+      }
+    },
+    "scale": {
+      "type": "object",
+      "required": [
+        "reference",
+        "diameter_mm",
+        "method"
+      ],
+      "properties": {
+        "reference": {
+          "const": "jp_1yen"
+        },
+        "diameter_mm": {
+          "const": 20.0
+        },
+        "method": {
+          "enum": [
+            "coin_auto",
+            "coin_tapped",
+            "coin_manual"
+          ],
+          "description": "自動検出／タップで指定／ハンドルで指定"
+        },
+        "px_per_mm_median": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 20
+        },
+        "px_per_mm_iqr": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        }
+      }
+    },
+    "fingers": {
+      "type": "object",
+      "required": [
+        "index",
+        "middle",
+        "ring",
+        "pinky"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/finger"
+        },
+        "middle": {
+          "$ref": "#/$defs/finger"
+        },
+        "ring": {
+          "$ref": "#/$defs/finger"
+        },
+        "pinky": {
+          "$ref": "#/$defs/finger"
+        },
+        "thumb": {
+          "$ref": "#/$defs/finger",
+          "description": "参考"
+        }
+      }
+    },
+    "palm": {
+      "type": "object",
+      "required": [
+        "mcp_positions_mm",
+        "hand_width_mcp_mm",
+        "wrist_to_middle_mcp_mm",
+        "wrist_to_index_mcp_mm",
+        "wrist_to_pinky_mcp_mm"
+      ],
+      "description": "手の甲の4区間（5→17、0→9、0→5、0→17）でメッシュの倍率を決める（§8.2）",
+      "properties": {
+        "mcp_positions_mm": {
+          "type": "object",
+          "description": "手の座標系（§8.1）の x, y",
+          "required": [
+            "index",
+            "middle",
+            "ring",
+            "pinky"
+          ],
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/mcp_position"
+            },
+            "middle": {
+              "$ref": "#/$defs/mcp_position"
+            },
+            "ring": {
+              "$ref": "#/$defs/mcp_position"
+            },
+            "pinky": {
+              "$ref": "#/$defs/mcp_position"
+            }
+          }
+        },
+        "hand_width_mcp_mm": {
+          "type": "number",
+          "minimum": 40,
+          "maximum": 110,
+          "description": "5→17"
+        },
+        "wrist_to_middle_mcp_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "description": "0→9"
+        },
+        "wrist_to_index_mcp_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "description": "0→5"
+        },
+        "wrist_to_pinky_mcp_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "description": "0→17"
+        },
+        "segments_source": {
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "description": "manual：直したフレームの値を使った（§7.1）"
+        },
+        "palm_thickness_mm": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 25,
+          "description": "任意。生成APIはメッシュから出し直す"
+        }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "required": [
+        "length_factor",
+        "source"
+      ],
+      "properties": {
+        "length_factor": {
+          "type": "number",
+          "minimum": 0.8,
+          "maximum": 1.2
+        },
+        "source": {
+          "type": "string",
+          "description": "default、または検証した日付"
+        }
+      }
+    },
+    "manual_points": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/manual_point_frame"
+      },
+      "description": "確認の画面で点を直したフレーム（代表の2〜3枚まで。§13）。直さなかったときは空か省略"
+    },
+    "overrides": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "使わない（§13）。メッシュの形を値で直すには、手の姿勢を作り直す必要があるため"
+    },
+    "quality": {
+      "type": "object",
+      "required": [
+        "warnings"
+      ],
+      "properties": {
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "§7.5のコード。MESH_SCALE_INCONSISTENT は生成APIが足す"
+        },
+        "views_covered": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "thumb_side",
+              "top",
+              "pinky_side"
+            ]
+          }
+        }
+      }
+    },
+    "method_version": {
+      "type": "string",
+      "description": "例: measure-2.2"
+    }
+  }
+}

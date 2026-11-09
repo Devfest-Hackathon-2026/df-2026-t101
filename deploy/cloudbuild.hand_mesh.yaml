@@ -1,0 +1,12 @@
+# hand-mesh のコンテナを作って Artifact Registry に置く（リポジトリの直下から。送るのは hand_mesh/ だけ）
+# gcloud builds submit hand_mesh --config deploy/cloudbuild.hand_mesh.yaml --project jijogu-hackathon-2026
+# torch（CUDA 入り）が大きいので、速いマシンと長めの期限にする
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "asia-northeast1-docker.pkg.dev/$PROJECT_ID/jijogu/hand-mesh:latest", "."]
+images:
+  - asia-northeast1-docker.pkg.dev/$PROJECT_ID/jijogu/hand-mesh:latest
+options:
+  machineType: E2_HIGHCPU_8
+  diskSizeGb: 100
+timeout: 3600s

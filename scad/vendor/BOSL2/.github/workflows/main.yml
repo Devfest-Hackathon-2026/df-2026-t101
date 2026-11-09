@@ -1,0 +1,156 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  Regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    # The last job in this repo that downloaded the OpenSCAD AppImage. All
+    # 909 tests pass on BelfrySCAD's evaluator, and run several times faster
+    # in-process than openscad-test's process-per-test. No GL libraries: the
+    # tests execute scripts and check echoes, and nothing renders.
+    # Version-pinned deliberately. `--test` arrived in 1.2.0, and an older
+    # belfryscad does not reject the flag -- it parses the command line with
+    # parse_known_args, ignores what it does not know, and treats the
+    # .scadtest files as a model to open, launching the GUI. That is exactly
+    # what happened the first time this job ran: pip picked up 1.0.7 because
+    # 1.2.0 was minutes old and had not reached that runner's index yet, and
+    # the failure surfaced as an unrelated `libEGL.so.1: cannot open shared
+    # object file` from Qt. Pinning turns that into a resolver error naming
+    # the real problem.
+    - name: Install BelfrySCAD
+      run: pip install 'belfryscad>=1.2.1'
+
+    - name: Run Regression Tests
+      run: |
+        cd $GITHUB_WORKSPACE
+        ./scripts/run_tests.sh
+
+  FuncCoverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Check Function Test Coverage
+      run: |
+        cd $GITHUB_WORKSPACE
+        OUTPUT=$(python3 scripts/func_coverage.py)
+        echo "$OUTPUT"
+        # Extract coverage percentage
+        COVERAGE=$(echo "$OUTPUT" | grep "Total coverage:" | grep -oP '[0-9]+\.[0-9]+(?=%)')
+        echo "Coverage: ${COVERAGE}%"
+        # Fail if coverage dropped below 99%
+        python3 -c "
+        coverage = float('${COVERAGE}')
+        if coverage < 99.0:
+            print(f'::error::Function test coverage dropped to {coverage}% (minimum: 99%)')
+            exit(1)
+        else:
+            print(f'Coverage OK: {coverage}%')
+        "
+
+  CheckTutorials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Clone Wiki
+      uses: actions/checkout@v5
+      with:
+        repository: BelfrySCAD/BOSL2.wiki
+        path: BOSL2.wiki
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    # Same swap as CheckDocs below, and same reason there are no GL
+    # libraries: --mdimggen -T executes every code block but writes no
+    # images, so the renderer is never imported.
+    - name: Install BelfrySCAD
+      run: pip install belfryscad
+
+    - name: Tabs Check
+      run: |
+        cd $GITHUB_WORKSPACE
+        echo "::add-matcher::.github/check_for_tabs.json"
+        ./scripts/check_for_tabs.sh
+
+    - name: Checking Tutorials
+      run: |
+        cd $GITHUB_WORKSPACE
+        echo "::add-matcher::.github/openscad_docsgen.json"
+        export OPENSCADPATH=$(dirname $GITHUB_WORKSPACE)
+        belfryscad --mdimggen -T
+
+  CheckDocs:
+    # macOS for speed, not for GL: -T renders nothing, so this job needs no
+    # display libraries and the runner is a free choice. Free for
+    # correctness, that is -- it is not free for time, which is what the
+    # numbers say:
+    #
+    #   ubuntu, -Tmf, no images:  30, 36, 45, 45, 46, 47 minutes
+    #   macOS,  -f,   ALL images: 35, 38, 40 minutes
+    #
+    # The mac does MORE work and still finishes sooner. Rendering the images
+    # costs about 11% (34.9s -> 38.9s on one file, one machine); the runner
+    # gap is larger than that. The dominant cost in both is parsing every
+    # script and evaluating every example, which -T does not avoid.
+    #
+    # The spread matters as much as the median: ubuntu ranged 30-47 minutes
+    # for identical work, macOS 35-40. Shared Linux VMs against near-dedicated
+    # mac hardware.
+    #
+    # 75 minutes stays until a few mac runs have been timed here.
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Clone Wiki
+      uses: actions/checkout@v5
+      with:
+        repository: BelfrySCAD/BOSL2.wiki
+        path: BOSL2.wiki
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    # BelfrySCAD replaces openscad-docsgen AND the OpenSCAD binary: it
+    # takes the same options and emits the same markdown, but runs
+    # Examples and Figures through its own evaluator. So no AppImage and
+    # no libfuse2.
+    #
+    # No GL libraries either. -T executes every script but generates no
+    # images, and the renderer is imported lazily at the point an image
+    # would be written, so a test-only run loads neither moderngl nor
+    # PySide6. The full-render workflow does need them.
+    - name: Install BelfrySCAD
+      run: pip install belfryscad
+
+    - name: Checking Docs
+      run: |
+        cd $GITHUB_WORKSPACE
+        echo "::add-matcher::.github/openscad_docsgen.json"
+        export OPENSCADPATH=$(dirname $GITHUB_WORKSPACE)
+        belfryscad --docsgen -Tmf

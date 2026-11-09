@@ -1,0 +1,21 @@
+# Cloud Build に送らないもの（生成APIのビルドに要るのは api/ と scad/ と schemas/ だけ）
+.git
+.gitignore
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+/.localstore/
+/.trash_proto_api/
+/app/
+/hand_mesh/
+/docs/
+/env/
+api/.data/
+api/tests/
+scad/vendor/BOSL2/tests/
+scad/vendor/BOSL2/examples/
+*.log
+# クリップの固定STLのライブラリは、コンテナのビルドの中で作る（手元の45MBは送らない）
+scad/library/
+# 出力したSTL・画像の置き場（個人データ。Cloud Build に送らない）
+/3Dモデル/
