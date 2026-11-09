@@ -119,16 +119,31 @@ async function initOnce(): Promise<void> {
   startOpenCV();  // 待たない
 }
 
-function pickFile(accept: string, multiple = false, capture?: string): Promise<File[]> {
+function pickFile(accept: string, multiple = false): Promise<File[]> {
   return new Promise((resolve) => {
+    let done = false;
+    const finish = (files: File[]) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('focus', onBack);
+      document.removeEventListener('visibilitychange', onBack);
+      resolve(files);
+    };
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
     input.multiple = multiple;
-    if (capture) input.setAttribute('capture', capture);
-    input.onchange = () => resolve(Array.from(input.files ?? []));
-    // 選ばずに閉じたとき。これがないと待ったままになり、ボタンが押せないまま「選んでください」が残った（2026-11-09）
-    input.addEventListener('cancel', () => resolve([]));
+    input.onchange = () => finish(Array.from(input.files ?? []));
+    // 選ばずに閉じたとき。これがないと待ったままになり、ボタンが押せないまま「選んでください」が残った（2026-11-09）。
+    // cancel が来ないブラウザ（iPhone の Safari で左上の×で閉じたとき）のために、ページに戻ってきたら少し待って
+    // （選んだファイルが届くのは戻ったあと）、何も選ばれていなければ閉じたとみなす
+    input.addEventListener('cancel', () => finish([]));
+    const onBack = () => {
+      if (document.visibilityState !== 'visible') return;
+      setTimeout(() => finish(Array.from(input.files ?? [])), PICK_BACK_WAIT_MS);
+    };
+    window.addEventListener('focus', onBack);
+    document.addEventListener('visibilitychange', onBack);
     input.click();
   });
 }
@@ -213,6 +228,7 @@ async function loadImages(files: File[]) {
   st.duration = 0;
 }
 
+const PICK_BACK_WAIT_MS = 2500;  // 選ぶ画面からページに戻ってから、選んだファイルが届くのを待つ時間
 const COIN_MIN_PX = 14;   // これより小さく写った1円玉は、縮尺の精度が足りない
 const PALM_MIN_PROPORTION = 1.1;  // 手首→中指の付け根 ÷ 付け根の幅 がこれより小さいフレームは、手の点が崩れている
 
@@ -638,7 +654,8 @@ const api = {
   init: () => init(),
   /** 動画を選ぶ（スマホではカメラが開く）。最初のフレームを返す */
   async pickVideo(progress?: (stage: string, i: number, n: number) => void) {
-    const files = await pickFile('video/*', false, 'environment');
+    // capture を付けると iPhone ではカメラが開く。撮った動画をライブラリから選べるように付けない（2026-11-09）
+    const files = await pickFile('video/*', false);
     if (!files.length) return JSON.stringify({ cancelled: true });
     await loadVideoFile(files[0], progress);
     st.source = 'file';

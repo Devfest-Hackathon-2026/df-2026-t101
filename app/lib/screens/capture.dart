@@ -23,6 +23,10 @@ class _CaptureScreenState extends State<CaptureScreen> {
   bool _busy = false;
   String? _status;
   String? _error;
+  // 動画を選ぶ画面を開いている間（「やめる」を出す）。iPhone では、選ばずに閉じたことがページに伝わらず、
+  // 「動画を選んでください」のまま進めなくなった（2026-11-09）。やめたら番号を進め、あとから届いた結果は捨てる
+  bool _waitingPick = false;
+  int _pickGen = 0;
   String _hand = 'right';
   String _fingerState = 'fist';
 
@@ -71,7 +75,15 @@ class _CaptureScreenState extends State<CaptureScreen> {
     }
   }
 
+  void _cancelPick() => setState(() {
+    _pickGen++;
+    _busy = false;
+    _waitingPick = false;
+    _status = null;
+  });
+
   Future<void> _pick({required bool video}) async {
+    final gen = ++_pickGen;
     setState(() {
       _busy = true;
       _status = 'カメラを準備しています（初回は少し時間がかかります）';
@@ -79,14 +91,21 @@ class _CaptureScreenState extends State<CaptureScreen> {
     try {
       final eng = MeasureEngine.instance;
       await eng.init();
-      setState(
-        () => _status = video ? '動画を選んでください' : '写真を2枚選んでください（上から・親指側の横から）',
-      );
+      if (gen != _pickGen || !mounted) return;
+      setState(() {
+        _waitingPick = true;
+        _status = video ? '動画を選んでください' : '写真を2枚選んでください（上から・親指側の横から）';
+      });
       final r = video
-          ? await eng.pickVideo(
-              (stage, i, n) => setState(() => _status = '$stage（$i/$n）'),
-            )
+          ? await eng.pickVideo((stage, i, n) {
+              if (gen != _pickGen || !mounted) return;
+              setState(() {
+                _waitingPick = false; // 選んだ動画を読み始めた
+                _status = '$stage（$i/$n）';
+              });
+            })
           : await eng.pickPhotos();
+      if (gen != _pickGen) return; // 「やめる」を押したあとに届いた
       if (r['cancelled'] == true) {
         if (r['message'] != null && mounted) showError(context, r['message']);
         return;
@@ -103,7 +122,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
         ),
       );
     } on EngineError catch (e) {
-      if (mounted) {
+      if (mounted && gen == _pickGen) {
         showError(
           context,
           video
@@ -112,11 +131,12 @@ class _CaptureScreenState extends State<CaptureScreen> {
         );
       }
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (mounted && gen == _pickGen) showError(context, e);
     } finally {
-      if (mounted) {
+      if (mounted && gen == _pickGen) {
         setState(() {
           _busy = false;
+          _waitingPick = false;
           _status = null;
         });
       }
@@ -260,6 +280,14 @@ class _CaptureScreenState extends State<CaptureScreen> {
       children: [
         if (_status != null) ...[
           BusyCard(text: _status!),
+          if (_waitingPick)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _cancelPick,
+                child: const Text('やめる'),
+              ),
+            ),
           const SizedBox(height: 12),
         ],
         // 撮り方の図はやめた（2026-11-08、チームの決定。手順の文だけで足りるため）。
