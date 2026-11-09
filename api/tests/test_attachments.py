@@ -100,7 +100,7 @@ def test_mock_attachment_angle():
 def test_prompt_versions_and_schemas():
     from app import gemini
     from app.gemini import schemas
-    assert gemini.PROMPT_VERSIONS["dimension"] == "v2" and gemini.PROMPT_VERSIONS["attachment"] == "v1"
+    assert gemini.PROMPT_VERSIONS["dimension"] == "v3" and gemini.PROMPT_VERSIONS["attachment"] == "v2"
     assert gemini.THINKING["attachment"] == "LOW"
     assert set(schemas.ATTACHMENT["required"]) == {"angle_deg", "reason_ja"}
     assert "attachments" in schemas.DIMENSION["properties"] and "attachments" not in schemas.DIMENSION["required"]

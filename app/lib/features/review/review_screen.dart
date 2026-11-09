@@ -4,6 +4,7 @@ import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
 import 'package:jijogu_app/core/session.dart';
+import 'package:jijogu_app/core/text_ja.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 import 'package:jijogu_app/core/viewer/viewer_3d.dart';
 
@@ -239,8 +240,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
           '写真はありません。採寸の数値と手の3Dメッシュだけを表示しています。',
           style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant),
         ),
-        if ('${d['summary_ja'] ?? ''}'.isNotEmpty)
-          InfoCard(child: Text('${d['summary_ja']}')),
+        if (ja(d['summary_ja']).isNotEmpty)
+          InfoCard(child: Text(ja(d['summary_ja']))),
       ],
     );
   }
@@ -469,7 +470,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
       for (final v in issues)
         InfoCard(
           tone: v['severity'] == 'high' ? NoticeTone.error : NoticeTone.warning,
-          child: Text('${v['description_ja'] ?? ''}'),
+          child: Text(ja(v['description_ja'])),
         ),
     ],
   );
@@ -1036,7 +1037,7 @@ class _ParamTable extends StatelessWidget {
             5,
             Text(_sourceJa[p['source']] ?? '${p['source'] ?? ''}', style: st),
           ),
-          _cell(6, Text('${p['reason_ja'] ?? ''}', style: st)),
+          _cell(6, Text(ja(p['reason_ja']), style: st)),
         ],
       ),
     );

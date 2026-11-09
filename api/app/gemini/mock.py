@@ -36,7 +36,10 @@ def attachment_angle(attachment: dict) -> dict:
     """取り付け具1つの角度を道具から選ぶ（道具が分からなければ60度）"""
     tool = attachment.get("tool_type")
     v = ANGLE_BY_TOOL.get(tool, 60)
-    return {"angle_deg": v, "reason_ja": f"道具（{TOOL_JA.get(tool, '道具')}）とやりたいこと（{attachment.get('activity')}）から {v} 度にしました"}
+    act = {"draw": "絵を描く", "write": "字を書く", "eat": "食べる"}.get(attachment.get("activity"))
+    if tool in TOOL_JA and act:
+        return {"angle_deg": v, "reason_ja": f"{TOOL_JA[tool]}で{act}ので、{v}度にしました"}
+    return {"angle_deg": v, "reason_ja": f"道具に合わせて{v}度にしました"}
 
 
 def dimension(requirements: dict, param_defs: list, attachments: list | None = None) -> dict:

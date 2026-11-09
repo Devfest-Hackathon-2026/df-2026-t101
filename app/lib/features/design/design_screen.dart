@@ -9,6 +9,7 @@ import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
 import 'package:jijogu_app/core/models/requirements.dart' show ToolAnswer;
 import 'package:jijogu_app/core/storage/files.dart';
+import 'package:jijogu_app/core/text_ja.dart';
 import 'package:jijogu_app/core/ui/tool_fields.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 import 'package:jijogu_app/core/viewer/viewer_3d.dart';
@@ -291,7 +292,7 @@ class _DesignScreenState extends State<DesignScreen> {
         body,
       );
       if (r['clarify_ja'] != null) {
-        setState(() => _clarify = '${r['clarify_ja']}');
+        setState(() => _clarify = ja(r['clarify_ja']));
       } else {
         final before = _attachments(d);
         final nd = Map<String, dynamic>.from(r['design']);
@@ -537,7 +538,7 @@ class _DesignScreenState extends State<DesignScreen> {
             tone: NoticeTone.warning,
             child: Text(
               // API は未解決の点を {severity, description_ja} で返す（pipeline.py・review.dart と同じ）
-              '確かめてほしい点があります：\n${issues.map((i) => '・${i is Map ? (i['description_ja'] ?? i['message_ja'] ?? i['issue_ja'] ?? '') : i}').join('\n')}',
+              '確かめてほしい点があります：\n${issues.map((i) => '・${ja(i is Map ? (i['description_ja'] ?? i['message_ja'] ?? i['issue_ja']) : i)}').join('\n')}',
             ),
           ),
         if (approval == 'rejected')
@@ -613,8 +614,8 @@ class _DesignScreenState extends State<DesignScreen> {
         _summary(d),
         // クリップの角度（ADR-0013）。取り付け具が2つ以上なら、選んでいる取り付け具の角度
         _Heading(multi ? 'クリップの角度（$label）' : 'クリップの角度'),
-        if (multi && '${att['reason_ja'] ?? ''}'.isNotEmpty)
-          Text('${att['reason_ja']}', style: _noteStyle),
+        if (multi && ja(att['reason_ja']).isNotEmpty)
+          Text(ja(att['reason_ja']), style: _noteStyle),
         IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -866,7 +867,7 @@ class _DesignScreenState extends State<DesignScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '${d['summary_ja'] ?? ''}',
+            ja(d['summary_ja']),
             style: AppText.bodyLarge.copyWith(color: fg),
           ),
         ],
