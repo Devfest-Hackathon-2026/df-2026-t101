@@ -212,6 +212,7 @@ async function loadImages(files: File[]) {
 }
 
 const COIN_MIN_PX = 14;   // これより小さく写った1円玉は、縮尺の精度が足りない
+const PALM_MIN_PROPORTION = 1.1;  // 手首→中指の付け根 ÷ 付け根の幅 がこれより小さいフレームは、手の点が崩れている
 
 /** 1円玉らしさ（小さいほどよい）。楕円の形・面積の比・大きさで判定し、だめなら null */
 function coinScore(e: Ellipse | null, f: Frame): number | null {
@@ -366,6 +367,11 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     f.world = (r.worldLandmarks[0] ?? []).map((q) => ({ x: q.x, y: q.y, z: q.z }));
     const edge = r.landmarks[0].some((q) => q.x < 0.05 || q.x > 0.95 || q.y < 0.05 || q.y > 0.95);
     if (edge) { f.reject = 'HAND_AT_EDGE'; continue; }
+    // 手の点が崩れたフレームは使わない。握りこぶしを真上から撮ると、手首の点が手の甲のまん中（1円玉のすぐ下）に
+    // 来て、手首→中指の付け根が付け根の幅と同じくらいか短く出る。本当の手は手首→中指の付け根の方がはっきり長い。
+    // 崩れたフレームが多いと手が25%小さく測られ、ベルトのスリットがレールの台と重なった（2026-11-09。
+    // IMG_0147 の比：崩れたフレーム 0.46〜1.01、ふつうのフレーム 1.18〜1.44。横から見たフレームは幅が縮むので大きく出る）
+    if (G.dist2(f.lm[0], f.lm[9]) < PALM_MIN_PROPORTION * G.dist2(f.lm[5], f.lm[17])) { f.reject = 'HAND_POINTS_OFF'; continue; }
     // 動画は前のフレームの中心で追いかける。写真は1枚ずつ別の向きなので、写真ごとにタップした位置を使う
     const tapped = st.coinSeeds.get(i);
     const { coin } = st.mode === 'photos'
@@ -385,7 +391,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   progress?.('まとめています', n, n);
   const ok = st.frames.filter((f) => f.s);
   if (ok.length < (st.mode === 'photos' ? 2 : 1)) {
-    const why: Record<string, string> = { NO_HAND: '手が見つからない', MULTIPLE_HANDS: '手が2つ以上写っている', HAND_AT_EDGE: '手が画面の端にかかっている', NO_COIN: '1円玉が見つからない', COIN_JUMP: '1円玉の大きさが急に変わった' };
+    const why: Record<string, string> = { NO_HAND: '手が見つからない', MULTIPLE_HANDS: '手が2つ以上写っている', HAND_AT_EDGE: '手が画面の端にかかっている', HAND_POINTS_OFF: '手首の点がずれた（真上から撮ったときに起きやすい。横からも撮ってください）',NO_COIN: '1円玉が見つからない', COIN_JUMP: '1円玉の大きさが急に変わった' };
     const counts: Record<string, number> = {};
     for (const f of st.frames) if (f.reject) counts[f.reject] = (counts[f.reject] ?? 0) + 1;
     const detail = Object.entries(counts).map(([k, v]) => `${why[k] ?? k}：${v}枚`).join('、');
