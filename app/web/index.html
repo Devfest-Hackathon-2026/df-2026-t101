@@ -12,6 +12,9 @@
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png"/>
   <title>Hand-Some-Fit</title>
+  <!-- 下に引っぱって再読み込み（スマホのブラウザ）を止める。撮影のあとの画面はアドレスが撮影の画面のままなので、
+       読み込み直すと撮った動画が消えて撮影の画面に戻っていた（2026-11-09） -->
+  <style>html, body { overscroll-behavior: none; }</style>
   <link rel="manifest" href="manifest.json">
   <!-- three.js（プロトタイプではCDNから。本番は自前で配る：docs/architecture.md §4） -->
   <script type="importmap">
