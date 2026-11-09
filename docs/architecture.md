@@ -3,7 +3,7 @@
 > **このドキュメントで決めたこと**
 > 1. 構成は3つに分ける。ブラウザ（Flutter Web。撮影・採寸・プレビュー）、生成API（Cloud Run。手のメッシュの実寸化とカバーの殻の計算・Gemini・範囲チェック・OpenSCAD）、Firebase（認証・データ・ファイル・配信）に、手の3Dメッシュを作るGPUのサービス `hand-mesh` を加える。動画を丸ごと扱うのはブラウザだけで、端末の外に出るのは、同意を得て `hand-mesh` に送る切り抜いたフレーム（最大8枚）だけにする。
 > 2. 生成APIは、OpenSCADとPythonを1つのコンテナに入れ、東京（asia-northeast1）に置く。Geminiは `global` で呼ぶ。Firestore・Storageも東京に置く。
-> 3. ケース・会話・版は生成APIだけが書き、`hand-mesh` が書くのは利用回数と費用と、Storageの未補正の手のメッシュだけにする。手のメッシュはブラウザを通さずにStorageで受け渡す（重いファイルを運ばず、書き換えられないため）。ブラウザはFirestoreを読むだけで、進み具合を待ち受ける。生成の二重実行は、期限付きの処理中の印で防ぐ。
+> 3. ケース・会話・版は生成APIだけが書き、`hand-mesh` が書くのは利用回数と費用と、Storageの未補正の手のメッシュだけにする。手のメッシュはブラウザを通さずにStorageで受け渡す（重いファイルを運ばず、書き換えられないため）。ブラウザはFirestoreに書かず、ケース・版・進み具合は生成APIの `GET` で読む（生成中は2秒ごと。Firestoreの待ち受けは、時間の都合で impl では使っていない。2026-11-09）。生成の二重実行は、期限付きの処理中の印で防ぐ。
 
 関連：[api.md](api.md)、[data-model.md](data-model.md)、[generation-pipeline.md](generation-pipeline.md)、[adr/0002-frontend-flutter-web.md](adr/0002-frontend-flutter-web.md)、[adr/0003-why-google-technologies.md](adr/0003-why-google-technologies.md)
 
@@ -52,7 +52,7 @@ flowchart LR
 
   HOST -. 配信 .-> UI
   UI -- ログイン --> AUTH
-  UI -- "読む・待ち受け" --> FS
+  UI -- "ケース・版・進み具合を読む（生成中は2秒ごと）" --> API
   UI -- "読む（ルールで制限）" --> ST
   UI -- "HTTPS + IDトークン<br/>（数値・mesh_id・テキストだけ）" --> API
   PIPE -- "構造化出力 / 画像入力" --> GEM
@@ -69,7 +69,7 @@ flowchart LR
 
 | コンポーネント | 置き場所 | 責務 | 持たない責務 |
 |---|---|---|---|
-| Flutter Web アプリ（`app/`） | Firebase Hosting | 画面と遷移、ログイン、Firestoreの待ち受け、APIの呼び出し、採寸エンジンの呼び出しと結果の表示 | Firestore・Storageへの書き込み、Geminiの呼び出し、フレームの処理 |
+| Flutter Web アプリ（`app/`） | Firebase Hosting | 画面と遷移、ログイン、生成中の進み具合の読み取り（`GET designs/{id}` を2秒ごと）、APIの呼び出し、採寸エンジンの呼び出しと結果の表示 | Firestore・Storageへの書き込み、Geminiの呼び出し、フレームの処理 |
 | 採寸エンジン（`app/web_engine/` のTypeScriptを、`app/web/js/measure_engine.js` の1ファイルにまとめる） | ブラウザ | アプリ内カメラでの録画（スマホは背面、PCはWebカメラ。握った形のこぶしを撮る）、フレームの取り出し、ぼけの判定、MediaPipeの呼び出し、1円玉の自動検出の呼び出しと縮尺、フレームごとの値、集計（[measurement.md §2〜§7](measurement.md)）、切り抜いたフレームを `hand-mesh` に送ること、S5で直した手首と指の付け根の5点から手の甲の長さを出し直すこと。Dartからは `dart:js_interop` で呼び、結果をJSONで返す。写真モードの計算も持つ | 手のメッシュの実寸化・手のモデルの組み立て（生成APIが行う） |
 | 1円玉の自動検出（`app/web_engine/src/coin_worker.ts` → `app/web/js/coin_worker.js`） | ブラウザ（Web Worker） | OpenCV.jsで、画像の中の楕円から1円玉を探す（手の上の丸を外し、手の大きさから大きさの見当をつける）。Web Workerで動かし、画面を止めない | 寸法の計算 |
 | MediaPipe（Hand Landmarker） | ブラウザ（WebAssembly） | フレームから21点を返す（`numHands: 2`。2つ以上見つかったら、そのフレームを捨てる）。Interactive Segmenterは使わない（CPUで1回約5秒かかり画面が止まる。GPUでは空のマスクが返った） | 寸法の計算 |
@@ -98,13 +98,13 @@ sequenceDiagram
   participant API as 生成API
   U->>App: 同意して進む（手のメッシュを保存することも含む）
   App->>API: POST /consent（mesh-consent-2）
-  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（15〜20秒・半周）
+  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（15〜20秒。カメラは固定して手を回す）
   App->>EN: 候補フレーム（メモリ内）
   EN->>MP: 最初のフレーム
   EN->>CV: 最初のフレームと手の21点
   CV-->>EN: 1円玉の楕円（自動検出）
   U->>App: 黄色い輪が1円玉か確かめる（違うときだけタップ）
-  loop 選んだフレーム（15〜45枚）
+  loop 選んだフレーム（最大60枚。20秒の撮影なら約40枚）
     EN->>MP: フレーム
     MP-->>EN: 21点
     EN->>CV: フレーム（前の1円玉の位置と大きさ）
@@ -144,7 +144,10 @@ sequenceDiagram
   participant ST as Storage
   App->>API: POST /designs（IDトークン）
   API->>FS: 版を作る（status=queued → running）
-  App->>FS: 版の変更を待ち受ける
+  loop 生成中（2秒ごと。8回に1回 POST /recover）
+    App->>API: GET /cases/{id} → GET /designs/{current_design_id}
+    API-->>App: progress（step・round）
+  end
   API->>G: select（構造化出力）
   API->>FS: progress=selecting
   API->>G: dimension
@@ -187,7 +190,7 @@ sequenceDiagram
   API->>ST: internal/…/print/ に置く（だれも読めない）
   API->>FS: geometry_hash・print_sha256、approval.status=requested
   OT->>App: /review/:caseId を開く（Googleログイン）
-  App->>FS: ケースと版を読む（reviewer_email が一致すれば読める）
+  App->>API: GET ケースと版（reviewer_email が一致すれば読める）
   OT->>App: 確認項目をチェックして「確認済み」
   App->>API: POST /approval（geometry_hash）
   API->>ST: 部品ごとの print_sha256 を確かめて print/ にコピー（描き直さない）

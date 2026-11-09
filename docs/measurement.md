@@ -86,7 +86,7 @@ flowchart TD
 
 1. 1秒に6枚の割合で候補のフレームを取る（候補は60枚までなので、10秒を超えて撮るときは1秒あたりの枚数を減らす。20秒なら3枚。アプリの中のカメラでは撮りながら取る。動画ファイルでは §2.4 の方法で取り出す）
 2. 各候補を、長い辺が256pxの白黒画像に縮め、ぼけの少なさを点数にする（ラプラシアンの分散。値が大きいほどくっきりしている）
-3. 1秒ごとに、点数が上位3枚のフレームだけを残す（10秒なら最大30枚、上限の15秒なら最大45枚）
+3. 1秒ごとに、点数が上位のフレームだけを残す。残す枚数は、1秒に取り出した枚数の半分（最大3枚）。20秒の撮影（1秒に3枚）なら1秒に2枚で最大40枚、動画ファイルの上限の25秒でも最大60枚（`app/web_engine/src/engine.ts` の `useCandidates`）
 4. 残したフレーム（長い辺が最大1280px）をMediaPipeに渡す。間引いた静止フレームなので `runningMode: "IMAGE"` を使う
 
 ### 3.2 使わないフレーム
@@ -510,7 +510,7 @@ sequenceDiagram
         "source": { "enum": ["live_camera", "file"], "description": "アプリの中のカメラか、動画ファイル（予備）か" },
         "duration_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 25, "description": "撮影の目安は15〜20秒。少しはみ出しても受け付ける" },
         "frames_sampled": { "type": "integer", "minimum": 1, "maximum": 90, "description": "候補は60枚まで（1秒に6枚、長く撮るときは減らす）" },
-        "frames_used": { "type": "integer", "minimum": 1, "maximum": 45, "description": "1秒あたり上位3枚×最大15秒" },
+        "frames_used": { "type": "integer", "minimum": 1, "maximum": 60, "description": "1秒あたり上位1〜3枚×最大25秒" },
         "mesh_consent": { "const": true, "description": "メッシュ復元のために切り抜いたフレームを送ること、手の形の3Dデータを保存することに同意した（同意しないと採寸に進めない）" },
         "mesh_frames_sent": { "type": "integer", "minimum": 1, "maximum": 8 },
         "mesh_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "hand-mesh が保存した生メッシュの番号（§11）" },

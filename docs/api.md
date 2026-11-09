@@ -2,7 +2,7 @@
 
 > **このドキュメントで決めたこと**
 > 1. 生成APIは、Cloud Run（asia-northeast1）上のHTTP JSON API（`/v1`）とする。認証は、FirebaseのIDトークンを `Authorization: Bearer` で送る方式にする。Firebase Hostingの転送（rewrite）は使わず、ブラウザから直接呼ぶ。Hosting経由だと60秒で打ち切られ、生成が間に合わないため。
-> 2. ケース・会話・版への書き込みはこのAPIが行う（`hand-mesh` が書くのは、利用回数と費用、Storageの未補正の手のメッシュだけ）。ブラウザはFirestoreを読むだけにする。手のメッシュを実寸にし、そこからカバーの殻を作るのもこのAPI（[ADR-0011](adr/0011-dorsal-cover.md)）。生成は1回のリクエスト内で行い、途中経過と期限付きの処理中の印をFirestoreに書く。
+> 2. ケース・会話・版への書き込みはこのAPIが行う（`hand-mesh` が書くのは、利用回数と費用、Storageの未補正の手のメッシュだけ）。ブラウザはFirestoreに書かない（ケース・版もこのAPIの `GET` で読む）。手のメッシュを実寸にし、そこからカバーの殻を作るのもこのAPI（[ADR-0011](adr/0011-dorsal-cover.md)）。生成は1回のリクエスト内で行い、途中経過と期限付きの処理中の印をFirestoreに書く。
 > 3. エラーは `{"error": {"code", "message", "details", "retryable", "request_id"}}` の形にそろえる。`message` は画面にそのまま出せる日本語にする。
 
 関連：[generation-pipeline.md](generation-pipeline.md)、[data-model.md](data-model.md)、[measurement.md](measurement.md)
@@ -240,7 +240,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 { "style": { "color": "#2A9D8F", "pattern": "none" } }
 ```
 
-- 処理には中央値で約75秒、最大で約170秒かかる（カバーの殻の計算の10〜20秒を含む。[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、`cases/{case_id}/designs/{design_id}` の `progress` を読んで進み具合を出す
+- 処理には中央値で約75秒、最大で約170秒かかる（カバーの殻の計算の10〜20秒を含む。[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、2秒ごとに `GET /v1/cases/{case_id}`（`current_design_id`）と `GET /v1/cases/{case_id}/designs/{design_id}` を呼び、`progress` を読んで進み具合を出す（`app/lib/screens/design.dart`）
 - 部品は、**カバー本体**（`cover`。空気穴 `air_holes`・ベルトのスリット `strap_slits`・アリ溝のレール `rail` を含む）と**C字クリップ**（`c_clip`）を必ず作る。**TPUの筒**（`tpu_sleeve`）と2個目のクリップは、道具と要望からGeminiが選ぶ（[generation-pipeline.md](generation-pipeline.md)、[ADR-0011](adr/0011-dorsal-cover.md)〜[ADR-0013](adr/0013-clip-angle-variants.md)）
 - 描く前に、**カバーの殻**を作る：実寸の手のメッシュ（正準形）の符号付き距離から、手の面から距離 `HAND_CLEARANCE_MM`（c）〜 c ＋ `cover_thickness_mm`（t）の層を取り、手のひら側・手首側・親指・人差し指側の外を切る面と、なめらかな共通部分（半径 `edge_radius_mm`）でつなぎ、閉じた面（`cover_shell.stl`）にする。切り口のふちも丸くなる。続けて、手を c だけ広げた立体（**内側を守る立体** `cover_keepout.stl`。レールの土台が内側へ出ないように、最後に引く）を作る。右手なら最後に鏡像に戻す。11/7のスパイク（手元のPC）の同じ仕組みで約12秒。カバーの外接箱の大きさで変わるので、10〜20秒を見込む。Cloud Run（4 vCPU）での時間は要確認
 - 殻・内側を守る立体・距離場は、採寸の版ごとのフォルダ `internal/cases/{case_id}/cover/{measurement_id}/` の下（`shell/<24桁>`・`keepout/c{c}`・`sdf`）に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
@@ -289,7 +289,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
     "files": {
       "parts": {
         "cover": { "preview_stl": "cases/c_8f3k2m/designs/d_01/cover.preview.stl" },
-        "c_clip": { "preview_stl": "cases/c_8f3k2m/designs/d_01/c_clip_20.preview.stl" }
+        "c_clip": { "preview_stl": "cases/c_8f3k2m/designs/d_01/c_clip_70.preview.stl" }
       },
       "views": {
         "front": "cases/c_8f3k2m/designs/d_01/views/front.png",
@@ -322,7 +322,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 ```
 
 ```json
-{ "clip_angle_deg": 40 }
+{ "clip_angle_deg": 80 }
 ```
 
 ```json
@@ -401,7 +401,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
   "files": {
     "print": {
       "cover": "cases/c_8f3k2m/designs/d_02/print/cover.stl",
-      "c_clip": "cases/c_8f3k2m/designs/d_02/print/c_clip_20.stl"
+      "c_clip": "cases/c_8f3k2m/designs/d_02/print/c_clip_70.stl"
     }
   },
   "case_status": "approved"
@@ -414,7 +414,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 ### 3.9 `POST /v1/cases/{case_id}/recover`
 
-本文は空。§1.1の規則で、期限切れだけを `kind` ごとに回収し、`200` で `{ case_status, current_design_id, active_operation, recovered }` を返す。有効な処理は中断しない。S6と承認処理の待機画面は15秒ごと、およびケースを開き直したときに呼ぶ。回収後はFirestoreの失敗状態と「もう一度試す」を表示する。
+本文は空。§1.1の規則で、期限切れだけを `kind` ごとに回収し、`200` で `{ case_status, current_design_id, active_operation, recovered }` を返す。有効な処理は中断しない。S6の待機画面は約16秒ごと（2秒ごとの読み取りの8回に1回）、およびケースを開き直したときに呼ぶ。回収後は版の失敗状態と「もう一度試す」を表示する。
 
 ### 3.10 `GET /v1/therapists`
 
