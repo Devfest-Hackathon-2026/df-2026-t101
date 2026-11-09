@@ -107,7 +107,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
         showError(
           context,
           video
-              ? 'この動画は読めませんでした。カメラの設定を「互換性優先」にして撮り直すか、「写真2枚で測る」を使ってください。（${e.message}）'
+              ? 'この動画は読めませんでした。カメラの設定を「互換性優先」にして撮り直すか、「カメラで撮る」で撮ってください。（${e.message}）'
               : e,
         );
       }
@@ -248,26 +248,12 @@ class _CaptureScreenState extends State<CaptureScreen> {
             label: const Text('カメラで撮る'),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _pick(video: true),
-                  style: smallOutline,
-                  icon: const Icon(Icons.videocam_rounded),
-                  label: const Text('撮った動画を選ぶ'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _pick(video: false),
-                  style: smallOutline,
-                  icon: const Icon(Icons.image_rounded),
-                  label: const Text('写真2枚で測る'),
-                ),
-              ),
-            ],
+          // 「写真2枚で測る」はやめた（2026-11-09。動画だけにする。選ばずに戻ったとき、待ったままになっていた）
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _pick(video: true),
+            style: smallOutline,
+            icon: const Icon(Icons.videocam_rounded),
+            label: const Text('撮った動画を選ぶ'),
           ),
         ],
       ),

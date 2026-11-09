@@ -127,6 +127,8 @@ function pickFile(accept: string, multiple = false, capture?: string): Promise<F
     input.multiple = multiple;
     if (capture) input.setAttribute('capture', capture);
     input.onchange = () => resolve(Array.from(input.files ?? []));
+    // 選ばずに閉じたとき。これがないと待ったままになり、ボタンが押せないまま「選んでください」が残った（2026-11-09）
+    input.addEventListener('cancel', () => resolve([]));
     input.click();
   });
 }
