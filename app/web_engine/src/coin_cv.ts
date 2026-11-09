@@ -24,6 +24,9 @@ export type CoinHints = {
 import { roundSpots, fitCoinAt } from './geometry';
 
 const WORK_LONG_SIDE = 960; // 速さのため、この大きさに縮めて探す
+const ARC_FIT_ERR = 0.03;      // 弧をつなぐ元にする弧：楕円にこれよりきれいに乗っている
+const ARC_MIN_COVERAGE = 0.3;  //   かつ、ぐるりのこれ以上を覆っている
+const ARC_JOIN_ERR = 0.04;     // ほかの弧は、点のずれの平均がこれ以下なら同じ楕円の弧とみなす
 
 /** 点が多角形の中にあるか */
 function inPolygon(p: { x: number; y: number }, poly: { x: number; y: number }[]) {
@@ -119,59 +122,138 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
     const minMajor = Math.max(10, (hints.minMajor ?? 14) * k), maxMajor = L * 0.3;
 
     const cands: CoinEllipse[] = [];
+    // 輪郭を点の配列にして取っておく（弧をつなぐときに何度も見るので）
+    type Arc = { d: Int32Array; n: number; x0: number; y0: number; x1: number; y1: number };
+    const arcs: Arc[] = [];
     for (let i = 0; i < contours.size(); i++) {
       const cnt = contours.get(i);
-      try {
-        const n = cnt.rows;
-        if (n < 16) continue;
-        const e = cv.fitEllipse(cnt);
-        const a = Math.max(e.size.width, e.size.height) / 2, b = Math.min(e.size.width, e.size.height) / 2;
-        if (!(a > 0 && b > 0) || 2 * a < minMajor || 2 * a > maxMajor || b / a < 0.35) continue;
-        // 当てはめの誤差とぐるりの覆い。楕円の座標系に直して見る
-        const th = (e.angle * Math.PI) / 180, ct = Math.cos(th), st = Math.sin(th);
-        const ax = e.size.width / 2, ay = e.size.height / 2;
-        const bins = new Uint8Array(36);
-        let err = 0;
-        const d = cnt.data32S;
+      const n = cnt.rows;
+      if (n >= 16) {
+        const d = Int32Array.from(cnt.data32S as Int32Array);
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
         for (let j = 0; j < n; j++) {
-          const x = d[2 * j] - e.center.x, y = d[2 * j + 1] - e.center.y;
-          const u = (x * ct + y * st) / ax, v = (-x * st + y * ct) / ay;
-          const rr = Math.hypot(u, v);
-          err += Math.abs(rr - 1);
+          const x = d[2 * j], y = d[2 * j + 1];
+          if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+        arcs.push({ d, n, x0, y0, x1, y1 });
+      }
+      cnt.delete();
+    }
+    type Fit = { cx: number; cy: number; ax: number; ay: number; ct: number; st: number; angle: number; a: number; b: number };
+    /** 点に楕円を当てる。大きさ・形が1円玉らしくなければ null */
+    const fitPoints = (d: Int32Array, n: number): Fit | null => {
+      const m = new cv.Mat(n, 1, cv.CV_32SC2);
+      try {
+        (m.data32S as Int32Array).set(d.subarray(0, 2 * n));
+        const e = cv.fitEllipse(m);
+        const a = Math.max(e.size.width, e.size.height) / 2, b = Math.min(e.size.width, e.size.height) / 2;
+        if (!(a > 0 && b > 0) || 2 * a < minMajor || 2 * a > maxMajor || b / a < 0.35) return null;
+        const th = (e.angle * Math.PI) / 180;
+        return { cx: e.center.x, cy: e.center.y, ax: e.size.width / 2, ay: e.size.height / 2, ct: Math.cos(th), st: Math.sin(th), angle: e.angle, a, b };
+      } finally {
+        m.delete();
+      }
+    };
+    /** 当てはめの誤差（点の、楕円からのずれの平均）とぐるりの覆い（36に分けた向きのうち点のある割合）。楕円の座標系に直して見る */
+    const fitStats = (f: Fit, group: Arc[]) => {
+      const bins = new Uint8Array(36);
+      let err = 0, n = 0;
+      for (const arc of group) {
+        for (let j = 0; j < arc.n; j++) {
+          const x = arc.d[2 * j] - f.cx, y = arc.d[2 * j + 1] - f.cy;
+          const u = (x * f.ct + y * f.st) / f.ax, v = (-x * f.st + y * f.ct) / f.ay;
+          err += Math.abs(Math.hypot(u, v) - 1);
           bins[Math.min(35, Math.floor(((Math.atan2(v, u) + Math.PI) / (2 * Math.PI)) * 36))] = 1;
         }
-        const fitErr = err / n, coverage = bins.reduce((s, x) => s + x, 0) / 36;
-        if (fitErr > 0.06 || coverage < 0.75) continue;
-        const center = { x: e.center.x, y: e.center.y };
-        const at = where(center);
-        if (at === 'finger') continue; // 指と関節の上の丸（爪・関節）
-        // 手の上は、関節の出っ張りや皮膚の模様と間違えないよう、楕円にきれいに乗ったものだけ。明るい肌との境目で輪郭が
-        // 途切れやすいので、ぐるりの覆いは机の上と同じ（0.75）にする（0.85 にしたら、真上からの1円玉まで落ちた。11/9 の動画）
-        if (at === 'back' && fitErr > 0.035 && !tapped) continue;
-        // 点数（小さいほどよい）。手の甲の上の1円玉を、机の上の1円玉より先に選ぶ
-        let score = fitErr * 10 + (1 - coverage) * 2 + (at === 'back' ? -0.5 : 0);
-        if (palmW) {
-          // 1円玉（20mm）は、人差し指と小指の付け根の間（大人で約55〜65mm）の約1/3
-          const r = (2 * a) / palmW;
-          if ((r < 0.12 || r > 0.8) && !tapped) continue;
-          score += Math.abs(Math.log(r / 0.33)) * 0.6;
-        }
-        if (hints.prev) {
-          const dp = Math.hypot(center.x - hints.prev.cx * k, center.y - hints.prev.cy * k) / L;
-          const ds = Math.abs(Math.log((2 * a) / (hints.prev.major * k)));
-          // 大きさが急に変わったものは別の物。カメラを動かして撮るので、距離の変化の分（約1.5倍まで）は許す
-          if (ds > 0.4) continue;
-          score += dp * 4 + ds * 3;
-        }
-        if (hints.near) score += (Math.hypot(center.x - hints.near.x * k, center.y - hints.near.y * k) / L) * 8;
-        cands.push({
-          cx: center.x / k, cy: center.y / k, major: (2 * a) / k, minor: (2 * b) / k, ratio: b / a, angle: e.angle,
-          areaRatio: 1, momentMajor: (2 * a) / k, pixels: Math.round(Math.PI * a * b / (k * k)),
-          fitErr, coverage, score, onHand: at === 'back',
-        });
-      } finally {
-        cnt.delete();
+        n += arc.n;
       }
+      return { fitErr: err / n, coverage: bins.reduce((s, x) => s + x, 0) / 36 };
+    };
+    /** 弧の点が楕円にどれだけ乗っているか（ずれの平均） */
+    const offEllipse = (f: Fit, arc: Arc) => {
+      let err = 0;
+      for (let j = 0; j < arc.n; j++) {
+        const x = arc.d[2 * j] - f.cx, y = arc.d[2 * j + 1] - f.cy;
+        err += Math.abs(Math.hypot((x * f.ct + y * f.st) / f.ax, (-x * f.st + y * f.ct) / f.ay) - 1);
+      }
+      return err / arc.n;
+    };
+    /** 1円玉の候補にするか決めて、点数をつける */
+    const consider = (f: Fit, fitErr: number, coverage: number) => {
+      if (fitErr > 0.06 || coverage < 0.75) return;
+      const { a, b } = f;
+      const center = { x: f.cx, y: f.cy };
+      const at = where(center);
+      if (at === 'finger') return; // 指と関節の上の丸（爪・関節）
+      // 手の上は、関節の出っ張りや皮膚の模様と間違えないよう、楕円にきれいに乗ったものだけ。明るい肌との境目で輪郭が
+      // 途切れやすいので、ぐるりの覆いは机の上と同じ（0.75）にする（0.85 にしたら、真上からの1円玉まで落ちた。11/9 の動画）
+      if (at === 'back' && fitErr > 0.035 && !tapped) return;
+      // 点数（小さいほどよい）。手の甲の上の1円玉を、机の上の1円玉より先に選ぶ
+      let score = fitErr * 10 + (1 - coverage) * 2 + (at === 'back' ? -0.5 : 0);
+      if (palmW) {
+        // 1円玉（20mm）は、人差し指と小指の付け根の間（大人で約55〜65mm）の約1/3
+        const r = (2 * a) / palmW;
+        if ((r < 0.12 || r > 0.8) && !tapped) return;
+        score += Math.abs(Math.log(r / 0.33)) * 0.6;
+      }
+      if (hints.prev) {
+        const dp = Math.hypot(center.x - hints.prev.cx * k, center.y - hints.prev.cy * k) / L;
+        const ds = Math.abs(Math.log((2 * a) / (hints.prev.major * k)));
+        // 大きさが急に変わったものは別の物。カメラを動かして撮るので、距離の変化の分（約1.5倍まで）は許す
+        if (ds > 0.4) return;
+        score += dp * 4 + ds * 3;
+      }
+      if (hints.near) score += (Math.hypot(center.x - hints.near.x * k, center.y - hints.near.y * k) / L) * 8;
+      cands.push({
+        cx: center.x / k, cy: center.y / k, major: (2 * a) / k, minor: (2 * b) / k, ratio: b / a, angle: f.angle,
+        areaRatio: 1, momentMajor: (2 * a) / k, pixels: Math.round(Math.PI * a * b / (k * k)),
+        fitErr, coverage, score, onHand: at === 'back',
+      });
+    };
+
+    // 1本の輪郭で一周取れたもの。きれいな弧なのに一周に足りないものは、弧をつなぐ元にする
+    const seeds: { f: Fit; arc: Arc }[] = [];
+    for (const arc of arcs) {
+      const f = fitPoints(arc.d, arc.n);
+      if (!f) continue;
+      const s = fitStats(f, [arc]);
+      if (s.fitErr <= 0.06 && s.coverage >= 0.75) consider(f, s.fitErr, s.coverage);
+      else if (s.fitErr <= ARC_FIT_ERR && s.coverage >= ARC_MIN_COVERAGE && arc.n >= 30) seeds.push({ f, arc });
+    }
+    // 弧をつなぐ：1円玉の縁は、肌や机と明るさが近い所で途切れて、いくつかの弧に分かれる（手の甲の上で覆い 0.55 しか
+    // なかった。2026-11-09 の写真）。同じ楕円の上に乗っているほかの弧を集めて当て直し、同じ条件（誤差・覆い）で見る。
+    // 1本の輪郭で取れた所には足さない（縁の線の内側と外側の輪郭の平均が縁の位置。つないだ弧が混ざると大きさがずれる）
+    const same = (f: Fit, g: { cx: number; cy: number; a: number }) =>
+      Math.hypot(g.cx - f.cx, g.cy - f.cy) < 0.4 * g.a && Math.abs(g.a - f.a) < 0.15 * g.a;
+    const single = cands.map((c) => ({ cx: c.cx * k, cy: c.cy * k, a: (c.major * k) / 2 }));
+    const already = (f: Fit) => single.some((g) => same(f, g));
+    const joined: { f: Fit; fitErr: number; coverage: number }[] = [];
+    for (const { f, arc: seed } of seeds) {
+      if (already(f)) continue;
+      const reach = f.a * 1.15;
+      const group = [seed];
+      for (const arc of arcs) {
+        if (arc === seed || arc.x0 < f.cx - reach || arc.x1 > f.cx + reach || arc.y0 < f.cy - reach || arc.y1 > f.cy + reach) continue;
+        if (offEllipse(f, arc) <= ARC_JOIN_ERR) group.push(arc);
+      }
+      if (group.length === 1) continue;
+      const n = group.reduce((s, g) => s + g.n, 0);
+      const d = new Int32Array(2 * n);
+      let o = 0;
+      for (const g of group) { d.set(g.d.subarray(0, 2 * g.n), o); o += 2 * g.n; }
+      const f2 = fitPoints(d, n);
+      if (!f2 || already(f2)) continue;
+      const s2 = fitStats(f2, group);
+      if (s2.fitErr <= 0.06 && s2.coverage >= 0.75) joined.push({ f: f2, ...s2 });
+    }
+    // 同じ中心の丸がいくつかできたら、いちばん大きいものだけ。1円玉の内側のふち（盛り上がった輪）や模様の弧からも
+    // 小さめの丸ができる（外の縁より6%小さかった。11/9 の動画）。外の縁がいちばん外側
+    joined.sort((p, q) => q.f.a - p.f.a);
+    const kept: Fit[] = [];
+    for (const j of joined) {
+      if (kept.some((g) => same(j.f, g))) continue;
+      kept.push(j.f);
+      consider(j.f, j.fitErr, j.coverage);
     }
     // もう1つの方法：丸い斑点から色で領域を広げる（光った所で輪郭が切れる1円玉でも取れる）
     const smallRgba = new cv.Mat();
