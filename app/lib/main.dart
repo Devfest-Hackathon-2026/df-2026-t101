@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import 'data/session.dart';
 import 'router.dart';
@@ -7,8 +6,9 @@ import 'widgets/ui.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Flutter Web は読み上げ用の情報が既定で無効なので、起動時に有効にする（docs/screens.md §2）
-  SemanticsBinding.instance.ensureSemantics();
+  // 読み上げ用の情報は、起動時には作らない（2026-11-09 にやめた）。常に作ると、画面が変わるたびに読み上げ用の部品も
+  // 作り直し、スマホが重かった（計算が約25%増えた）。読み上げ（VoiceOver など）を使う人は、Flutter Web が出す
+  // 「読み上げを有効にする」のボタン（Enable accessibility）を1回押すと有効になる（docs/screens.md §2）
   await Session.instance.init();
   runApp(const JijoguApp());
 }

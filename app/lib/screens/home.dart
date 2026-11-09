@@ -415,6 +415,9 @@ class _Thumb extends StatelessWidget {
           ? Image.memory(
               bytes!,
               fit: BoxFit.cover,
+              // 768px の確認用画像を、出す大きさ（56px × 画素の密度）で読み込む。そのままだとカードごとに大きな画像を
+              // 読み込んで縮めて描き、一覧が重かった（2026-11-09）
+              cacheWidth: (56 * MediaQuery.devicePixelRatioOf(context)).round(),
               errorBuilder: (_, _, _) =>
                   Icon(statusIcon, color: AppColors.primary),
             )
