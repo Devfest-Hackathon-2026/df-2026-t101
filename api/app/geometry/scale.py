@@ -59,12 +59,16 @@ def compute_scale(measurement: dict, J: dict) -> dict:
             raise GeometryError("MEASUREMENT_INVALID", "メッシュの関節が重なっています", [{"segment": key}])
         ratios[key] = measured[key] / mesh_len
     rv = np.array(list(ratios.values()))
-    k = float(np.median(rv))
+    k_raw = float(np.median(rv))
+    # 検証で求めた長さの補正係数（measurement.md §10.3。1円玉と関節の距離の差など、系統的なずれを直す）。
+    # 倍率にだけ掛け、測った長さの比のばらつきの判定は掛ける前の値で行う
+    lf = float((measurement.get("calibration") or {}).get("length_factor") or 1.0)
+    k = k_raw * lf
     if not (0.5 <= k <= 2.0):
         raise GeometryError("MEASUREMENT_INVALID", "倍率が範囲外です（点の取り違えか、1円玉の誤検出のおそれ）",
                             [{"field": "scale_factor", "value": round(k, 3), "range": [0.5, 2.0]}])
     q1, q3 = np.percentile(rv, [25, 75])
-    palm_spread = float((q3 - q1) / k)
+    palm_spread = float((q3 - q1) / k_raw)
 
     # 指の区間（確かめだけ）
     fr = []
@@ -76,11 +80,11 @@ def compute_scale(measurement: dict, J: dict) -> dict:
             ml = float(np.linalg.norm(J[f][s + 1] - J[f][s]))
             if ml > 1e-6 and lens[s] > 0:
                 fr.append(lens[s] / ml)
-    finger_med = float(np.median(fr)) if fr else k
-    spread = abs(finger_med - k) / k
+    finger_med = float(np.median(fr)) if fr else k_raw
+    spread = abs(finger_med - k_raw) / k_raw
     if palm_spread > 0.10 or spread > 0.15:
         warnings.append("MESH_SCALE_INCONSISTENT")
-    return {"k": k, "scale_source": source, "scale_spread_ratio": round(spread, 4),
+    return {"k": k, "k_raw": round(k_raw, 5), "length_factor": lf, "scale_source": source, "scale_spread_ratio": round(spread, 4),
             "palm_ratio_iqr": round(palm_spread, 4), "ratios": {kk: round(v, 4) for kk, v in ratios.items()},
             "warnings": warnings}
 

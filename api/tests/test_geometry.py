@@ -87,6 +87,21 @@ def test_scale_inconsistent_and_out_of_range():
     assert e.value.code == "MEASUREMENT_INVALID"
 
 
+def test_length_factor_scales_k_without_warnings():
+    """calibration.length_factor（検証で求めた補正係数、measurement.md §10.3）は倍率 k にだけ掛かる。
+    測った長さの比のばらつきの判定は、掛ける前の値で行う（係数で警告が出たり消えたりしない）"""
+    from app.geometry.scale import compute_scale
+    raw = fixture_glb()
+    J = parse_joints(read_glb(raw)[2]["joints_mm"])
+    base = compute_scale(make_measurement(J, 1.15), J)
+    m = make_measurement(J, 1.15)
+    m["calibration"] = {"length_factor": 1.1, "source": "2026-11-09"}
+    cal = compute_scale(m, J)
+    assert cal["k"] == pytest.approx(base["k"] * 1.1, rel=1e-6)
+    assert cal["length_factor"] == 1.1 and base["length_factor"] == 1.0
+    assert cal["warnings"] == base["warnings"] and cal["palm_ratio_iqr"] == base["palm_ratio_iqr"]
+
+
 def test_manual_points_must_match_palm_lengths():
     raw = fixture_glb()
     J = parse_joints(read_glb(raw)[2]["joints_mm"])
