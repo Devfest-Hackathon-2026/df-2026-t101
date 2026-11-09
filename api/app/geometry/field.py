@@ -106,9 +106,3 @@ def compute_field(vertices_c: np.ndarray, faces_c: np.ndarray, Jc: dict, radii: 
     nz = ndimage.gaussian_filter(nzv.reshape(shape), 1.0)
     nz = np.clip(np.round(nz * 127), -127, 127).astype(np.int8)
     return Field(origin=np.asarray(lo, dtype=np.float64), voxel=voxel, sdf=sdf, nz=nz)
-
-
-def sample_sdf(field: Field, P: np.ndarray) -> np.ndarray:
-    """点 P（正準形）での距離（3次の補間ではなく1次）。箱の外は大きな値。"""
-    idx = (np.asarray(P) - field.origin) / field.voxel
-    return ndimage.map_coordinates(field.sdf, idx.T, order=1, mode="constant", cval=99.0)

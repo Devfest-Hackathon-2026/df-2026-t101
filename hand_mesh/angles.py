@@ -27,7 +27,7 @@ z the palm-side normal of the canonical (left-hand) frame of §8.1.
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 
@@ -103,34 +103,6 @@ def frame_flexion(canonical_pts: np.ndarray) -> Dict[str, Dict[str, float]]:
 def _iqr(vals: Sequence[float]) -> float:
     q75, q25 = np.percentile(np.asarray(vals, dtype=np.float64), [75, 25])
     return float(q75 - q25)
-
-
-def aggregate(per_frame: List[Dict[str, Dict[str, float]]]) -> Dict[str, dict]:
-    """Median and IQR across frames, rounded to 0.1 deg (api.md §4 shape)."""
-    fingers: Dict[str, dict] = {}
-    for f in FINGERS:
-        vals = {j: [fr[f][j] for fr in per_frame] for j in JOINTS}
-        fingers[f] = {
-            "flexion_deg": {j: round(float(np.median(vals[j])), 1) for j in JOINTS},
-            "iqr_deg": {j: round(_iqr(vals[j]), 1) for j in JOINTS},
-            "frames_used": len(per_frame),
-        }
-    return fingers
-
-
-def angles_from_right_keypoints(frames_kps: Iterable[Optional[np.ndarray]]) -> tuple:
-    """Right-hand MHR70 keypoints per frame (None = no hand) -> (fingers, n_used)."""
-    per_frame = []
-    for kps in frames_kps:
-        if kps is None:
-            continue
-        try:
-            per_frame.append(frame_flexion(to_canonical_left(kps)))
-        except ValueError:
-            continue
-    if not per_frame:
-        return None, 0
-    return aggregate(per_frame), len(per_frame)
 
 
 # ---------------------------------------------------------------------------

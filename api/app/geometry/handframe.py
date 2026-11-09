@@ -49,11 +49,6 @@ def to_canonical_mesh(vertices: np.ndarray, faces: np.ndarray, hand_side: str):
     return mirror_z(vertices), np.asarray(faces)[:, ::-1].copy()
 
 
-# 正準形↔実際の手は同じ操作（z の反転）
-to_actual_mesh = to_canonical_mesh
-to_actual_joints = to_canonical_joints
-
-
 def curl_sign(Jc: dict) -> float:
     """正準形で、指先が付け根より手のひら側（+z）にあるか（握るほど大きい）。確かめ用。"""
     return float(np.mean([Jc[f][3][2] - Jc[f][0][2] for f in LONG_FINGERS]))

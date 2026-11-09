@@ -11,17 +11,11 @@ from typing import Any
 from .config import CATALOG_PATH
 
 REQUIRED_PARTS = ("cover", "air_holes", "strap_slits", "rail", "c_clip")
-SHELL_PARAMS = {("cover", "cover_thickness_mm"), ("cover", "palm_cut_offset_mm"), ("cover", "wrist_cut_mm"),
-                ("cover", "edge_radius_mm")}
 
 
 @lru_cache(maxsize=1)
 def catalog() -> dict:
     return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-
-
-def reload_catalog() -> None:
-    catalog.cache_clear()
 
 
 def fixed(name: str, default: float) -> float:
@@ -37,11 +31,6 @@ def param_def(part_id: str, name: str) -> dict | None:
     if not p:
         return None
     return next((q for q in p.get("params", []) if q["name"] == name), None)
-
-
-def is_shell_param(part_id: str, name: str) -> bool:
-    d = param_def(part_id, name)
-    return bool(d.get("shell")) if d else (part_id, name) in SHELL_PARAMS
 
 
 def ai_params(part_id: str) -> list[dict]:
@@ -77,15 +66,6 @@ def to_dict(params: list[Param]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for p in params:
         out.setdefault(p.part_id, {})[p.name] = p.value
-    return out
-
-
-def baseline_params(baseline: list[dict], selected_parts: list[str]) -> list[Param]:
-    """基準値から引数の一覧を作る（Gemini の答えがない引数はこれを使う）"""
-    out = []
-    for b in baseline:
-        if b["part_id"] in selected_parts:
-            out.append(Param(b["part_id"], b["name"], b["value"], b.get("source", "default"), "", b["value"]))
     return out
 
 

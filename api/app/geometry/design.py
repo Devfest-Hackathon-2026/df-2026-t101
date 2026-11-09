@@ -15,12 +15,12 @@ import trimesh
 
 from . import checks as CK
 from .baseline import make_baseline
-from .consts import FIELD_VERSION, LONG_FINGERS, catalog, fixed
+from .consts import FIELD_VERSION, catalog, fixed
 from .errors import GeometryError
 from .field import Field, compute_field
 from .glb import read_glb, write_glb
 from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirror_z, palm_length, parse_joints,
-                        rail_direction, to_actual_joints, to_canonical_joints, to_canonical_mesh, wrist_cut_default, z_pip, palm_cut_base)
+                        rail_direction, to_canonical_joints, to_canonical_mesh, wrist_cut_default, palm_cut_base)
 from . import clipgeom, cliplib
 from .placement import outer_surface, place_holes, place_rail, place_slits, slit_rail_clearance, tool_rod
 from .scad import posix, render_views, run

@@ -11,7 +11,6 @@ from scipy.spatial import cKDTree
 from .consts import LONG_FINGERS, fixed
 from .handframe import palm_length, rail_direction, seg_dist
 
-RAIL_HEIGHT = None  # rail.scad の rail_height()：溝の深さ＋溝の下の肉
 RAIL_WALL_MM = 2.5   # common.scad の RAIL_WALL_MM（溝のまわりの肉）
 RAIL_BASE_MM = 2.0   # common.scad の RAIL_BASE_MM（溝の底の下の肉）
 RAIL_FOOT_MM = 6.0   # common.scad の RAIL_FOOT_MM（殻の中へ入り込ませる土台）

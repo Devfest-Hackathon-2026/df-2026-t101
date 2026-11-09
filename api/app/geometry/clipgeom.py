@@ -11,11 +11,9 @@ import numpy as np
 
 from .consts import fixed
 
-CLIP_PLATE_MM = 2.5    # 舌の上の板の厚み（c_clip.scad と同じ。2026-11-08 に 2.0 から）。いまは計算に使っていない
 CLIP_LAT_MM = 20.0     # 輪の中心を、レールの上面の中心から親指側へ出す量
 CLIP_DOWN_MM = 6.0     # 手のひら側へ下げる量
 CLIP_FWD_MM = 5.0      # 指先側へ進める量
-RAIL_END_WALL_MM = 2.5
 S2 = math.sqrt(0.5)
 CANONICAL_SIDE = -1    # 正準形は左手の向き
 
@@ -35,10 +33,6 @@ def inner_d(clip: dict) -> float:
     return td - float(fixed("CLIP_INTERFERENCE_MM"))
 
 
-def r_out(clip: dict) -> float:
-    return inner_d(clip) / 2 + float(clip["wall_mm"])
-
-
 def clip_axis_rail(clip: dict, side: int = CANONICAL_SIDE) -> np.ndarray:
     """道具の軸（先の向き）。tilt＝机に対する傾き"""
     up, _, fwd = frame_rail(side)
@@ -53,10 +47,3 @@ def clip_center_rail(clip: dict, side: int = CANONICAL_SIDE) -> np.ndarray:
 
 def opening_mm(clip: dict) -> float:
     return float(clip["opening_ratio"]) * float(clip["tool_d_mm"])
-
-
-def sleeve_dims(clip: dict) -> dict:
-    td = float(clip["tool_d_mm"])
-    ri = td - 0.2
-    return {"inner_d_mm": round(ri, 2), "outer_d_mm": round(ri + 2 * float(fixed("TPU_SLEEVE_WALL_MM")), 2),
-            "length_mm": float(clip["height_mm"])}
