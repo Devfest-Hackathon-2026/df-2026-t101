@@ -22,7 +22,7 @@ from .glb import read_glb, write_glb
 from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirror_z, palm_length, parse_joints,
                         rail_direction, to_canonical_joints, to_canonical_mesh, wrist_cut_default, palm_cut_base)
 from . import clipgeom, cliplib
-from .placement import outer_surface, place_holes, place_rail, place_slits, slit_rail_clearance, tool_rod
+from .placement import outer_surface, place_holes, place_rail_clear_of_slits, place_slits, slit_rail_clearance, tool_rod
 from .scad import posix, render_views, run
 from .scale import check_mcp_order, compute_scale
 from .shell import build_keepout, build_shell, shell_cut_values
@@ -337,9 +337,11 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     ov, on = outer_surface(shell_c, href.tree, c, t)
     from scipy.spatial import cKDTree
     otree = cKDTree(ov)
-    rail = place_rail(Jc, radii, ov, on, c, t)
     sl = place_slits(Jc, ov, on, otree, {**slits_p, "_t": t}, float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"],
                      hand=hand_c, radii=radii, wrist_cut=float(cover_p["wrist_cut_mm"]))
+    # スリットはベルトの通り道で決まるので先に置き、レールの台がかかるなら台のほうを手の甲側へずらす（2026-11-10）。
+    # 道具も一緒に動くので、主な取り付け具の角度で、基準の太さの道具が手に当たらない所まで
+    rail = place_rail_clear_of_slits(Jc, radii, ov, on, c, t, sl, hand_ref=href, tool_angle=float(clip_p["angle_deg"]))
     slit_rail_mm = slit_rail_clearance(sl, rail, wall_t=t)
     avoid = [(rail["anchor"], float(fixed("RAIL_WIDTH_MM")) + 6.0)]
     avoid += [(p, float(sl["width"]) / 2 + 2.0) for p in sl["centers"]]
@@ -362,6 +364,7 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         "strap_slits_axes": [A(a) for a in sl["axes"]],
         "cover_palm_plane": [*[float(x) for x in _palm_normal_actual(hand_side)], round(float(cut["palm_plane_z"]) + 0.25, 3)],  # 殻の面に触れて切れ端ができないよう0.25mm先で切る
         "rail_origin": A(rail["origin"]), "rail_frame": [[round(float(x), 5) for x in r] for r in fr],
+        "rail_foot_mm": round(float(rail["foot_mm"]), 2),
         **_clip_defs(clip_p),
     }
     angle = int(clip_p["angle_deg"])
@@ -473,9 +476,14 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         results.append({"rule": "R6e_strap_window", "ok": found, "value": win, "message_ja": msg, "severity": "info"})
     # スリットとレールの台の、置く前の箱どうしの距離（目安。実際に穴が開いているかは R6e_slit_open で見る）
     ok_sr = slit_rail_mm >= 1.0
-    results.append({"rule": "R6e_slit_rail", "ok": ok_sr, "value": {"clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None},
-                    "message_ja": "ベルトのスリットはレールの台から離れている" if ok_sr else "ベルトのスリットがレールの台に近い",
-                    "severity": "info"})
+    shift = float(rail.get("shift_mm", 0.0))
+    msg_sr = "ベルトのスリットはレールの台から離れている" if ok_sr else "ベルトのスリットがレールの台に近い"
+    if shift > 0:
+        msg_sr += f"（スリットにかからないよう、レールの台を手の甲側へ{shift:g}mmずらしました）"
+    results.append({"rule": "R6e_slit_rail", "ok": ok_sr,
+                    "value": {"clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None,
+                              "rail_shift_mm": shift, "rail_foot_mm": round(float(rail["foot_mm"]), 1)},
+                    "message_ja": msg_sr, "severity": "info"})
 
     # 確認用画像（プレビューのときだけ）
     views = []
@@ -505,6 +513,7 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         "placement": {"rail_origin": defs["rail_origin"], "rail_frame": defs["rail_frame"],
                       "air_holes": len(ho["centers"]), "strap_slits": len(sl["centers"]),
                       "slit_rail_clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None,
+                      "rail_shift_mm": float(rail.get("shift_mm", 0.0)),
                       "strap_window": sl.get("window")},
         "clip": _clip_info(clip_p, lib),
         "extra_clips": extra_out,

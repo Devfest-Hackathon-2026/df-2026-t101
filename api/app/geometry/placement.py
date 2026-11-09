@@ -34,7 +34,7 @@ def slit_rail_clearance(sl: dict, rail: dict, wall_t: float = 2.5) -> float:
     if not sl["centers"]:
         return float("inf")
     hx, hy = rail_outer_w() / 2, float(fixed("RAIL_LENGTH_MM")) / 2
-    z_lo, z_hi = -(rail_height() + RAIL_FOOT_MM), 0.0
+    z_lo, z_hi = -(rail_height() + float(rail.get("foot_mm", RAIL_FOOT_MM))), 0.0
     half = np.array([hx, hy, (z_hi - z_lo) / 2])
     mid = np.array([0.0, 0.0, (z_hi + z_lo) / 2])
     Fm = np.asarray(rail["frame"])
@@ -79,8 +79,11 @@ def _surface_has_ring(center, normal, outer_tree, radius, tol=1.6, n=12) -> bool
     return bool(np.all(d < tol))
 
 
-def place_rail(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float) -> dict:
+def place_rail(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float, shift: float = 0.0) -> dict:
+    """shift：光線の出どころを、手の甲の真ん中の向き（親指側の角から手の甲の上へ。−X）へずらす長さ（mm）。
+    向き（frame）は変えない"""
     mid, u, dvec = rail_direction(Jc)
+    mid = mid + np.cross(dvec, u) * shift
     # 基節の中点から外向きの光線の近くにある外面の頂点のうち、一番遠いもの
     rel = outer_v - mid
     s = rel @ dvec
@@ -95,7 +98,92 @@ def place_rail(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float) -> d
     y_r = u
     x_r = np.cross(y_r, z_r)
     origin = anchor + z_r * rail_height()   # レールの上面（溝の口）の中心
-    return {"anchor": anchor, "origin": origin, "frame": np.stack([x_r, y_r, z_r])}
+    return {"anchor": anchor, "origin": origin, "frame": np.stack([x_r, y_r, z_r]),
+            "shift_mm": float(shift), "lift_mm": 0.0, "foot_mm": RAIL_FOOT_MM}
+
+
+SLIT_RAIL_GAP_MM = 1.0       # スリットの穴とレールの台（土台を含む）のあいだに残す距離（R6e_slit_rail と同じ）
+RAIL_MAX_SHIFT_MM = 20.0     # レールをずらしてよい長さの上限
+RAIL_MAX_FOOT_MM = 12.0      # ずらしたときに深くしてよい土台の上限
+
+
+def _rail_seat(rail: dict, outer_v) -> tuple[float, float]:
+    """台の底面（anchor を通り外向きに垂直な面）から見た、外面の高さ。
+    返り値：溝の下で外面がいちばん高い所（底面より上に何mm）と、台の下で外面がいちばん低い所（底面より下に何mm）"""
+    x, y, d = (np.asarray(v, float) for v in rail["frame"])
+    hx, hy = rail_outer_w() / 2 - 0.5, float(fixed("RAIL_LENGTH_MM")) / 2 - 0.5
+    groove_half = rail_outer_w() / 2 - RAIL_WALL_MM
+    bury, low = -np.inf, np.inf
+    for a in np.linspace(-hx, hx, 9):
+        for b in np.linspace(-hy, hy, 7):
+            p = np.asarray(rail["anchor"], float) + a * x + b * y
+            rel = outer_v - p
+            s = rel @ d
+            perp = np.linalg.norm(rel - s[:, None] * d, axis=1)
+            sel = (perp < 1.5) & (np.abs(s) < 20.0)
+            if not sel.any():
+                continue
+            top = float(s[sel].max())
+            low = min(low, top)
+            if abs(a) <= groove_half + 0.5:
+                bury = max(bury, top)
+    return (bury if np.isfinite(bury) else 0.0), (-low if np.isfinite(low) else 0.0)
+
+
+REF_TOOL_D_MM = 11.5   # ずらしてよいかを見る基準の道具の太さ（標準でいちばん太い「太い」。太さを直してもカバーが変わらないよう固定）
+
+
+def _tool_paths(hand_ref, rail: dict, Jc: dict, angle: float) -> list[dict]:
+    from .checks import check_tool_path
+    return [check_tool_path(hand_ref, None, rail, {"tool_d_mm": REF_TOOL_D_MM, "angle_deg": angle}, Jc)[0]["value"]]
+
+
+def _tool_not_worse(now: list[dict], before: list[dict]) -> bool:
+    """どの角度でも、道具と手のすき間・机までの長さが、ずらす前より悪くならない（もともと足りていれば合格の範囲に収まる）"""
+    from .checks import TOOL_HAND_GAP_MM, TOOL_TIP_MM
+    for v, v0 in zip(now, before):
+        if v["gap_hand_mm"] < min(TOOL_HAND_GAP_MM, v0["gap_hand_mm"]):
+            return False
+        reach, reach0 = v["reach_mm"], v0["reach_mm"]
+        if reach0 is not None and (reach is None or reach > max(TOOL_TIP_MM, reach0)):
+            return False
+    return True
+
+
+def place_rail_clear_of_slits(Jc: dict, radii: dict, outer_v, outer_n, c: float, t: float, sl: dict,
+                              hand_ref=None, tool_angle: float = 70.0) -> dict:
+    """レールの台がベルトのスリットにかかるなら、台を手の甲側へずらして離す（2026-11-10）。
+    側面が低い手では、親指側の角にある台の土台が親指側のスリットの上にかぶさり、穴がふさがれていた。
+    スリットはベルトの通り道（手ごと）で決まるので動かさず、台のほうを動かす。台の向き（frame）は変えないので、
+    クリップと道具の角度、先に作っておいたクリップの形はそのまま使える。
+    ずらすと台が面から傾くので、溝の下に殻が来ない高さまで持ち上げ（lift）、浮いた側は土台を深くして（foot）殻に届かせる。
+    hand_ref（手の形）を渡すと、道具も一緒に動く（1mm ずらすごとに、握った指とのすき間が 0.5〜0.7mm 減る）ので、
+    主な取り付け具の角度 tool_angle の基準の道具（太さ REF_TOOL_D_MM）が、手から TOOL_HAND_GAP_MM 以上離れ（ずらす前に
+    足りなければ、それより近づかず）、机に届く所までしかずらさない。太さは基準の値で見るので、太さを直したり取り付け具を
+    足したりしても、カバー（レールの位置）は変わらない。
+    離しきれないなら、ずらさず今までの位置のまま（途中までずらしても穴はほとんど開かず、道具だけが手に近づいた。
+    残った重なりは R6e_slit_rail・R6e_slit_open で知らせる）"""
+    wall_t = float(t)
+    rail0 = place_rail(Jc, radii, outer_v, outer_n, c, t)
+    clear0 = slit_rail_clearance(sl, rail0, wall_t=wall_t)
+    if clear0 >= SLIT_RAIL_GAP_MM:
+        return rail0
+    tools0 = _tool_paths(hand_ref, rail0, Jc, tool_angle) if hand_ref is not None else None
+    d = np.asarray(rail0["frame"][2], float)
+    for shift in np.arange(1.0, RAIL_MAX_SHIFT_MM + 0.01, 1.0):
+        r = place_rail(Jc, radii, outer_v, outer_n, c, t, shift=float(shift))
+        bury, floating = _rail_seat(r, outer_v)
+        lift = max(0.0, bury - (RAIL_BASE_MM - 0.5))           # 溝の底より 0.5mm 下まで
+        foot = max(RAIL_FOOT_MM, floating + lift + 1.0)         # 浮いた所でも殻に 1mm 入る
+        if foot > RAIL_MAX_FOOT_MM:
+            continue
+        r.update(origin=np.asarray(r["anchor"], float) + d * (rail_height() + lift), lift_mm=float(lift),
+                 foot_mm=float(foot), groove_bury_mm=float(bury - lift), float_mm=float(floating + lift))
+        if tools0 is not None and not _tool_not_worse(_tool_paths(hand_ref, r, Jc, tool_angle), tools0):
+            continue
+        if slit_rail_clearance(sl, r, wall_t=wall_t) >= SLIT_RAIL_GAP_MM:
+            return r
+    return rail0
 
 
 SLIT_MAX_NZ = 0.7   # スリットを抜く向きの縦成分の上限（これより下向きなら横へ寄せる。ベルトは横〜斜め下へ出る）

@@ -190,11 +190,13 @@ def test_finger_radii_reasonable():
         assert 3.0 <= r[f][0] <= 15.0
 
 
-def _placement_for(name="hand_raw_fist", strap_count=1):
-    """試験用の手でカバーの殻を作り、レールとスリットの位置を出す（正準形）。"""
+def _placement_for(name="hand_raw_fist", strap_count=1, clear=False, ctx=False, tool_angle=70.0):
+    """試験用の手でカバーの殻を作り、レールとスリットの位置を出す（正準形）。
+    clear=True なら、レールは生成と同じくスリットを避けて置く（place_rail_clear_of_slits）。
+    ctx=True なら、置き直しに使う値（Jc, radii, 外面の点と向き, c, t）も返す"""
     from scipy.spatial import cKDTree
 
-    from app.geometry.placement import outer_surface, place_rail, place_slits
+    from app.geometry.placement import outer_surface, place_rail, place_rail_clear_of_slits, place_slits
     from app.geometry.shell import build_shell, shell_cut_values
     raw = fixture_glb(name)
     J = parse_joints(read_glb(raw)[2]["joints_mm"])
@@ -217,6 +219,12 @@ def _placement_for(name="hand_raw_fist", strap_count=1):
     sl = place_slits(Jc, ov, on, cKDTree(ov), {**params["strap_slits"], "strap_count": strap_count, "_t": t},
                      float(cover_p["edge_radius_mm"]), palm_z=cut["palm_plane_z"],
                      hand=trimesh.Trimesh(Vc, Fc, process=False), radii=radii, wrist_cut=float(cover_p["wrist_cut_mm"]))
+    if clear:
+        # clear="guarded"：生成と同じく、道具の通り道が悪くならない所までしかずらさない
+        rail = place_rail_clear_of_slits(Jc, radii, ov, on, c, t, sl, hand_ref=href if clear == "guarded" else None,
+                                         tool_angle=tool_angle)
+    if ctx:
+        return Jc, cut, rail, sl, (Jc, radii, ov, on, c, t)
     return Jc, cut, rail, sl
 
 
@@ -278,6 +286,65 @@ def test_slit_rail_clearance_detects_overlap_on_short_walls():
     assert slit_rail_clearance(sl, rail) < 2.0
     _, _, rail, sl = _placement_for("hand_raw_right", strap_count=2)
     assert len(sl["centers"]) == 4 and slit_rail_clearance(sl, rail) < 2.0
+
+
+@pytest.mark.parametrize("name,count", [("hand_raw_fist", 1), ("hand_raw_right", 1), ("hand_raw_right", 2)])
+def test_rail_slides_off_the_slits(name, count):
+    """スリットにレールの台がかかる手では、台の向きは変えずに（クリップと道具の角度はそのまま）手の甲側へずらして離す。
+    ずらすと台が面から傾くので、溝が殻に埋まらない高さまで持ち上げ、浮いた側は土台を深くして殻に届かせる（2026-11-10。
+    本番のケースで、親指側のスリットがレールの土台でふさがれていた）"""
+    from app.geometry.placement import RAIL_BASE_MM, RAIL_FOOT_MM, slit_rail_clearance
+    _, _, rail0, _ = _placement_for(name, strap_count=count)
+    _, _, rail, sl = _placement_for(name, strap_count=count, clear=True)
+    assert slit_rail_clearance(sl, rail) >= 1.0, rail
+    assert np.allclose(rail["frame"], rail0["frame"])          # 向きは同じ
+    assert rail["shift_mm"] > 0
+    assert rail["groove_bury_mm"] <= RAIL_BASE_MM              # 溝の底より上に殻が来ない
+    assert rail["foot_mm"] >= max(RAIL_FOOT_MM, rail["float_mm"] + 1.0) - 1e-6   # 土台が殻に届く
+
+
+@pytest.mark.parametrize("name,count,angle", [("hand_raw_fist", 1, 60), ("hand_raw_right", 1, 60), ("hand_raw_right", 2, 60),
+                                              ("hand_raw_right", 1, 80)])
+def test_rail_shift_never_breaks_the_tool_path(name, count, angle):
+    """台をずらすと道具も動く（15mm ずらすと、道具が握った指に当たった）。手の形を渡したときは、主な取り付け具の角度で、
+    基準の太さ（11.5mm）の道具が手から 2mm 以上離れ（ずらす前に足りなければそれより近づかず）、机に届く所までしか
+    ずらさない。重なりは、ずらす前より増えない（2026-11-10）"""
+    from app.geometry.checks import TOOL_HAND_GAP_MM, TOOL_TIP_MM, check_tool_path
+    from app.geometry.placement import REF_TOOL_D_MM, slit_rail_clearance
+    Jc, _, rail0, _ = _placement_for(name, strap_count=count)
+    _, _, rail, sl = _placement_for(name, strap_count=count, clear="guarded", tool_angle=angle)
+    href = HandRef(trimesh.Trimesh(*_canon_mesh(name), process=False))
+    assert slit_rail_clearance(sl, rail) >= slit_rail_clearance(sl, rail0)
+    clip = {"tool_d_mm": REF_TOOL_D_MM, "angle_deg": angle}
+    v0 = check_tool_path(href, None, rail0, clip, Jc)[0]["value"]
+    v = check_tool_path(href, None, rail, clip, Jc)[0]["value"]
+    assert v["gap_hand_mm"] >= min(TOOL_HAND_GAP_MM, v0["gap_hand_mm"]) - 0.05, (v0, v)
+    assert v["reach_mm"] <= max(TOOL_TIP_MM, v0["reach_mm"]) + 0.5, (v0, v)
+
+
+def test_rail_shift_clears_the_slit_when_the_tool_allows():
+    """60度（ペン・スプーン）なら道具に余裕があり、右手の試験用の手では台をずらしてスリットから離せる"""
+    from app.geometry.placement import slit_rail_clearance
+    _, _, rail, sl = _placement_for("hand_raw_right", clear="guarded", tool_angle=60)
+    assert rail["shift_mm"] > 0 and slit_rail_clearance(sl, rail) >= 1.0
+
+
+def _canon_mesh(name):
+    raw = fixture_glb(name)
+    J = parse_joints(read_glb(raw)[2]["joints_mm"])
+    pm = prepare_measurement(raw, make_measurement(J, 1.15), "right", {"tool_d_mm": 9.5, "tool_type": "brush"})
+    V, F, _ = read_glb(pm["scaled_glb"])
+    return to_canonical_mesh(V, F, "right")
+
+
+def test_rail_stays_put_when_slits_are_clear():
+    """スリットと重ならなければ、レールは今までの位置（ずらさない・持ち上げない・土台はふつう）"""
+    from app.geometry.placement import RAIL_FOOT_MM, place_rail_clear_of_slits
+    _, _, rail0, sl, args = _placement_for("hand_raw_right", ctx=True)
+    far = {**sl, "centers": [np.asarray(c) + np.array([0.0, 200.0, 0.0]) for c in sl["centers"]]}
+    rail = place_rail_clear_of_slits(*args, far)
+    assert rail["shift_mm"] == 0 and rail["foot_mm"] == RAIL_FOOT_MM
+    assert np.allclose(rail["origin"], rail0["origin"]) and np.allclose(rail["frame"], rail0["frame"])
 
 
 def test_slit_rail_clearance_box_geometry():
