@@ -11,8 +11,10 @@ const SKIN = 0xf2c09e;
 
 function setup(el) {
   if (views.has(el)) return views.get(el);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  // 画素の密度は2倍まで（iPhone は3倍で、9倍の画素を描いていた。2倍と見た目は変わらない）。描いた絵を読み返さないので
+  // preserveDrawingBuffer は使わない（2026-11-09、スマホが重い）
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   el.style.touchAction = 'none';
   el.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
@@ -32,7 +34,7 @@ function setup(el) {
   const group = new THREE.Group();
   scene.add(group);
   // dorsal：手の甲の向きの z の符号（右手 +1、左手 −1。実際の手の座標では右手の手の甲が +z）。初期の視点は手の甲側から
-  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, landmarks: null, framed: false, dorsal: 1 };
+  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, landmarks: null, framed: false, dorsal: 1, dirty: true };
   const resize = () => {
     const w = el.clientWidth || 300, h = el.clientHeight || 300;
     renderer.setSize(w, h, false);
@@ -41,14 +43,19 @@ function setup(el) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     controls.handleResize();
+    state.dirty = true;
   };
   const ro = new ResizeObserver(resize);
   ro.observe(el);
   resize();
   state.ro = ro;
+  // 絵が変わったときだけ描く（前は毎フレーム描いていて、止まっている間もGPUを使い続け、スマホが重かった。2026-11-09）。
+  // 回している間と、指を離したあとの惰性の間は、controls が change を出す
+  controls.addEventListener('change', () => { state.dirty = true; });
   const loop = () => {
     if (state.disposed) return;
-    controls.update(); renderer.render(scene, camera);
+    controls.update();
+    if (state.dirty) { state.dirty = false; renderer.render(scene, camera); }
     state.raf = requestAnimationFrame(loop);
   };
   loop();
@@ -90,6 +97,7 @@ function frame(state) {
   state.camera.far = size * 20;
   state.camera.updateProjectionMatrix();
   state.framed = true;
+  state.dirty = true;
 }
 
 function dispose(obj) {
@@ -221,6 +229,7 @@ window.jijoguViewer = {
     await setHand(state, url, H(headersJson), 1.0);
     setLandmarks(state, JSON.parse(landmarksJson || 'null'));
     frame(state);
+    state.dirty = true;
   },
   // S7：手（半透明）＋部品＋道具の棒。sceneJson = { hand: {url, headers, opacity, visible}, parts: [{id, url, headers, color}], tool_d_mm,
   //   tool: {center, axis, tip_mm, rear_mm}（任意。生成APIが版に書いた道具の軸） }
@@ -238,20 +247,23 @@ window.jijoguViewer = {
     for (const id of [...state.parts.keys()]) if (!want.has(id)) await setPart(state, id, null);
     for (const p of s.parts || []) await setPart(state, p.id, p.url, p.headers, p.color);
     if (!state.framed) frame(state);
+    state.dirty = true;
   },
   // 1つの部品だけ差し替える（クリップの角度を変えたとき）
   async setPart(el, id, url, headersJson, color) {
     const state = setup(el);
     await setPart(state, id, url, H(headersJson), color);
+    state.dirty = true;
   },
   setColor(el, color) {
     const state = views.get(el);
     if (!state) return;
     for (const m of state.parts.values()) m.material.color.set(color);
+    state.dirty = true;
   },
   setHandVisible(el, visible) {
     const state = views.get(el);
-    if (state?.hand) state.hand.visible = !!visible;
+    if (state?.hand) { state.hand.visible = !!visible; state.dirty = true; }
   },
   reframe(el) { const state = views.get(el); if (state) frame(state); },
   dispose(el) { disposeView(el); },
