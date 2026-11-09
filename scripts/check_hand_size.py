@@ -5,6 +5,10 @@
 - 手首→中指の付け根：手の甲の側の、手首の上の皮膚から、中指の付け根の出っ張りのてっぺんまで（まっすぐ）
 - 付け根の幅：人差し指の付け根の出っ張りから、小指の付け根の出っ張りまで
 
+係数の案は「手首→中指の付け根」だけから出す（倍率もこの手の甲の長さから出しているので）。こぶしの高さは、
+定規は机にグーを付けた姿勢、3Dは動画の浮かせて少し握った手で、握り方が違う（同じくらいの倍率で 59〜74mm と
+ケースごとに変わった。2026-11-09）。付け根の幅は測り方がぶれやすい。この2つは比べるだけにする
+
 使い方（リポジトリの直下から。api/.venv を使う）：
   本番の直近のケース（読むだけ。gcloud auth application-default login が要る）
     api/.venv/bin/python scripts/check_hand_size.py --height 65 --dorsal 90 --width 70
@@ -93,7 +97,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--case")
     ap.add_argument("--glb", type=Path)
-    ap.add_argument("--height", type=float, help="定規：こぶしの高さ（mm）")
+    ap.add_argument("--height", type=float, help="定規：こぶしの高さ（mm）。比べるだけで、係数の案には使わない")
     ap.add_argument("--dorsal", type=float, help="定規：手首→中指の付け根（mm）")
     ap.add_argument("--width", type=float, help="定規：付け根の幅（mm）。測り方がぶれやすいので、係数の案には使わない")
     a = ap.parse_args()
@@ -122,11 +126,11 @@ def main() -> None:
         if ruler:
             r = ruler / mt[key]
             print(f"   {name}：定規 {ruler} ÷ 3D {mt[key]} = {r:.3f}")
-            if key != "width_mm":
+            if key == "dorsal_mm":
                 ratios.append(r)
     if ratios:
         lf = lf_now * statistics.median(ratios)
-        print(f"   → 補正係数の案：{lf:.3f}（いまの {lf_now} × 比の中央値 {statistics.median(ratios):.3f}）")
+        print(f"   → 補正係数の案：{lf:.3f}（いまの {lf_now} × 手首→中指の付け根の比 {statistics.median(ratios):.3f}）")
 
 
 if __name__ == "__main__":
