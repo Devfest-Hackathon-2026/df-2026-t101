@@ -45,7 +45,17 @@ DIMENSION = {
                            "source": {"enum": ["measured", "rule", "interview", "ai", "default"]},
                            "reason_ja": {"type": "string"}}}},
         "summary_ja": {"type": "string"},
+        # 主でない取り付け具ごとの角度（任意。複数の取り付け具があるときだけ）
+        "attachments": {"type": "array", "items": {
+            "type": "object", "required": ["attachment_id", "angle_deg", "reason_ja"],
+            "properties": {"attachment_id": {"type": "string"}, "angle_deg": {"type": "number"},
+                           "reason_ja": {"type": "string"}}}},
     },
+}
+
+ATTACHMENT = {
+    "type": "object", "required": ["angle_deg", "reason_ja"],
+    "properties": {"angle_deg": {"type": "number"}, "reason_ja": {"type": "string"}},
 }
 
 REVIEW = {

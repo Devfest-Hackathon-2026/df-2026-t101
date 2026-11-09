@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-ANGLE_BY_TOOL = {"brush": 70, "pen": 60, "spoon": 60}   # 道具の立て具合（机に対する傾き。ADR-0013、2026-11-08）
+from ..attachments import ANGLE_BY_TOOL, TOOL_JA   # 道具の立て具合（机に対する傾き。ADR-0013）
 
 
 def interview(requirements: dict, message: str, turn: int) -> dict:
@@ -32,7 +32,14 @@ def select(requirements: dict) -> dict:
     return {"parts": parts}
 
 
-def dimension(requirements: dict, param_defs: list) -> dict:
+def attachment_angle(attachment: dict) -> dict:
+    """取り付け具1つの角度を道具から選ぶ（道具が分からなければ60度）"""
+    tool = attachment.get("tool_type")
+    v = ANGLE_BY_TOOL.get(tool, 60)
+    return {"angle_deg": v, "reason_ja": f"道具（{TOOL_JA.get(tool, '道具')}）とやりたいこと（{attachment.get('activity')}）から {v} 度にしました"}
+
+
+def dimension(requirements: dict, param_defs: list, attachments: list | None = None) -> dict:
     """基準値のまま返し、角度だけ道具から選ぶ"""
     out = []
     for d in param_defs:
@@ -44,7 +51,10 @@ def dimension(requirements: dict, param_defs: list) -> dict:
         if d["part_id"] == "c_clip" and d["name"] == "opening_ratio" and requirements.get("donning_by") == "helper":
             src, why = "ai", "家族や支援者が着け外しするので、押し込みやすさを優先しました"
         out.append({"part_id": d["part_id"], "name": d["name"], "value": v, "source": src, "reason_ja": why})
-    return {"params": out, "summary_ja": "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。"}
+    res = {"params": out, "summary_ja": "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。"}
+    if attachments:
+        res["attachments"] = [{"attachment_id": a["attachment_id"], **attachment_angle(a)} for a in attachments]
+    return res
 
 
 def review(params: list, round_no: int) -> dict:

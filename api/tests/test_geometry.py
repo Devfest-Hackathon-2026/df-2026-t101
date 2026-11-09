@@ -296,3 +296,9 @@ def test_slit_rail_clearance_box_geometry():
     # 台の中に中心があれば負
     sl = {**base, "centers": [np.array([0.0, 0.0, -2.0])], "normals": [np.array([1.0, 0.0, 0.0])]}
     assert slit_rail_clearance(sl, rail) < 0
+
+
+def test_angle_by_tool_matches_attachments():
+    import app.attachments
+    from app.geometry import baseline
+    assert baseline.ANGLE_BY_TOOL == app.attachments.ANGLE_BY_TOOL

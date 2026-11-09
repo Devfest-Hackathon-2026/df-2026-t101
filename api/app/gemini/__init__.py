@@ -13,9 +13,9 @@ from ..errors import ApiError
 from . import mock, schemas
 
 log = logging.getLogger("gemini")
-PROMPT_VERSIONS = {"system": "v1", "interview": "v1", "select": "v1", "dimension": "v1", "review": "v1", "refine": "v1"}
+PROMPT_VERSIONS = {"system": "v1", "interview": "v1", "select": "v1", "dimension": "v2", "attachment": "v1", "review": "v1", "refine": "v1"}
 # review は画像4枚で時間がぶれやすい（11/7 の実測で6〜108秒）ので LOW にした（generation-pipeline.md §3 の表も同じ）
-THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "review": "LOW", "refine": "LOW"}
+THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "attachment": "LOW", "review": "LOW", "refine": "LOW"}
 
 
 class Usage:
@@ -127,11 +127,18 @@ def select(requirements: dict, hand: dict, catalog_summary: list, usage: Usage) 
 
 
 def dimension(requirements: dict, hand: dict, parts: list, param_defs: list, violations: list | None,
-              usage: Usage) -> dict:
+              usage: Usage, attachments: list[dict] | None = None) -> dict:
+    """attachments は主でない取り付け具（attachment_id・tool_type・activity・tool_d_mm）。角度を取り付け具ごとに答えさせる"""
     v = ("\n前の答えの問題（直してください）：\n" + _j(violations)) if violations else ""
     return _run("dimension", {"requirements": requirements, "hand": hand, "parts": parts, "params": param_defs,
-                              "violations": v}, schemas.DIMENSION, usage,
-                mock_fn=lambda: mock.dimension(requirements, param_defs))
+                              "violations": v, "attachments": attachments or []}, schemas.DIMENSION, usage,
+                mock_fn=lambda: mock.dimension(requirements, param_defs, attachments))
+
+
+def attachment_angle(requirements: dict, hand: dict, attachment: dict, usage: Usage) -> dict:
+    """取り付け具1つの角度（60／70／80）と理由。取り付け具を足すときに使う"""
+    return _run("attachment", {"requirements": requirements, "hand": hand, "attachment": attachment},
+                schemas.ATTACHMENT, usage, mock_fn=lambda: mock.attachment_angle(attachment))
 
 
 def review(images: list[bytes], requirements: dict, hand: dict, params: list, history: list, round_no: int,

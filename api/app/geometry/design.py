@@ -5,6 +5,7 @@ import hashlib
 
 SHELL_RULES_VERSION = "2026-11-07b"  # 指を覆わない（基節から先を捨てる）、手のひら側の平面を付け根＋8mmまで
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -181,8 +182,82 @@ def _print_matrix(bounds_actual: np.ndarray, hand_side: str) -> np.ndarray:
     return M
 
 
+# ---------------------------------------------------------------------------
+# 1つのクリップ（主なクリップと、同じレールに付けるほかのクリップの両方で使う）
+# ---------------------------------------------------------------------------
+
+def _clip_defs(cp: dict) -> dict:
+    """OpenSCAD に渡すクリップの引数"""
+    return {
+        "c_clip_tool_d_mm": float(cp["tool_d_mm"]), "c_clip_wall_mm": float(cp["wall_mm"]),
+        "c_clip_opening_ratio": float(cp["opening_ratio"]), "c_clip_height_mm": float(cp["height_mm"]),
+        "c_clip_angle_deg": int(cp["angle_deg"]), "c_clip_grip_ribs": bool(cp["grip_ribs"]),
+        "c_clip_tpu_sleeve": bool(cp.get("tpu_sleeve", False)),
+    }
+
+
+def _clip_plan(cp: dict, defs: dict, wd: Path, quality: str, names: dict, want_file: bool = True):
+    """ライブラリ（cliplib）にあれば持ってくる。なければ OpenSCAD の仕事を作る。
+    names：{"print", "preview", "check"} のファイル名。返り値は (引数, ライブラリ|None, 仕事 {"file"?, "check"})"""
+    lib = cliplib.lookup(cp) if want_file else None
+    if lib:
+        return {**cp, "tool_d_mm": lib["tool_d_snapped"]}, lib, {}
+    d = {**defs, **_clip_defs(cp)}
+    jobs = {}
+    if want_file:
+        if quality == "print":
+            jobs["file"] = ({**d, "mode": "clip"}, wd / names["print"])
+        else:
+            jobs["file"] = ({**d, "mode": "assembled", "part": "c_clip"}, wd / names["preview"])
+    # 検査用：刷る向きのクリップ（速い）
+    jobs["check"] = ({**d, "mode": "clip", "quality": "preview"}, wd / names["check"])
+    return cp, None, jobs
+
+
+def _clip_from_lib(lib: dict, quality: str, defs: dict, wd: Path, names: dict, hand_side: str) -> str:
+    mirror = hand_side == "left"   # ライブラリは右手の形
+    if quality == "print":
+        dst = wd / names["print"]
+        cliplib.copy_print(lib["print"], dst, mirror=mirror)
+    else:
+        dst = wd / names["preview"]
+        cliplib.place_in_rail(lib["rail"], defs["rail_origin"], defs["rail_frame"], dst, mirror=mirror)
+    return posix(dst)
+
+
+def _clip_checks(clip_check: str, cp: dict, href, cover_c, rail: dict, Jc: dict) -> tuple[list, list]:
+    """R6f（クリップの形）と R6h（道具の通り道）。返り値は (R6f, R6h)"""
+    return CK.check_clip(trimesh.load(clip_check, force="mesh"), cp), CK.check_tool_path(href, cover_c, rail, cp, Jc)
+
+
+def _clip_tool(cp: dict, rail: dict, hand_side: str) -> dict:
+    """道具の軸（実際の手の座標）。画面（S7）の3D表示が、クリップの形から推定せずにこの値で棒を描く"""
+    Rc = np.asarray(rail["frame"]).T
+    tool_c = _to_actual_point(Rc @ clipgeom.clip_center_rail(cp) + rail["origin"], hand_side)
+    tool_a = _to_actual_point(Rc @ clipgeom.clip_axis_rail(cp), hand_side)
+    return {"center": [round(float(v), 2) for v in tool_c], "axis": [round(float(v), 4) for v in tool_a],
+            "tip_mm": CK.TOOL_TIP_MM, "rear_mm": CK.TOOL_REAR_MM, "diameter_mm": float(cp["tool_d_mm"])}
+
+
+def _clip_info(cp: dict, lib: dict | None) -> dict:
+    return {"source": "library" if lib else "generated", "variant": lib["variant"] if lib else None,
+            "tool_d_mm": float(cp["tool_d_mm"]), "angle_deg": int(cp["angle_deg"])}
+
+
+def _violations(results: list) -> list:
+    return [{"rule": r["rule"], "message_ja": r["message_ja"], "fix_hint": r.get("fix_hint")}
+            for r in results if not r["ok"] and r.get("severity") == "error"]
+
+
+def _safe_id(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", str(s))
+
+
 def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict, workdir: str, cache,
-                quality: str = "preview", parts: tuple = ("cover", "c_clip"), color: str = "#2A9D8F") -> dict:
+                quality: str = "preview", parts: tuple = ("cover", "c_clip"), color: str = "#2A9D8F",
+                extra_clips: dict[str, dict] | None = None) -> dict:
+    """extra_clips：同じレールに付けるほかのクリップ {取り付け具のID: クリップの引数}。
+    カバーは1回だけ作り、ほかのクリップは返り値の "extra_clips" に入れる（違反は最上位の violations に入れない）"""
     t0 = time.time()
     timings = {}
     wd = Path(workdir)
@@ -287,52 +362,60 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         "strap_slits_axes": [A(a) for a in sl["axes"]],
         "cover_palm_plane": [*[float(x) for x in _palm_normal_actual(hand_side)], round(float(cut["palm_plane_z"]) + 0.25, 3)],  # 殻の面に触れて切れ端ができないよう0.25mm先で切る
         "rail_origin": A(rail["origin"]), "rail_frame": [[round(float(x), 5) for x in r] for r in fr],
-        "c_clip_tool_d_mm": float(clip_p["tool_d_mm"]), "c_clip_wall_mm": float(clip_p["wall_mm"]),
-        "c_clip_opening_ratio": float(clip_p["opening_ratio"]), "c_clip_height_mm": float(clip_p["height_mm"]),
-        "c_clip_angle_deg": int(clip_p["angle_deg"]), "c_clip_grip_ribs": bool(clip_p["grip_ribs"]),
-        "c_clip_tpu_sleeve": bool(clip_p.get("tpu_sleeve", False)),
+        **_clip_defs(clip_p),
     }
     angle = int(clip_p["angle_deg"])
     pm = _print_matrix(shell_a.bounds, hand_side)
 
     # クリップ：先に作っておいた固定STL（cliplib）に合うものがあれば、OpenSCAD で描かずにそれを持ってくる（2026-11-08）
-    lib = cliplib.lookup(clip_p) if "c_clip" in parts else None
-    if lib:
-        clip_p = {**clip_p, "tool_d_mm": lib["tool_d_snapped"]}
+    names = {"print": f"print_clip_{angle}.stl", "preview": "clip_preview.stl", "check": "_clip_check.stl"}
+    clip_p, lib, cjobs = _clip_plan(clip_p, defs, wd, quality, names, want_file="c_clip" in parts)
+    # ほかのクリップ（同じレール。カバーは作り直さない）。引数の足りない所は主なクリップの引数で埋める
+    clip_base = _merged(params, "c_clip")
+    extras = {}
+    for aid, v in (extra_clips or {}).items():
+        sid = _safe_id(aid)
+        ecp = {**clip_base, **v}
+        en = {"print": f"print_clip_{sid}_{int(ecp['angle_deg'])}.stl", "preview": f"clip_{sid}_preview.stl",
+              "check": f"_clip_{sid}_check.stl"}
+        ecp, elib, ejobs = _clip_plan(ecp, defs, wd, quality, en)
+        extras[aid] = {"cp": ecp, "lib": elib, "jobs": ejobs, "names": en}
 
     # OpenSCAD（部品ごとに並行して描く）
     jobs = {}
     if quality == "print":
         if "cover" in parts:
             jobs["cover"] = ({**defs, "mode": "cover", "cover_print_matrix": pm.round(5).tolist()}, wd / "print_cover.stl")
-        if "c_clip" in parts and not lib:
-            jobs["c_clip"] = ({**defs, "mode": "clip"}, wd / f"print_clip_{angle}.stl")
+        if "file" in cjobs:
+            jobs["c_clip"] = cjobs["file"]
         if want_sleeve:
             jobs["tpu_sleeve"] = ({**defs, "mode": "sleeve"}, wd / "print_sleeve.stl")
     else:
         if "cover" in parts:
             jobs["cover"] = ({**defs, "mode": "assembled", "part": "cover"}, wd / "cover_preview.stl")
-        if "c_clip" in parts and not lib:
-            jobs["c_clip"] = ({**defs, "mode": "assembled", "part": "c_clip"}, wd / "clip_preview.stl")
+        if "file" in cjobs:
+            jobs["c_clip"] = cjobs["file"]
         if want_sleeve:
             jobs["tpu_sleeve"] = ({**defs, "mode": "assembled", "part": "tpu_sleeve"}, wd / "sleeve_preview.stl")
-    if not lib:
-        # 検査用：刷る向きのクリップ（速い）
-        jobs["_clip_print_check"] = ({**defs, "mode": "clip", "quality": "preview"}, wd / "_clip_check.stl")
+    if "check" in cjobs:
+        jobs["_clip_print_check"] = cjobs["check"]
+    for aid, x in extras.items():
+        for k, j in x["jobs"].items():
+            jobs[("_extra", aid, k)] = j
     ts = time.time()
     with ThreadPoolExecutor(max_workers=4) as ex:
         futs = {k: ex.submit(run, d, p) for k, (d, p) in jobs.items()}
         files = {k: f.result() for k, f in futs.items()}
     timings["openscad_ms"] = int((time.time() - ts) * 1000)
-    if lib:
-        mirror = hand_side == "left"   # ライブラリは右手の形
-        if quality == "print":
-            dst = wd / f"print_clip_{angle}.stl"
-            cliplib.copy_print(lib["print"], dst, mirror=mirror)
+    for aid, x in extras.items():
+        out = {k: files.pop(("_extra", aid, k)) for k in list(x["jobs"])}
+        if x["lib"]:
+            x["file"] = _clip_from_lib(x["lib"], quality, defs, wd, x["names"], hand_side)
+            x["check"] = x["lib"]["print"]
         else:
-            dst = wd / "clip_preview.stl"
-            cliplib.place_in_rail(lib["rail"], defs["rail_origin"], defs["rail_frame"], dst, mirror=mirror)
-        files["c_clip"] = posix(dst)
+            x["file"], x["check"] = out["file"], out["check"]
+    if lib:
+        files["c_clip"] = _clip_from_lib(lib, quality, defs, wd, names, hand_side)
         clip_check = lib["print"]
     else:
         clip_check = files.pop("_clip_print_check")
@@ -357,16 +440,20 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
             cm.apply_transform(np.linalg.inv(pm))
         cm_c = _mesh_to_canonical(cm, hand_side)
         results += CK.check_cover(cm_c, href, cut)
-    results += CK.check_clip(trimesh.load(clip_check, force="mesh"), clip_p)
-    # R6h：道具の通り道（手・カバーに当たらず、机に届くか）
+    # R6h：道具の通り道（手・カバーに当たらず、机に届くか）。ほかのクリップも同じカバーで見る
     cover_c = _mesh_to_canonical(trimesh.load(files["cover"], force="mesh"), hand_side) if "cover" in files else None
     if cover_c is not None and quality == "print":
         cover_c = _mesh_to_canonical(trimesh.load(files["cover"], force="mesh").apply_transform(np.linalg.inv(pm)), hand_side)
-    results += CK.check_tool_path(href, cover_c, rail, clip_p, Jc)
+    r6f, r6h = _clip_checks(clip_check, clip_p, href, cover_c, rail, Jc)
+    results += r6f + r6h
     results += CK.check_slits_open(cover_c, sl, t)
+    extra_out = {}
+    for aid, x in extras.items():
+        ef, eh = _clip_checks(x["check"], x["cp"], href, cover_c, rail, Jc)
+        extra_out[aid] = {"file": x["file"], "tool": _clip_tool(x["cp"], rail, hand_side), "clip": _clip_info(x["cp"], x["lib"]),
+                          "checks": ef + eh, "violations": _violations(ef + eh)}
     timings["checks_ms"] = int((time.time() - ts) * 1000)
-    violations = [{"rule": r["rule"], "message_ja": r["message_ja"], "fix_hint": r.get("fix_hint")}
-                  for r in results if not r["ok"] and r.get("severity") == "error"]
+    violations = _violations(results)
     if ho["dropped"]:
         results.append({"rule": "R6e_holes", "ok": True, "value": {"dropped": ho["dropped"]},
                         "message_ja": f"空気穴を {ho['dropped']} 個減らしました（置ける場所が足りないため）", "severity": "info"})
@@ -407,13 +494,8 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
         views = render_views(vfiles, str(wd / "hand.stl"), rod, float(clip_p["tool_d_mm"]), color, cams, wd)
         timings["views_ms"] = int((time.time() - ts) * 1000)
     timings["total_ms"] = int((time.time() - t0) * 1000)
-    # 道具の軸（実際の手の座標）。画面（S7）の3D表示が、クリップの形から推定せずにこの値で棒を描く
-    Rc = np.asarray(rail["frame"]).T
-    tool_c = _to_actual_point(Rc @ clipgeom.clip_center_rail(clip_p) + rail["origin"], hand_side)
-    tool_a = _to_actual_point(Rc @ clipgeom.clip_axis_rail(clip_p), hand_side)
     return {
-        "tool": {"center": [round(float(v), 2) for v in tool_c], "axis": [round(float(v), 4) for v in tool_a],
-                 "tip_mm": CK.TOOL_TIP_MM, "rear_mm": CK.TOOL_REAR_MM, "diameter_mm": float(clip_p["tool_d_mm"])},
+        "tool": _clip_tool(clip_p, rail, hand_side),
         "files": files,
         "views": views,
         "cover_shell_sha256": shell_sha,
@@ -424,8 +506,8 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
                       "air_holes": len(ho["centers"]), "strap_slits": len(sl["centers"]),
                       "slit_rail_clearance_mm": round(float(slit_rail_mm), 1) if np.isfinite(slit_rail_mm) else None,
                       "strap_window": sl.get("window")},
-        "clip": {"source": "library" if lib else "generated", "variant": lib["variant"] if lib else None,
-                 "tool_d_mm": float(clip_p["tool_d_mm"]), "angle_deg": angle},
+        "clip": _clip_info(clip_p, lib),
+        "extra_clips": extra_out,
         "shell_info": {k: v for k, v in info.items() if k != "cut"},
     }
 

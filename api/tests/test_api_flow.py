@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 
 TMP = tempfile.mkdtemp(prefix="jijogu_test_store_")
-os.environ.update({"AUTH_MODE": "dev", "STORE_BACKEND": "local", "LOCAL_STORE_DIR": TMP, "GEMINI_MODE": "mock"})
+# 1人1日の生成の上限（既定10回）は、このファイルの生成の数より少ないので上げる
+os.environ.update({"AUTH_MODE": "dev", "STORE_BACKEND": "local", "LOCAL_STORE_DIR": TMP, "GEMINI_MODE": "mock",
+                   "LIMIT_DESIGNS_PER_USER": "100"})
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import trimesh  # noqa: E402
@@ -62,20 +64,33 @@ def _fake_geometry():
 
     calls = []
 
-    def make_design(scaled_glb, joints_mm, hand_side, params, workdir, cache, quality="preview", parts=("cover", "c_clip")):
-        calls.append({"params": params, "quality": quality, "parts": parts})
+    def make_design(scaled_glb, joints_mm, hand_side, params, workdir, cache, quality="preview", parts=("cover", "c_clip"),
+                    color="#2A9D8F", extra_clips=None):
+        calls.append({"params": params, "quality": quality, "parts": parts, "extra_clips": extra_clips})
         out = {}
         for p in parts:
             path = Path(workdir) / f"{p}_{quality}.stl"
-            trimesh.creation.box((10, 10, 10)).export(path)
+            # 本物の OpenSCAD は同じ入力でも毎回少し違うSTLを出すので、仮のカバーも呼ぶたびに中身を変える
+            h = 10 + 0.01 * len(calls) if p == "cover" else 10
+            trimesh.creation.box((10, 10, h)).export(path)
             out[p] = str(path)
+        extra = {}
+        for aid, cp in (extra_clips or {}).items():
+            path = Path(workdir) / f"c_clip_{aid}_{quality}.stl"
+            trimesh.creation.box((10, 10, 10)).export(path)
+            extra[aid] = {"file": str(path),
+                          "tool": {"center": [0, 0, 0], "axis": [0, 0, -1], "tip_mm": 100.0, "rear_mm": 50.0,
+                                   "diameter_mm": float(cp["tool_d_mm"])},
+                          "clip": {"source": "generated", "variant": None, "tool_d_mm": float(cp["tool_d_mm"]),
+                                   "angle_deg": int(cp["angle_deg"])},
+                          "checks": [], "violations": []}
         views = []
         for name in ("front", "side", "top", "iso"):
             path = Path(workdir) / f"{name}.png"
             Image.new("RGB", (32, 24), (200, 200, 200)).save(path)
             views.append(str(path))
         return {"files": out, "views": views, "cover_shell_sha256": "ab" * 32, "checks": [], "violations": [],
-                "timings_ms": {"openscad": 5}}
+                "timings_ms": {"openscad": 5}, "extra_clips": extra}
 
     m.GeometryError, m.prepare_measurement, m.make_design, m.calls = GeometryError, prepare_measurement, make_design, calls
     return m
@@ -137,19 +152,32 @@ def client():
     mp.undo()
 
 
-def _setup_case(client) -> tuple[str, bytes, str]:
+def _setup_case(client, tools=None) -> tuple[str, bytes, str]:
+    """tools：(activity, tool_type, tool_d_mm, 柄の形) の組の一覧。None なら今までどおり筆1つ（tools を送らない）"""
     r = client.post("/v1/cases", json={"title": "筆のカバー"}, headers=H)
     assert r.status_code == 201, r.text
     cid = r.json()["case_id"]
-    r = client.put(f"/v1/cases/{cid}/requirements", headers=H, json={
-        "activity": "draw", "tool_type": "brush", "hand_side": "right", "tool_d_mm": 9.5, "tool_shaft_size": None,
-        "tool_shaft_shape": "round", "finger_state": "fist", "donning_by": "helper", "capture_by": "helper"})
+    body = {"activity": "draw", "tool_type": "brush", "hand_side": "right", "tool_d_mm": 9.5, "tool_shaft_size": None,
+            "tool_shaft_shape": "round", "finger_state": "fist", "donning_by": "helper", "capture_by": "helper"}
+    if tools:
+        items = [{"activity": a, "tool_type": t, "tool_d_mm": d, "tool_shaft_size": None, "tool_shaft_shape": s}
+                 for a, t, d, s in tools]
+        body.update({k: items[0][k] for k in ("activity", "tool_type", "tool_d_mm", "tool_shaft_shape")}, tools=items)
+    r = client.put(f"/v1/cases/{cid}/requirements", headers=H, json=body)
     assert r.status_code == 200, r.text
     assert r.json()["case_status"] == "measuring"
     raw = (FIX / "hand_raw_right.glb").read_bytes()
     mesh_id = "hm_0123456789ab"
     files.put(f"cases/{cid}/hand/raw/{mesh_id}.glb", raw)
     return cid, raw, mesh_id
+
+
+def _put_measurement(client, cid: str, raw: bytes, mesh_id: str) -> None:
+    """同意して採寸を保存する"""
+    client.post(f"/v1/cases/{cid}/consent", headers=H, json={"mesh_consent": True, "consent_text_version": "mesh-consent-2"})
+    tok = _token(cid, raw, {"index": {"flexion_deg": {"mcp": 1}}})
+    r = client.put(f"/v1/cases/{cid}/measurement", headers=H, json=_measurement(cid, mesh_id, tok))
+    assert r.status_code == 200, r.text
 
 
 def test_flow_measure_design_refine_print(client):
@@ -254,6 +282,21 @@ def test_review_and_approval(client):
     assert r.status_code == 200, r.text
     assert r.json()["case_status"] == "approved"
     assert client.get(f"/v1/files/{r.json()['files']['print']['cover']}", headers=H).status_code == 200
+
+
+def test_review_approval_publishes_one_print_per_attachment(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 12.0, "round")])
+    _request_review(client, cid, d["design_id"])
+    ot = {"X-User": "ot1", "X-User-Email": "ot@example.com"}
+    ghash = client.get(f"/v1/cases/{cid}/designs/{d['design_id']}", headers=ot).json()["design"]["geometry_hash"]
+    ck = {k: True for k in ("dimensions_reviewed", "edges_safe", "not_an_orthosis", "palm_open_wrist_free",
+                            "no_mouth_contact", "user_informed")}
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/approval", headers=ot,
+                    json={"decision": "approve", "geometry_hash": ghash, "checklist": ck})
+    assert r.status_code == 200, r.text
+    pr = r.json()["files"]["print"]
+    assert set(pr) == {"cover", "c_clip", "c_clip_a2"}
+    assert all(client.get(f"/v1/files/{k}", headers=H).status_code == 200 for k in pr.values())
 
 
 def test_errors_and_conflict(client):
@@ -392,3 +435,429 @@ def test_fixed_params_cannot_be_changed():
     assert ("strap_slits", "strap_count") not in keys and ("c_clip", "wall_mm") not in keys
     assert {(c["part_id"], c["name"]) for c in res.clamped} >= {("strap_slits", "strap_count"), ("c_clip", "wall_mm")}
     assert validator.to_dict(res.params).get("strap_slits", {}).get("strap_count") is None   # 形はカタログの既定（1本）で作る
+
+
+_REQ_KEYS = ("activity", "tool_type", "hand_side", "tool_d_mm", "tool_shaft_size", "tool_shaft_shape",
+             "finger_state", "donning_by", "capture_by", "tools")
+_TOOL_KEYS = ("activity", "tool_type", "tool_d_mm", "tool_shaft_size", "tool_shaft_shape")
+
+
+def _req_body(req: dict) -> dict:
+    """スキーマにある項目だけを残す（サーバーが足す notes・assumptions・tool_d_source などを落とす）"""
+    out = {k: req[k] for k in _REQ_KEYS if k in req}
+    if "tools" in out:
+        out["tools"] = [{k: t[k] for k in _TOOL_KEYS if k in t} for t in out["tools"]]
+    return out
+
+
+def test_requirements_with_tools_fills_legacy_from_primary(client):
+    cid = client.post("/v1/cases", json={}, headers=H).json()["case_id"]
+    r = client.put(f"/v1/cases/{cid}/requirements", headers=H, json={
+        "activity": "eat", "tool_type": "spoon", "hand_side": "right", "tool_d_mm": 10, "tool_shaft_size": None,
+        "tool_shaft_shape": "flat", "finger_state": "fist", "donning_by": "helper", "capture_by": "helper",
+        "tools": [{"activity": "eat", "tool_type": "spoon", "tool_d_mm": 10, "tool_shaft_size": None, "tool_shaft_shape": "flat"},
+                  {"activity": "write", "tool_type": "pen", "tool_d_mm": 9, "tool_shaft_size": None, "tool_shaft_shape": "round"}]})
+    req = r.json()["requirements"]
+    assert r.status_code == 200 and len(req["tools"]) == 2
+    assert req["tool_type"] == "pen" and req["tool_d_mm"] == 9 and req["tool_shaft_shape"] == "round"
+    assert any(a.startswith("スプーン：平たい柄は") for a in req["assumptions"])
+    # 5つは多すぎる
+    body = {**_req_body(req), "tools": [_req_body(req)["tools"][1]] * 5}
+    assert client.put(f"/v1/cases/{cid}/requirements", headers=H, json=body).status_code == 422  # REQUIREMENTS_INVALID
+    # 返ってきた要求をそのまま送り直せる
+    assert client.put(f"/v1/cases/{cid}/requirements", headers=H, json=_req_body(req)).status_code == 200
+
+
+def test_design_with_two_tools_makes_two_clips(client):
+    cid, raw, mesh_id = _setup_case(client, tools=[("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
+    atts = d["attachments"]
+    assert [a["tool_type"] for a in atts] == ["brush", "spoon"] and atts[0]["primary"]
+    assert atts[0]["files"]["preview_stl"] == d["files"]["parts"]["c_clip"]["preview_stl"]
+    assert atts[0]["files"]["preview_stl"].endswith("c_clip_brush_70.preview.stl")
+    assert atts[1]["files"]["preview_stl"].endswith("c_clip_spoon_60.preview.stl")
+    assert all(files.get(a["files"]["preview_stl"]) for a in atts)
+    assert d["clip_angle_deg"] == 70
+
+
+def test_single_tool_design_keeps_old_names(client):
+    cid, raw, mesh_id = _setup_case(client)          # 今までどおり道具1つ
+    _put_measurement(client, cid, raw, mesh_id)
+    d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
+    assert len(d["attachments"]) == 1 and d["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_70.preview.stl")
+
+
+def test_flat_tool_is_left_out_with_notice(client):
+    cid, raw, mesh_id = _setup_case(client, tools=[("eat", "spoon", 10, "flat"), ("write", "pen", 9, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
+    assert [a["tool_type"] for a in d["attachments"]] == ["pen"] and d["status"] == "needs_attention"
+    assert any("太柄スポンジ" in i["description_ja"] for i in d["review"]["unresolved_issues"])
+
+
+def test_same_tool_twice_gets_distinct_files(client):
+    """同じ道具・太さ・角度が2つあっても、プレビュー用STLの名前は重ならない"""
+    cid, raw, mesh_id = _setup_case(client, tools=[("write", "pen", 9, "round"), ("write", "pen", 9, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
+    names = [a["files"]["preview_stl"] for a in d["attachments"]]
+    assert len(names) == 2 and len(set(names)) == 2 and all(files.get(n) for n in names)
+    assert [a["print_key"] for a in d["attachments"]] == ["c_clip", "c_clip_a2"]
+
+
+def test_failed_extra_clip_is_left_out(client, monkeypatch):
+    """主でないクリップが R6f に落ちたら、そのクリップだけ外して知らせる"""
+    cid, raw, mesh_id = _setup_case(client, tools=[("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    good = GEOM.make_design
+
+    def bad_extra(*a, **k):
+        res = good(*a, **k)
+        for ex in res["extra_clips"].values():
+            ex["violations"] = [{"rule": "R6f", "message_ja": "クリップの開きが狭すぎます", "fix_hint": None}]
+        return res
+    monkeypatch.setattr(GEOM, "make_design", bad_extra)
+    d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
+    assert [a["tool_type"] for a in d["attachments"]] == ["brush"] and d["status"] == "needs_attention"
+    assert d["attachments"][0]["files"]["preview_stl"].endswith("c_clip_70.preview.stl")
+    assert any(i["description_ja"].startswith("スプーンのクリップは作れませんでした（") for i in d["review"]["unresolved_issues"])
+
+
+def test_failed_primary_clip_promotes_next(client, monkeypatch):
+    """主なクリップが R6f に落ちたら外し、次の取り付け具を主に繰り上げて今までの項目をうめ直す"""
+    cid, raw, mesh_id = _setup_case(client, tools=[("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    good = GEOM.make_design
+
+    def bad_primary(scaled_glb, joints_mm, hand_side, params, *a, **k):
+        res = good(scaled_glb, joints_mm, hand_side, params, *a, **k)
+        if params["c_clip"]["tool_d_mm"] == 9.5:
+            res["violations"] = [{"rule": "R6f", "message_ja": "クリップの開きが狭すぎます", "fix_hint": None}]
+        return res
+    monkeypatch.setattr(GEOM, "make_design", bad_primary)
+    r = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H)
+    assert r.status_code == 200, r.text
+    d = r.json()["design"]
+    atts = d["attachments"]
+    assert [a["tool_type"] for a in atts] == ["spoon"] and atts[0]["primary"] and atts[0]["print_key"] == "c_clip"
+    assert d["clip_angle_deg"] == 60 and d["status"] == "needs_attention"
+    c_clip = {p["name"]: p["value"] for p in d["params"] if p["part_id"] == "c_clip"}
+    assert c_clip["tool_d_mm"] == 11.5 and c_clip["angle_deg"] == 60
+    assert d["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_60.preview.stl")
+    assert any(i["description_ja"].startswith("筆のクリップは作れませんでした（") for i in d["review"]["unresolved_issues"])
+
+
+def test_unrenderable_extra_clip_is_left_out(client, monkeypatch):
+    """主でないクリップだけが描けない（OpenSCAD の失敗）なら、そのクリップだけ外して版を作る"""
+    cid, raw, mesh_id = _setup_case(client, tools=[("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    good = GEOM.make_design
+
+    def fail_spoon(*a, **k):
+        if "a2" in (k.get("extra_clips") or {}):
+            raise GEOM.GeometryError("RENDER_FAILED")
+        return good(*a, **k)
+    monkeypatch.setattr(GEOM, "make_design", fail_spoon)
+    r = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H)
+    assert r.status_code == 200, r.text
+    d = r.json()["design"]
+    assert [a["tool_type"] for a in d["attachments"]] == ["brush"] and d["status"] == "needs_attention"
+    assert any(i["description_ja"] == "スプーンのクリップは作れませんでした（形を描けませんでした）"
+               for i in d["review"]["unresolved_issues"])
+
+
+def test_refine_angle_keeps_all_attachments(client):
+    """取り付け具が2つの版の角度を変えても、取り付け具の一覧は残り、主な取り付け具が今までの項目とそろう"""
+    cid, raw, mesh_id = _setup_case(client, tools=[("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    _put_measurement(client, cid, raw, mesh_id)
+    d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"clip_angle_deg": 80})
+    assert r.status_code == 200, r.text
+    d2 = r.json()["design"]
+    atts = d2["attachments"]
+    assert [a["tool_type"] for a in atts] == ["brush", "spoon"] and atts[0]["angle_deg"] == 80 == d2["clip_angle_deg"]
+    assert atts[0]["files"]["preview_stl"] == d2["files"]["parts"]["c_clip"]["preview_stl"]
+    assert atts[0]["files"]["preview_stl"].endswith("c_clip_brush_80.preview.stl")
+    assert f"/designs/{d2['design_id']}/" in atts[1]["files"]["preview_stl"] and files.get(atts[1]["files"]["preview_stl"])
+    assert files.get(d2["files"]["parts"]["cover"]["preview_stl"]) == files.get(d["files"]["parts"]["cover"]["preview_stl"])
+
+
+# ---------------------------------------------------------------- 足す・取り付け具ごとに直す（ADR-0014 §4）
+def _design_with_tools(client, tools) -> tuple[str, dict]:
+    """道具の一覧でケースを作り、採寸して、最初の版を作る"""
+    cid, raw, mesh_id = _setup_case(client, tools=tools)
+    _put_measurement(client, cid, raw, mesh_id)
+    r = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H)
+    assert r.status_code == 200, r.text
+    return cid, r.json()["design"]
+
+
+def _request_review(client, cid: str, design_id: str) -> None:
+    """test_review_and_approval と同じ手順で OT に頼む"""
+    db.set("therapists/ot@example.com", {"name": "OT役"})
+    db.update(f"cases/{cid}", {"demo": False})
+    r = client.post(f"/v1/cases/{cid}/review-request", headers=H, json={"reviewer_email": "ot@example.com", "design_id": design_id})
+    assert r.status_code == 200, r.text
+
+
+def test_add_attachment_keeps_cover_and_resets_approval(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    cover_before = files.get(d["files"]["parts"]["cover"]["preview_stl"])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "eat", "tool_type": "spoon", "tool_d_mm": 12.0,
+                                             "tool_shaft_size": None, "tool_shaft_shape": "round"}})
+    n = r.json()["design"]
+    assert n["design_id"] != d["design_id"] and [a["id"] for a in n["attachments"]] == ["a1", "a2"]
+    assert db.get(f"cases/{cid}/designs/{n['design_id']}")["cover_shell_sha256"] == db.get(f"cases/{cid}/designs/{d['design_id']}")["cover_shell_sha256"]
+    assert files.get(n["files"]["parts"]["cover"]["preview_stl"]) == cover_before
+    assert n["files"]["parts"]["cover"]["preview_stl"] != d["files"]["parts"]["cover"]["preview_stl"]   # 新しい版の場所に置く
+    assert n["approval"]["status"] == "none"
+    assert [t["tool_type"] for t in db.get(f"cases/{cid}")["requirements"]["tools"]] == ["brush", "spoon"]
+
+
+def test_add_attachment_refused_without_new_version(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")] * 1)
+    for bad in ({"tool_d_mm": 25.0, "tool_shaft_shape": "round"}, {"tool_d_mm": 9.0, "tool_shaft_shape": "flat"}):
+        r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                        json={"add_attachment": {"activity": "write", "tool_type": "pen", "tool_shaft_size": None, **bad}})
+        assert r.status_code == 400
+    assert db.get(f"cases/{cid}")["current_design_id"] == d["design_id"]
+    assert len(db.get(f"cases/{cid}")["requirements"]["tools"]) == 1
+
+
+def test_fifth_attachment_is_refused(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 8, "round"), ("write", "pen", 9, "round"),
+                                         ("eat", "spoon", 11, "round"), ("other", "brush", 10, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "write", "tool_type": "pen", "tool_d_mm": 12, "tool_shaft_size": None, "tool_shaft_shape": "round"}})
+    assert r.status_code == 400 and db.get(f"cases/{cid}")["current_design_id"] == d["design_id"]
+
+
+def _cover_bytes(d: dict) -> bytes:
+    return files.get(d["files"]["parts"]["cover"]["preview_stl"])
+
+
+def test_angle_and_thickness_change_one_attachment(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("write", "pen", 8.5, "round")])
+    n = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"clip_angle_deg": 80, "attachment_id": "a2"}).json()["design"]
+    assert [a["angle_deg"] for a in n["attachments"]] == [70, 80] and n["clip_angle_deg"] == 70
+    m = client.post(f"/v1/cases/{cid}/designs/{n['design_id']}/refine", headers=H,
+                    json={"tool_d_mm": 9.0, "attachment_id": "a2"}).json()["design"]
+    assert m["attachments"][1]["tool_d_mm"] == 9.0
+    assert db.get(f"cases/{cid}")["requirements"]["tools"][1]["tool_d_mm"] == 9.0
+    # 取り付け具だけを直した版は、カバーのプレビュー用STLの中身が前の版と同じ（描き直しても中身は変えない）
+    assert _cover_bytes(n) == _cover_bytes(d) and _cover_bytes(m) == _cover_bytes(d)
+    p = client.post(f"/v1/cases/{cid}/designs/{m['design_id']}/refine", headers=H,
+                    json={"clip_angle_deg": 60}).json()["design"]   # 主な取り付け具の角度
+    assert _cover_bytes(p) == _cover_bytes(d)
+
+
+def test_cover_param_change_renders_new_cover(client):
+    """カバーの値を変えた版は、カバーのプレビュー用STLを描き直したものにする（前の版のものを使わない）"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"param_changes": [{"part_id": "cover", "name": "cover_thickness_mm", "value": 3.0}]})
+    assert r.status_code == 200, r.text
+    n = r.json()["design"]
+    assert _cover_bytes(n) != _cover_bytes(d)
+
+
+def test_duplicate_tool_names_are_distinct(client):
+    cid, d = _design_with_tools(client, [("write", "pen", 8.5, "round")])
+    n = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "write", "tool_type": "pen", "tool_d_mm": 12.0, "tool_shaft_size": None, "tool_shaft_shape": "round"}}).json()["design"]
+    names = [a["files"]["preview_stl"].rsplit("/", 1)[1] for a in n["attachments"]]
+    assert len(set(names)) == 2 and all("_d" in x for x in names)
+
+
+def test_refine_old_design_without_attachments(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    doc = db.get(f"cases/{cid}/designs/{d['design_id']}")
+    doc.pop("attachments")                      # この変更の前に作った版
+    db.set(f"cases/{cid}/designs/{d['design_id']}", doc)
+    n = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"clip_angle_deg": 60}).json()["design"]
+    assert len(n["attachments"]) == 1 and n["clip_angle_deg"] == 60
+
+
+def test_add_after_review_request_resets_case(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    _request_review(client, cid, d["design_id"])     # 既存の test_review_and_approval と同じ手順
+    n = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "eat", "tool_type": "spoon", "tool_d_mm": 12, "tool_shaft_size": None, "tool_shaft_shape": "round"}}).json()["design"]
+    assert n["approval"]["status"] == "none" and db.get(f"cases/{cid}")["status"] == "previewing"
+
+
+def test_add_attachment_render_failure_keeps_parent(client, monkeypatch):
+    """足したクリップが R6f に落ちたら、版を作らず RENDER_FAILED（details に検査の名前）。要求の道具も増えない"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    good = GEOM.make_design
+
+    def bad_extra(*a, **k):
+        res = good(*a, **k)
+        for ex in res["extra_clips"].values():
+            ex["violations"] = [{"rule": "R6f", "message_ja": "クリップの開きが狭すぎます", "fix_hint": None}]
+        return res
+    monkeypatch.setattr(GEOM, "make_design", bad_extra)
+    before = {i for i, _ in db.list(f"cases/{cid}/designs")}
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "eat", "tool_type": "spoon", "tool_d_mm": 12, "tool_shaft_size": None, "tool_shaft_shape": "round"}})
+    assert r.status_code == 500 and r.json()["error"]["code"] == "RENDER_FAILED"
+    assert any(x.get("rule") == "R6f" for x in r.json()["error"]["details"])
+    assert {i for i, _ in db.list(f"cases/{cid}/designs")} == before
+    case = db.get(f"cases/{cid}")
+    assert case["current_design_id"] == d["design_id"] and case["status"] == "previewing" and len(case["requirements"]["tools"]) == 1
+
+
+def test_add_attachment_unrenderable_keeps_parent(client, monkeypatch):
+    """足したクリップが描けない（OpenSCAD の失敗）ときも、版を作らない"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    good = GEOM.make_design
+
+    def fail_extra(*a, **k):
+        if k.get("extra_clips"):
+            raise GEOM.GeometryError("RENDER_FAILED")
+        return good(*a, **k)
+    monkeypatch.setattr(GEOM, "make_design", fail_extra)
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "eat", "tool_type": "spoon", "tool_d_mm": 12, "tool_shaft_size": None, "tool_shaft_shape": "round"}})
+    assert r.status_code == 500 and r.json()["error"]["code"] == "RENDER_FAILED"
+    assert len(db.list(f"cases/{cid}/designs")) == 1 and db.get(f"cases/{cid}")["current_design_id"] == d["design_id"]
+
+
+def test_unknown_attachment_id_is_refused(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"clip_angle_deg": 80, "attachment_id": "a9"})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_ARGUMENT"
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"tool_d_mm": 2.0})
+    assert r.status_code == 400
+    assert db.get(f"cases/{cid}")["current_design_id"] == d["design_id"]
+
+
+def test_user_tool_d_minimum_is_3_5(client):
+    """人が入れる柄の太さの下限は、要求（requirements.schema.json）と同じ 3.5mm（直す・足すとも）"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"tool_d_mm": 3.2})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_ARGUMENT"
+    assert "3.5" in r.json()["error"]["message"]
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "write", "tool_type": "pen", "tool_d_mm": 3.2,
+                                             "tool_shaft_size": None, "tool_shaft_shape": "round"}})
+    assert r.status_code == 400
+    assert db.get(f"cases/{cid}")["current_design_id"] == d["design_id"]
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"tool_d_mm": 3.5})
+    assert r.status_code == 200, r.text
+
+
+def test_old_case_without_tools_keeps_estimated_thickness(client):
+    """tools のない古い要求で、太さが区分から推定した値なら、足したあとも最初の道具は推定のまま（知らせも残る）"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    case = db.get(f"cases/{cid}")
+    req = {k: v for k, v in case["requirements"].items() if k != "tools"}   # この変更の前に保存した要求
+    req.update(tool_d_mm=8.5, tool_d_source="category", tool_shaft_size="medium",
+               assumptions=["道具の太さは推定です。刷る前に太さを確かめてください"])
+    db.update(f"cases/{cid}", {"requirements": {**req, "__replace__": True}})
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"add_attachment": {"activity": "eat", "tool_type": "spoon", "tool_d_mm": 12.0,
+                                             "tool_shaft_size": None, "tool_shaft_shape": "round"}})
+    assert r.status_code == 200, r.text
+    new_req = db.get(f"cases/{cid}")["requirements"]
+    assert [t["tool_d_source"] for t in new_req["tools"]] == ["category", "user"]
+    assert any("推定" in a for a in new_req["tools"][0]["assumptions"])
+    assert any(a.startswith("筆：") and "推定" in a for a in new_req["assumptions"])
+
+
+def test_thickness_change_on_primary_updates_legacy(client):
+    """主な取り付け具の太さを直すと、要求の今までの項目と params の c_clip（値と基準値）も直る"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"tool_d_mm": 10.0})
+    assert r.status_code == 200, r.text
+    n = r.json()["design"]
+    tool_d = next(p for p in n["params"] if p["part_id"] == "c_clip" and p["name"] == "tool_d_mm")
+    assert tool_d["value"] == 10.0 and tool_d["baseline"] == 10.0 and n["attachments"][0]["tool_d_mm"] == 10.0
+    req = db.get(f"cases/{cid}")["requirements"]
+    assert req["tool_d_mm"] == 10.0 and req["tools"][0]["tool_d_mm"] == 10.0 and req["tools"][1]["tool_d_mm"] == 11.5
+
+
+def test_text_refine_on_extra_attachment_changes_only_it(client):
+    """言葉の微調整を主でない取り付け具に向けると、その取り付け具の角度だけが変わる"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 11.5, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H,
+                    json={"instruction": "クリップを立てて", "attachment_id": "a2"})
+    assert r.status_code == 200, r.text
+    n = r.json()["design"]
+    assert [a["angle_deg"] for a in n["attachments"]] == [70, 70] and n["clip_angle_deg"] == 70
+    # 数値の変更でカバーの値は全部に効く
+    r = client.post(f"/v1/cases/{cid}/designs/{n['design_id']}/refine", headers=H,
+                    json={"param_changes": [{"part_id": "cover", "name": "cover_thickness_mm", "value": 3.0}], "attachment_id": "a2"})
+    assert r.status_code == 200, r.text
+    m = r.json()["design"]
+    assert next(p for p in m["params"] if p["name"] == "cover_thickness_mm")["value"] == 3.0
+    assert [a["angle_deg"] for a in m["attachments"]] == [70, 70]
+
+
+def test_attachments_of_old_design_uses_first_round_tool():
+    """取り付け具のない古い版は、params と要求の今までの項目から主な取り付け具を作る（ID と位置は最初の丸い柄の道具）"""
+    from app import pipeline
+    tools = [{"activity": "eat", "tool_type": "spoon", "tool_d_mm": 10, "tool_shaft_size": None, "tool_shaft_shape": "flat"},
+             {"activity": "write", "tool_type": "pen", "tool_d_mm": 9, "tool_shaft_size": None, "tool_shaft_shape": "round"}]
+    req = {"activity": "write", "tool_type": "pen", "tool_d_mm": 9, "tool_shaft_size": None, "tool_shaft_shape": "round",
+           "tools": tools}
+    design = {"params": [{"part_id": "c_clip", "name": "tool_d_mm", "value": 9.0, "source": "interview", "baseline": 9.0},
+                         {"part_id": "c_clip", "name": "angle_deg", "value": 80, "source": "user", "reason_ja": "画面で角度を選びました"}]}
+    atts = pipeline._attachments_of(design, req)
+    assert [(a["id"], a["tool_index"], a["primary"]) for a in atts] == [("a2", 1, True)]
+    assert atts[0]["tool_d_mm"] == 9.0 and atts[0]["angle_deg"] == 80 and atts[0]["angle_source"] == "user"
+
+
+def test_primary_thickness_change_survives_regeneration(client):
+    """主な取り付け具の太さを直したあとで作り直しても、直した太さのクリップになる（要求の値が正）"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"tool_d_mm": 12.0})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H)
+    assert r.status_code == 200, r.text
+    g = r.json()["design"]
+    tool_d = next(p for p in g["params"] if p["part_id"] == "c_clip" and p["name"] == "tool_d_mm")
+    assert tool_d["value"] == 12.0 and g["attachments"][0]["tool_d_mm"] == 12.0
+
+
+def test_attachment_id_must_be_string_and_not_with_style(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    for body in ({"clip_angle_deg": 80, "attachment_id": ["a1"]}, {"clip_angle_deg": 80, "attachment_id": {"x": 1}},
+                 {"style": {"color": "#E76F51"}, "attachment_id": "a1"}):
+        r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json=body)
+        assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_ARGUMENT", (body, r.text)
+    assert db.get(f"cases/{cid}")["current_design_id"] == d["design_id"]
+
+
+def test_prepare_print_has_one_file_per_attachment(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 12.0, "round")])
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print", headers=H)
+    assert r.status_code == 200, r.text
+    pr = r.json()["files"]["print"]
+    assert set(pr) == {"cover", "c_clip", "c_clip_a2"}
+    assert pr["c_clip"].endswith("c_clip_brush_70.stl") and pr["c_clip_a2"].endswith("c_clip_spoon_60.stl")
+    assert all(files.get(k) for k in pr.values())
+
+
+def test_single_attachment_print_names_unchanged(client):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    pr = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print", headers=H).json()["files"]["print"]
+    assert set(pr) == {"cover", "c_clip"} and pr["c_clip"].endswith("c_clip_70.stl")
+
+
+def test_print_violation_on_extra_clip_is_render_failed(client, monkeypatch):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 12.0, "round")])
+    good = GEOM.make_design
+
+    def bad(*a, **k):
+        res = good(*a, **k)
+        if k.get("quality") == "print":
+            for ex in res["extra_clips"].values():
+                ex["violations"] = [{"rule": "R6f", "message_ja": "x", "fix_hint": None}]
+        return res
+    monkeypatch.setattr(GEOM, "make_design", bad)
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print", headers=H)
+    assert r.status_code == 500 and r.json()["error"]["code"] == "RENDER_FAILED"

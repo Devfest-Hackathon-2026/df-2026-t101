@@ -78,3 +78,24 @@ def test_make_design_fist_cover_and_clip(tmp_path):
     pc = trimesh.load(r2["files"]["cover"], force="mesh")
     assert pc.bounds[0][2] == pytest.approx(0.0, abs=0.6)   # 刷る向き：底が机の面
     assert {c["rule"]: c for c in r2["checks"]}["R6c"]["ok"]
+
+
+def test_make_design_extra_clip_shares_cover(tmp_path):
+    raw = fixture_glb("hand_raw_fist")
+    J = parse_joints(read_glb(raw)[2]["joints_mm"])
+    pm = prepare_measurement(raw, make_measurement(J, 1.15), "right", {"tool_d_mm": 9.5, "tool_type": "brush"})
+    params = {}
+    for b in pm["baseline"]:
+        params.setdefault(b["part_id"], {})[b["name"]] = b["value"]
+    cache = DirCache(tmp_path / "cache")
+    base = make_design(pm["scaled_glb"], pm["joints_mm"], "right", params, str(tmp_path / "a"), cache)
+    extra = {**params["c_clip"], "tool_d_mm": 12.0, "angle_deg": 60}
+    r = make_design(pm["scaled_glb"], pm["joints_mm"], "right", params, str(tmp_path / "b"), cache, extra_clips={"a2": extra})
+    e = r["extra_clips"]["a2"]
+    assert r["cover_shell_sha256"] == base["cover_shell_sha256"]
+    assert Path(e["file"]).exists() and e["clip"]["tool_d_mm"] == 12.0 and e["clip"]["angle_deg"] == 60
+    assert {c["rule"] for c in e["checks"]} >= {"R6f", "R6h"}
+    assert r["violations"] == base["violations"]
+    rp = make_design(pm["scaled_glb"], pm["joints_mm"], "right", params, str(tmp_path / "c"), cache, quality="print", extra_clips={"a2": extra})
+    m = trimesh.load(rp["extra_clips"]["a2"]["file"], force="mesh")
+    assert m.is_watertight and abs(m.bounds[0][2]) < 0.05      # 刷る向き：机の面に乗る

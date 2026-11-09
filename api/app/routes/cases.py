@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, Depends
 from jsonschema import Draft202012Validator
 
 from .. import gemini, ops
+from ..attachments import normalize_tools, primary_index, requirement_assumptions
 from ..auth import User, current_user
 from ..config import CONSENT_TEXT_VERSION, SCHEMA_DIR
 from ..errors import ApiError
@@ -16,8 +17,6 @@ from ..store import db, files, now
 from .common import case_view, owned_case, readable_case
 
 router = APIRouter()
-SHAFT_D = {"thin": 6.0, "medium": 8.5, "thick": 11.5}
-DEFAULT_D = {"brush": 8.5, "pen": 8.5, "spoon": 11.5}
 
 
 @lru_cache(maxsize=1)
@@ -75,16 +74,13 @@ def put_requirements(case_id: str, body: dict = Body(...), user: User = Depends(
         # 採寸は左右ごとに座標が違う（保存したメッシュを逆向きに正準化すると、手のひら側を覆う形になり検査も通ってしまう。11/8）
         raise ApiError("CONFLICT", "手の左右を変えるには、採寸（撮影）からやり直してください")
     old = case.get("requirements") or {}
-    req = {**body, "notes": old.get("notes", []), "activity_ja": old.get("activity_ja"), "assumptions": []}
-    if req.get("tool_d_mm") is not None:
-        req["tool_d_source"] = "user"
-    else:
-        size = req.get("tool_shaft_size") or "unknown"
-        req["tool_d_mm"] = SHAFT_D.get(size, DEFAULT_D.get(req.get("tool_type"), 8.5))
-        req["tool_d_source"] = "category"
-        req["assumptions"].append("道具の太さは推定です。刷る前に太さを確かめてください")
-    if req.get("tool_shaft_shape") == "flat":
-        req["assumptions"].append("平たい柄は、いまのC字クリップでは挟めません")
+    tools = normalize_tools(body)
+    pi = primary_index(tools)
+    primary = tools[pi if pi is not None else 0]
+    req = {**body, "tools": tools, "notes": old.get("notes", []), "activity_ja": old.get("activity_ja"),
+           "assumptions": requirement_assumptions(tools)}
+    for k in ("activity", "tool_type", "tool_d_mm", "tool_d_source", "tool_shaft_size", "tool_shaft_shape"):
+        req[k] = primary[k]
     status = case["status"]
     if req.get("activity") != "other" or req.get("activity_ja"):
         status = "measuring" if status in ("interviewing", "measuring") else status
