@@ -4,6 +4,7 @@ import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart' show toolJa;
 import 'package:jijogu_app/core/models/requirements.dart';
+import 'package:jijogu_app/core/text_ja.dart';
 import 'package:jijogu_app/core/ui/tool_fields.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 
@@ -158,7 +159,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
       final t = Map<String, dynamic>.from(r['turn']);
       setState(() {
         _turns++;
-        _chat.add((false, '${t['message_ja']}'));
+        _chat.add((false, ja(t['message_ja'])));
         _choices = List<String>.from(t['choices'] ?? []);
         _suggested = [
           for (final s in (t['suggested_changes'] as List? ?? []))
@@ -170,7 +171,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         final rephrase = await showDialog<bool>(
           context: context,
           builder: (_) => OutOfScopeDialog(
-            reason: '${t['message_ja']}',
+            reason: ja(t['message_ja']),
             canRephrase: _turns < 3,
           ),
         );
@@ -487,7 +488,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                 ? [
                     for (final s in _suggested)
                       SuggestButton(
-                        label: '${s['reason_ja'] ?? '答えを変えますか？'}（変える）',
+                        label: '${s['reason_ja'] == null ? '答えを変えますか？' : ja(s['reason_ja'])}（変える）',
                         onPressed: () => _applySuggestion(s),
                       ),
                   ]

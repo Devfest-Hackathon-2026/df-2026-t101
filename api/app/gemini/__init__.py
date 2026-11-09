@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from string import Template
 
@@ -12,7 +13,8 @@ from ..errors import ApiError
 from . import mock, schemas
 
 log = logging.getLogger("gemini")
-PROMPT_VERSIONS = {"system": "v1", "interview": "v1", "select": "v1", "dimension": "v2", "attachment": "v1", "review": "v1", "refine": "v1"}
+# 2026-11-10：system v2・attachment v2・dimension v3。理由の文に項目名（tool_type=spoon など）を書かせていたのをやめた
+PROMPT_VERSIONS = {"system": "v2", "interview": "v1", "select": "v1", "dimension": "v3", "attachment": "v2", "review": "v1", "refine": "v1"}
 # review は画像4枚で時間がぶれやすい（11/7 の実測で6〜108秒）ので LOW にした（generation-pipeline.md §3 の表も同じ）
 THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "attachment": "LOW", "review": "LOW", "refine": "LOW"}
 
@@ -106,12 +108,43 @@ def _live(name: str, text: str, schema: dict, usage: Usage, images: list[bytes] 
     raise ApiError("AI_OUTPUT_INVALID", details=[{"request": name, "reason": str(last)}])
 
 
+# 利用者に見せる文に混ざった項目名（2026-11-10。「スプーン(tool_type=spoon)で食べる。(activity=eat)」と出ていた）
+_CODE_PAREN = re.compile(r"\s*[（(]\s*([A-Za-z0-9_.]+(?:\s*[=:]\s*[A-Za-z0-9_.+\-]+)?)\s*[）)]")
+_CODE_ASSIGN = re.compile(r"(?<![A-Za-z0-9_.])[A-Za-z][A-Za-z0-9]*(?:[_.][A-Za-z0-9]+)*\s*=\s*([A-Za-z0-9_.+\-]+)")
+
+
+def clean_ja(text: str) -> str:
+    """AI が書いた文から、項目名と英語の値を取り除く。
+    - かっこの中が項目名だけ（tool_type=spoon、activity=eat、angle_deg など。「_」「=」「:」を含む英数字）なら、かっこごと消す
+    - かっこの外の「項目名=値」は、値が数なら数だけ残し、英語の値なら両方消す
+    「PLA（ポリ乳酸）」「60度（おすすめ）」「(PLA)」のような、ふつうのかっこは残す"""
+    if not isinstance(text, str) or not text:
+        return text
+    out = _CODE_PAREN.sub(lambda m: "" if re.search(r"[_=:]", m.group(1)) else m.group(0), text)
+    out = _CODE_ASSIGN.sub(lambda m: m.group(1) if re.fullmatch(r"[\d.+\-]+", m.group(1)) else "", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"[ \t]+([。、，．）)])", r"\1", out)
+    out = re.sub(r"。{2,}", "。", out)
+    return out.strip()
+
+
+def _clean_out(v, key: str = ""):
+    """答えの中の *_ja の文だけを掃除する（tool_type などの値そのものは変えない）"""
+    if isinstance(v, dict):
+        return {k: _clean_out(x, k) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_clean_out(x, key) for x in v]
+    if isinstance(v, str) and key.endswith("_ja"):
+        return clean_ja(v)
+    return v
+
+
 def _run(name: str, vars: dict, schema: dict, usage: Usage, images=None, mock_fn=None) -> dict:
     if settings.gemini_mode != "live":
         usage.calls += 1
-        return mock_fn()
+        return _clean_out(mock_fn())
     text = Template(_prompt(name)).safe_substitute({k: (v if isinstance(v, str) else _j(v)) for k, v in vars.items()})
-    return _live(name, text, schema, usage, images)
+    return _clean_out(_live(name, text, schema, usage, images))
 
 
 # ---------------------------------------------------------------- 5種類
