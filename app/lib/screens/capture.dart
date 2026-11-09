@@ -204,12 +204,16 @@ class _CaptureScreenState extends State<CaptureScreen> {
           const SizedBox(height: 16),
           Text(
             '同意しない場合は、撮影に進めません。',
-            style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+            style: AppText.bodyLarge.copyWith(
+              color: AppColors.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             '同意の文の版：$consentVersion',
-            style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant),
+            style: AppText.bodySmall.copyWith(
+              color: AppColors.onSurfaceVariant,
+            ),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
@@ -278,7 +282,10 @@ class _CaptureScreenState extends State<CaptureScreen> {
         // 手を回すと1円玉が落ちるので、カメラを動かす（1円玉は手と一緒に写るので、画面から出る心配もない）
         Semantics(
           header: true,
-          child: Text('カメラをこぶしのまわりで動かして撮ります（15〜20秒）', style: AppText.titleLarge),
+          child: Text(
+            'カメラをこぶしのまわりで動かして撮ります（15〜20秒）',
+            style: AppText.titleLarge,
+          ),
         ),
         const SizedBox(height: 16),
         for (final (i, s) in const [
@@ -397,6 +404,46 @@ class _StepRow extends StatelessWidget {
   );
 }
 
+/// 撮影のあとの画面で、うっかり戻って撮った動画を失わないようにする（iPhone の Safari のスワイプなど。2026-11-09）。
+/// 戻る操作が働いたら確かめ、「撮り直す」を選んだときだけ戻る
+mixin _KeepRecording<T extends StatefulWidget> on State<T> {
+  bool _leaving = false;
+
+  /// 撮り直す（確かめずに戻る）
+  void leaveToRetake() {
+    setState(() => _leaving = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  Widget keepRecording(Widget child) => PopScope(
+    canPop: _leaving,
+    onPopInvokedWithResult: (didPop, _) async {
+      if (didPop) return;
+      final retake = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('撮り直しますか？'),
+          content: const Text('撮った動画は消えます。続けるときは「続ける」を押してください。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(c).pop(false),
+              child: const Text('続ける'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(c).pop(true),
+              child: const Text('撮り直す'),
+            ),
+          ],
+        ),
+      );
+      if (retake == true && mounted) leaveToRetake();
+    },
+    child: child,
+  );
+}
+
 /// S4 1円玉の確認（自動で見つけた輪を確かめ、違うときだけタップ）。docs/screens.md S4
 class CoinScreen extends StatefulWidget {
   const CoinScreen({
@@ -414,7 +461,7 @@ class CoinScreen extends StatefulWidget {
   State<CoinScreen> createState() => _CoinScreenState();
 }
 
-class _CoinScreenState extends State<CoinScreen> {
+class _CoinScreenState extends State<CoinScreen> with _KeepRecording {
   late String _image = widget.first['first'];
   late double _w = (widget.first['width'] as num).toDouble();
   late double _h = (widget.first['height'] as num).toDouble();
@@ -515,87 +562,89 @@ class _CoinScreenState extends State<CoinScreen> {
         : _ok == false
         ? NoticeTone.warning
         : NoticeTone.info;
-    return AppPage(
-      title: _count > 1 ? '1円玉の確認（${_index + 1}/$_count枚目）' : '1円玉の確認',
-      bottom: FilledButton(
-        onPressed: _ok == true && !_busy
-            ? (last
-                  ? () => Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) => AnalyzeScreen(
-                          caseId: widget.caseId,
-                          hand: widget.hand,
-                          video: widget.video,
+    return keepRecording(
+      AppPage(
+        title: _count > 1 ? '1円玉の確認（${_index + 1}/$_count枚目）' : '1円玉の確認',
+        bottom: FilledButton(
+          onPressed: _ok == true && !_busy
+              ? (last
+                    ? () => Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(
+                          builder: (_) => AnalyzeScreen(
+                            caseId: widget.caseId,
+                            hand: widget.hand,
+                            video: widget.video,
+                          ),
                         ),
-                      ),
-                    )
-                  : _nextPhoto)
-            : null,
-        child: Text(!last ? '次の写真へ' : 'この1円玉で解析する'),
-      ),
-      children: [
-        if (_ok == true) ...[
-          Semantics(
-            header: true,
-            child: Text('黄色い輪が1円玉に重なっていますか？', style: AppText.headlineSmall),
-          ),
-          const SizedBox(height: 16),
-        ],
-        AspectRatio(
-          aspectRatio: _w / _h,
-          child: LayoutBuilder(
-            builder: (context, c) => Semantics(
-              label: '写真。黄色い輪が1円玉でなければ、1円玉をタップしてください',
-              image: true,
-              child: GestureDetector(
-                excludeFromSemantics: true,
-                onTapUp: (d) => _tap(d, Size(c.maxWidth, c.maxHeight)),
-                child: MouseRegion(
-                  cursor: _busy
-                      ? SystemMouseCursors.wait
-                      : SystemMouseCursors.click,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(28),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.memory(
-                          dataUrlBytes(_image),
-                          fit: BoxFit.fill,
-                          gaplessPlayback: true,
-                        ),
-                        if (_busy)
-                          Center(
-                            child: Container(
-                              width: 56,
-                              height: 56,
-                              padding: const EdgeInsets.all(14),
-                              decoration: const BoxDecoration(
-                                color: AppColors.primaryContainer,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const CircularProgressIndicator(
-                                strokeWidth: 3,
-                                color: AppColors.onPrimaryContainer,
+                      )
+                    : _nextPhoto)
+              : null,
+          child: Text(!last ? '次の写真へ' : 'この1円玉で解析する'),
+        ),
+        children: [
+          if (_ok == true) ...[
+            Semantics(
+              header: true,
+              child: Text('黄色い輪が1円玉に重なっていますか？', style: AppText.headlineSmall),
+            ),
+            const SizedBox(height: 16),
+          ],
+          AspectRatio(
+            aspectRatio: _w / _h,
+            child: LayoutBuilder(
+              builder: (context, c) => Semantics(
+                label: '写真。黄色い輪が1円玉でなければ、1円玉をタップしてください',
+                image: true,
+                child: GestureDetector(
+                  excludeFromSemantics: true,
+                  onTapUp: (d) => _tap(d, Size(c.maxWidth, c.maxHeight)),
+                  child: MouseRegion(
+                    cursor: _busy
+                        ? SystemMouseCursors.wait
+                        : SystemMouseCursors.click,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(28),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.memory(
+                            dataUrlBytes(_image),
+                            fit: BoxFit.fill,
+                            gaplessPlayback: true,
+                          ),
+                          if (_busy)
+                            Center(
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                padding: const EdgeInsets.all(14),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primaryContainer,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  color: AppColors.onPrimaryContainer,
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        InfoCard(
-          tone: tone,
-          child: Semantics(liveRegion: true, child: Text(msg)),
-        ),
-        const SizedBox(height: 8),
-        const HelperNote(),
-      ],
+          const SizedBox(height: 12),
+          InfoCard(
+            tone: tone,
+            child: Semantics(liveRegion: true, child: Text(msg)),
+          ),
+          const SizedBox(height: 8),
+          const HelperNote(),
+        ],
+      ),
     );
   }
 }
@@ -615,7 +664,7 @@ class AnalyzeScreen extends StatefulWidget {
   State<AnalyzeScreen> createState() => _AnalyzeScreenState();
 }
 
-class _AnalyzeScreenState extends State<AnalyzeScreen> {
+class _AnalyzeScreenState extends State<AnalyzeScreen> with _KeepRecording {
   /// 段階の一覧（Figma の M3/Step item の並び）。先頭3つは解析エンジンが出す段階の名前と同じ
   static const _steps = [
     'フレームを選んでいます',
@@ -740,95 +789,97 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
   @override
   Widget build(BuildContext context) {
     final sub = AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant);
-    return AppPage(
-      title: '手を調べています',
-      bottom: _error == null
-          ? null
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (!_retake)
-                  FilledButton.icon(
-                    onPressed: _run,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('もう一度試す'),
+    return keepRecording(
+      AppPage(
+        title: '手を調べています',
+        bottom: _error == null
+            ? null
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!_retake)
+                    FilledButton.icon(
+                      onPressed: _run,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('もう一度試す'),
+                    ),
+                  if (!_retake) const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: leaveToRetake,
+                    icon: const Icon(Icons.photo_camera_rounded),
+                    label: const Text('撮り直す'),
                   ),
-                if (!_retake) const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.photo_camera_rounded),
-                  label: const Text('撮り直す'),
-                ),
-              ],
-            ),
-      children: [
-        if (_error == null) ...[
-          Row(
-            children: [
-              const _LoadingMark(),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Semantics(
-                      liveRegion: true,
-                      child: Text(_stage, style: AppText.headlineSmall),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '画面を閉じると、撮影からやり直しになります。',
-                      style: AppText.bodyLarge.copyWith(
-                        color: AppColors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Expanded(child: Text(_steps[_step], style: sub)),
-              if (_n > 0) Text('$_i / $_n枚', style: sub),
-            ],
-          ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(value: _value),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
+        children: [
+          if (_error == null) ...[
+            Row(
               children: [
-                for (final (k, label) in _steps.indexed)
-                  _StageRow(
-                    label: label,
-                    state: k < _step
-                        ? _StageState.done
-                        : k == _step
-                        ? _StageState.current
-                        : _StageState.todo,
+                const _LoadingMark(),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Semantics(
+                        liveRegion: true,
+                        child: Text(_stage, style: AppText.headlineSmall),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '画面を閉じると、撮影からやり直しになります。',
+                        style: AppText.bodyLarge.copyWith(
+                          color: AppColors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
               ],
             ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(child: Text(_steps[_step], style: sub)),
+                if (_n > 0) Text('$_i / $_n枚', style: sub),
+              ],
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: _value),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  for (final (k, label) in _steps.indexed)
+                    _StageRow(
+                      label: label,
+                      state: k < _step
+                          ? _StageState.done
+                          : k == _step
+                          ? _StageState.current
+                          : _StageState.todo,
+                    ),
+                ],
+              ),
+            ),
+          ] else
+            ErrorCard(message: _error!),
+          const SizedBox(height: 12),
+          const InfoCard(
+            tone: NoticeTone.info,
+            icon: Icons.lock_rounded,
+            child: Text(
+              '動画はこの端末の中だけで調べています。外に送るのは、手の3Dを作るための手の部分の画像（最大8枚）だけで、画像は保存しません。',
+            ),
           ),
-        ] else
-          ErrorCard(message: _error!),
-        const SizedBox(height: 12),
-        const InfoCard(
-          tone: NoticeTone.info,
-          icon: Icons.lock_rounded,
-          child: Text(
-            '動画はこの端末の中だけで調べています。外に送るのは、手の3Dを作るための手の部分の画像（最大8枚）だけで、画像は保存しません。',
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
