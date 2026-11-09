@@ -60,6 +60,7 @@ class Viewer3D extends StatefulWidget {
     this.color = '#2A9D8F',
     this.toolDmm = 0,
     this.tool,
+    this.toolType,
     this.handSide,
     this.showHand = true,
     this.landmarks,
@@ -75,6 +76,9 @@ class Viewer3D extends StatefulWidget {
 
   /// 道具の軸（版の `tool`：center・axis・tip_mm・rear_mm。実際の手の座標）
   final Map<String, dynamic>? tool;
+
+  /// 道具の種類（'brush'／'pen'／'spoon'）。道具の見た目を変える。なければ筆の形
+  final String? toolType;
   final bool showHand;
   final Map<String, dynamic>? landmarks;
   final String label;
@@ -129,6 +133,7 @@ class _Viewer3DState extends State<Viewer3D> {
                 'tool_d_mm': widget.toolDmm,
                 // 生成APIが版に書いた道具の軸（実際の手の座標）。なければ viewer.js がクリップの形から推定する
                 if (widget.tool != null) 'tool': widget.tool,
+                if (widget.toolType != null) 'tool_type': widget.toolType,
                 if (widget.handSide != null) 'hand_side': widget.handSide,
               }),
             )
@@ -166,6 +171,7 @@ class _Viewer3DState extends State<Viewer3D> {
         partsChanged ||
         old.toolDmm != widget.toolDmm || // 取り付け具を切り替えると道具の棒の太さが変わる（S7）
         jsonEncode(old.tool) != jsonEncode(widget.tool) ||
+        old.toolType != widget.toolType ||
         jsonEncode(old.landmarks) != jsonEncode(widget.landmarks)) {
       unawaited(_render());
       return;

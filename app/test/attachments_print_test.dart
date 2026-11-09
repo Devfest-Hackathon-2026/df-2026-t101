@@ -152,4 +152,45 @@ void main() {
       expect(l.single.checks, isEmpty);
     });
   });
+
+  group('OTに頼むときの版の要約', () {
+    final cover = {'part_id': 'cover', 'name': 'cover_thickness_mm', 'value': 2.5};
+
+    test('取り付け具が2つ以上：道具ごとの角度を並べる', () {
+      final d = {
+        'params': [cover],
+        'attachments': [
+          {'id': 'a1', 'tool_type': 'brush', 'tool_d_mm': 8.5, 'angle_deg': 70},
+          {'id': 'a2', 'tool_type': 'pen', 'tool_d_mm': 6.0, 'angle_deg': 60},
+          {'id': 'a3', 'tool_type': 'spoon', 'tool_d_mm': 11.5, 'angle_deg': 60},
+        ],
+      };
+      expect(versionSummary(d), 'カバー 2.5mm・筆 70度・ペン 60度・スプーン 60度');
+    });
+
+    test('同じ道具が2つ：太さで見分ける', () {
+      final d = {
+        'params': [cover],
+        'attachments': [
+          {'id': 'a1', 'tool_type': 'pen', 'tool_d_mm': 6.0, 'angle_deg': 60},
+          {'id': 'a2', 'tool_type': 'pen', 'tool_d_mm': 9.0, 'angle_deg': 70},
+        ],
+      };
+      expect(versionSummary(d), 'カバー 2.5mm・ペン 6mm 60度・ペン 9mm 70度');
+    });
+
+    test('取り付け具が1つ・古い版：今までどおり「クリップ」', () {
+      final one = {
+        'params': [cover],
+        'attachments': [
+          {'id': 'a1', 'tool_type': 'pen', 'tool_d_mm': 6.0, 'angle_deg': 60},
+        ],
+      };
+      expect(versionSummary(one), 'カバー 2.5mm・クリップ 60度');
+      final old = {
+        'params': [cover, {'part_id': 'c_clip', 'name': 'angle_deg', 'value': 70}],
+      };
+      expect(versionSummary(old), 'カバー 2.5mm・クリップ 70度');
+    });
+  });
 }

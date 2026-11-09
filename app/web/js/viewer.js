@@ -34,7 +34,7 @@ function setup(el) {
   const group = new THREE.Group();
   scene.add(group);
   // dorsal：手の甲の向きの z の符号（右手 +1、左手 −1。実際の手の座標では右手の手の甲が +z）。初期の視点は手の甲側から
-  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, landmarks: null, framed: false, dorsal: 1, dirty: true };
+  const state = { el, renderer, scene, camera, controls, group, hand: null, parts: new Map(), tool: null, toolD: 0, toolSpec: null, toolType: null, landmarks: null, framed: false, dorsal: 1, dirty: true };
   const resize = () => {
     const w = el.clientWidth || 300, h = el.clientHeight || 300;
     renderer.setSize(w, h, false);
@@ -138,6 +138,36 @@ async function setPart(state, id, url, headers, color) {
   if (id === 'c_clip') placeTool(state);
 }
 
+// 道具の見た目。+y が先（tip_mm の側）。柄は太さ r（半径）、長さ len で、どの道具も挟む所の太さは同じ。
+// 筆：木の柄＋黒い穂先。ペン：紺の軸＋銀のペン先。スプーン：銀の柄＋細い首＋楕円の皿
+function makeTool(type, r, len) {
+  const g = new THREE.Group();
+  const mat = (color, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: metal ? 0.35 : 0.6, metalness: metal });
+  if (type === 'spoon') {
+    const steel = mat(0xd3d8de, 0.2);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 24), steel);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.45, r * 0.8, 16, 16), steel);
+    neck.position.y = len / 2 + 8;
+    const bowl = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), steel);
+    bowl.scale.set(17, 25, 5);   // 幅約34mm・長さ約50mm・深さ約10mm
+    bowl.position.y = len / 2 + 16 + 23;
+    g.add(handle, neck, bowl);
+    return g;
+  }
+  if (type === 'pen') {
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 24), mat(0x2f3e5c));
+    const nib = new THREE.Mesh(new THREE.ConeGeometry(r * 0.9, 16, 24), mat(0xd3d8de, 0.2));
+    nib.position.y = len / 2 + 8;
+    g.add(body, nib);
+    return g;
+  }
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 24), mat(0xc8a165));
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(r * 1.1, 22, 24), mat(0x333333));
+  tip.position.y = len / 2 + 11;
+  g.add(rod, tip);
+  return g;
+}
+
 // 道具（筆など）の棒。生成APIが版に書いた軸（tool: {center, axis, tip_mm, rear_mm}。実際の手の座標）があればそれで描く。
 // なければ（古い版）、クリップの輪の軸（頂点の広がりが一番小さい向き）を推定して、指先の向き（+y）へ伸ばす
 function placeTool(state) {
@@ -149,11 +179,7 @@ function placeTool(state) {
     const c = new THREE.Vector3(...spec.center);
     const axis = new THREE.Vector3(...spec.axis).normalize();
     const tipL = spec.tip_mm || 100, rearL = spec.rear_mm || 50, len = tipL + rearL, r = state.toolD / 2;
-    const g = new THREE.Group();
-    const rod = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 24), new THREE.MeshStandardMaterial({ color: 0xc8a165, roughness: 0.6 }));
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(r * 1.1, 22, 24), new THREE.MeshStandardMaterial({ color: 0x333333 }));
-    tip.position.y = len / 2 + 11;
-    g.add(rod, tip);
+    const g = makeTool(state.toolType, r, len);
     g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
     g.position.copy(c).add(axis.clone().multiplyScalar((tipL - rearL) / 2));   // クリップの位置が、後ろから rear_mm の所
     state.tool = g;
@@ -183,11 +209,7 @@ function placeTool(state) {
   const axis = new THREE.Vector3().crossVectors(e1, e2).normalize();
   if (axis.y < 0) axis.negate();
   const len = 150, r = state.toolD / 2;
-  const g = new THREE.Group();
-  const rod = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 24), new THREE.MeshStandardMaterial({ color: 0xc8a165, roughness: 0.6 }));
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(r * 1.1, 22, 24), new THREE.MeshStandardMaterial({ color: 0x333333 }));
-  tip.position.y = len / 2 + 11;
-  g.add(rod, tip);
+  const g = makeTool(state.toolType, r, len);
   g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
   g.position.copy(c).add(axis.clone().multiplyScalar(len * 0.25));
   state.tool = g;
@@ -232,12 +254,13 @@ window.jijoguViewer = {
     state.dirty = true;
   },
   // S7：手（半透明）＋部品＋道具の棒。sceneJson = { hand: {url, headers, opacity, visible}, parts: [{id, url, headers, color}], tool_d_mm,
-  //   tool: {center, axis, tip_mm, rear_mm}（任意。生成APIが版に書いた道具の軸） }
+  //   tool: {center, axis, tip_mm, rear_mm}（任意。生成APIが版に書いた道具の軸）, tool_type: 'brush'|'pen'|'spoon'（任意。なければ筆の形） }
   async showAssembly(el, sceneJson) {
     const state = setup(el);
     const s = JSON.parse(sceneJson);
     state.toolD = s.tool_d_mm || 0;
     state.toolSpec = s.tool || null;
+    state.toolType = s.tool_type || null;
     state.dorsal = s.hand_side === 'left' ? -1 : 1;
     if (s.hand?.url) {
       await setHand(state, s.hand.url, s.hand.headers, s.hand.opacity ?? 0.35);
