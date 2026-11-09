@@ -6,7 +6,7 @@
 module cover_part(shell_file, keepout_file, thickness,
                   slit_centers, slit_normals, slit_axes, strap_width, strap_thickness,
                   hole_centers, hole_normals, hole_diameter,
-                  rail_origin, rail_frame, palm_plane = [], quality = "preview") {
+                  rail_origin, rail_frame, palm_plane = [], quality = "preview", rail_foot = RAIL_FOOT_MM) {
   difference() {
     union() {
       difference() {
@@ -15,7 +15,7 @@ module cover_part(shell_file, keepout_file, thickness,
           strap_slits_cut(slit_centers, slit_normals, slit_axes, strap_width, strap_thickness, quality);
         air_holes_cut(hole_centers, hole_normals, hole_diameter, thickness, quality);
       }
-      if (len(rail_origin) == 3) rail_on_cover(rail_origin, rail_frame, quality);
+      if (len(rail_origin) == 3) rail_on_cover(rail_origin, rail_frame, quality, rail_foot);
     }
     // 内側の面を守る：レールの土台などが手の側へ出た分を削る
     if (keepout_file != "") import(keepout_file, convexity = 10);

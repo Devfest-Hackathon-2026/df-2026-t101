@@ -36,6 +36,7 @@ strap_slits_axes = [];
 // レール（寸法は固定。位置と向きだけ渡す）
 rail_origin = [];
 rail_frame = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+rail_foot_mm = 6.0;        // 土台の深さ（common.scad の RAIL_FOOT_MM と同じ。スリットを避けて台をずらしたときだけ深くする）
 
 // C字クリップ
 c_clip_tool_d_mm = 8.5;
@@ -51,7 +52,7 @@ module the_cover() {
              strap_slits_centers, strap_slits_normals, strap_slits_axes,
              strap_slits_strap_width_mm, strap_slits_strap_thickness_mm,
              air_holes_centers, air_holes_normals, air_holes_diameter_mm,
-             rail_origin, rail_frame, cover_palm_plane, quality);
+             rail_origin, rail_frame, cover_palm_plane, quality, rail_foot_mm);
 }
 
 module the_clip_rail() {

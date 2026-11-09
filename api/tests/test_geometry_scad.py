@@ -63,6 +63,10 @@ def test_make_design_fist_cover_and_clip(tmp_path):
     for rule in ("R6a", "R6b", "R6c", "R6d", "R6e", "R6f"):
         assert checks[rule]["ok"], (rule, checks[rule])
     assert r["violations"] == []
+    # 筆（70度）では、スリットから離れるまで台をずらすと道具が握った指に近づきすぎるので、ずらさない
+    # （途中までずらしても穴は開かない。重なりは R6e_slit_rail・R6e_slit_open で知らせる）
+    assert checks["R6h"]["ok"] and r["placement"]["rail_shift_mm"] == 0
+    assert not checks["R6e_slit_open"]["ok"]
     cover = trimesh.load(r["files"]["cover"], force="mesh")
     assert cover.is_watertight and len(cover.split(only_watertight=False)) == 1
     assert len(r["views"]) == 4 and all(Path(v).exists() for v in r["views"])
@@ -78,6 +82,25 @@ def test_make_design_fist_cover_and_clip(tmp_path):
     pc = trimesh.load(r2["files"]["cover"], force="mesh")
     assert pc.bounds[0][2] == pytest.approx(0.0, abs=0.6)   # 刷る向き：底が机の面
     assert {c["rule"]: c for c in r2["checks"]}["R6c"]["ok"]
+
+
+def test_make_design_rail_slides_off_thumb_slit(tmp_path):
+    """側面が低い手で親指側のスリットにレールの台がかかるとき、60度（ペン）なら台を手の甲側へずらし、
+    描いたあとのカバーで親指側のスリットが開いている。道具は手に当たらない（2026-11-10。本番でふさがれていた）"""
+    raw = fixture_glb("hand_raw_right")
+    J = parse_joints(read_glb(raw)[2]["joints_mm"])
+    pm = prepare_measurement(raw, make_measurement(J, 1.15), "right", {"tool_d_mm": 9.0, "tool_type": "pen"})
+    params = {}
+    for b in pm["baseline"]:
+        params.setdefault(b["part_id"], {})[b["name"]] = b["value"]
+    assert params["c_clip"]["angle_deg"] == 60
+    r = make_design(pm["scaled_glb"], pm["joints_mm"], "right", params, str(tmp_path / "job"), DirCache(tmp_path / "cache"))
+    checks = {c["rule"]: c for c in r["checks"]}
+    assert r["placement"]["rail_shift_mm"] > 0
+    assert checks["R6e_slit_rail"]["ok"], checks["R6e_slit_rail"]
+    assert checks["R6e_slit_open"]["ok"], checks["R6e_slit_open"]
+    assert checks["R6h"]["ok"], checks["R6h"]
+    assert r["violations"] == []
 
 
 def test_make_design_extra_clip_shares_cover(tmp_path):

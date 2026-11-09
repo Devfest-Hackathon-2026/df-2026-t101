@@ -5,14 +5,14 @@
 
 RAIL_END_WALL_MM = 2.5;   // 閉じた端の壁
 
-module rail_block(quality = "preview") {
+module rail_block(quality = "preview", foot = RAIL_FOOT_MM) {
   $fn = fn_for(quality) / 4;
   ow = rail_outer_w();
-  h = rail_height() + RAIL_FOOT_MM;
+  h = rail_height() + foot;
   r = MIN_EDGE_RADIUS_MM;
   L = RAIL_LENGTH_MM;
   difference() {
-    // 外形（角を丸めた箱）。下は殻の中へ RAIL_FOOT_MM 入り込む
+    // 外形（角を丸めた箱）。下は殻の中へ foot（ふつうは RAIL_FOOT_MM）入り込む
     minkowski() {
       translate([-(ow / 2 - r), -(L / 2 - r), -h + r]) cube([ow - 2 * r, L - 2 * r, h - 2 * r]);
       sphere(r = r);
@@ -38,7 +38,8 @@ module dovetail_profile_xy(clr = 0) {
   polygon([[-wb / 2, zb], [wb / 2, zb], [wt / 2, 0], [wt / 2, 2], [-wt / 2, 2], [-wt / 2, 0]]);
 }
 
-// カバーに付ける：origin（レールの上面の中心）と frame（行：X・Y・Z の向き）で置く
-module rail_on_cover(origin, frame, quality = "preview") {
-  multmatrix(frame_matrix(origin, frame)) rail_block(quality);
+// カバーに付ける：origin（レールの上面の中心）と frame（行：X・Y・Z の向き）で置く。
+// foot：土台の深さ。スリットを避けて台をずらしたときは、面から傾いて浮く側が殻に届くよう生成APIが深くする（2026-11-10）
+module rail_on_cover(origin, frame, quality = "preview", foot = RAIL_FOOT_MM) {
+  multmatrix(frame_matrix(origin, frame)) rail_block(quality, foot);
 }

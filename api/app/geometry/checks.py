@@ -123,6 +123,9 @@ def _inside_by_normal(mesh: trimesh.Trimesh, P: np.ndarray, min_depth: float = 0
     return (depth > min_depth) & (d > min_depth)
 
 
+SLIT_BLOCKED_MAX = 0.10   # スリットの穴の中の点のうち、カバーの中と出てよい割合
+
+
 def check_slits_open(cover: trimesh.Trimesh | None, sl: dict, wall_t: float) -> list[dict]:
     """R6e_slit_open：描いたあとのカバーで、ベルトのスリットの穴が本当に開いているか（正準形）。
     穴の箱（壁の中の部分）に点を並べ、カバーの中にある点の割合を数える。レールの台が穴をふさぐと（2026-11-08 に起きた）
@@ -146,7 +149,9 @@ def check_slits_open(cover: trimesh.Trimesh | None, sl: dict, wall_t: float) -> 
         frac = float(inside.mean())
         per.append(round(frac, 3))
         worst = max(worst, frac)
-    ok = worst <= 0.02
+    # 開いている穴でも、縁の近くの点が 3〜5% ほど「中」と出る（最寄りの面の法線で内外を決めるため。2026-11-10 に
+    # 内外を正しく数える方法と比べて確かめた）。台がふさぐときは 50〜80% なので、10% で分ける
+    ok = worst <= SLIT_BLOCKED_MAX
     return [_item("R6e_slit_open", ok, {"blocked_fraction": per},
                   "ベルトのスリットは開いている" if ok else "ベルトのスリットがふさがれています（レールの台など）",
                   fix_hint="strap_width_mm を狭くする", severity="warning")]
