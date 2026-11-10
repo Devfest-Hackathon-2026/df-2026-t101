@@ -98,13 +98,6 @@ AUTH_MODE=dev STORE_BACKEND=local GEMINI_MODE=mock OPENSCAD_BIN=<openscad のパ
 (cd api && .venv/bin/python -m pytest)   # 先に上の手順で api/.venv を作っておく
 ```
 
-## 今できていること・まだのこと
-
-- 確かめたのは、チームのメンバーの手だけです。指が握った形で固まった方と作業療法士による評価は、まだしていません
-- 11/9 に、前の版の 3D モデルで刷ったカバーが、メンバーのこぶしに合うことを確かめました（その後に直した今の版では、まだ刷っていません）。すき間やしめしろの値は仮のままです
-- 採寸の大きさの補正係数は、メンバーの手での仮の値です
-- クリップを作れるのは丸い柄の道具だけです（平たい柄は今後）
-
 ## ドキュメント
 
 設計仕様は [docs/](docs/README.md) にあります。画面（[screens.md](docs/screens.md)）、採寸（[measurement.md](docs/measurement.md)）、部品（[parts-library.md](docs/parts-library.md)）、生成の流れ（[generation-pipeline.md](docs/generation-pipeline.md)）、API（[api.md](docs/api.md)）、先行例との違い（[prior-art.md](docs/prior-art.md)）など。
