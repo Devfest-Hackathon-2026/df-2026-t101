@@ -204,14 +204,36 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
   const url = URL.createObjectURL(file);
   try {
     const v = document.createElement('video');
-    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
-    // 読み込めないまま待ち続けないよう、20秒で止める（2026-11-10。iPhone で「動画を選んでください」のまま止まったことがある）
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+    v.src = url;
+    // iPhone の Safari は、画面に出していない動画のデータを再生するまで読まないことがあり、1回目だけ loadeddata が
+    // 来ずに止まった（2026-11-10。2回目は読めた）。メタデータが来ても絵のデータがなければ、音なしで一瞬だけ再生して
+    // すぐ止め、読み込みを始めさせる。それでも読めなければ20秒で止め、原因を探せるよう状態の数字を添える
+    let gotMeta = false, kicked = false;
     await new Promise<void>((res, rej) => {
-      const fail = () => rej(new Error('動画を読めませんでした。カメラの設定を「互換性優先」にして撮り直してください。'));
-      const timer = window.setTimeout(fail, 20000);
-      v.onloadeddata = () => { window.clearTimeout(timer); res(); };
-      v.onerror = () => { window.clearTimeout(timer); fail(); };
+      let done = false;
+      const finish = (err?: string) => {
+        if (done) return;
+        done = true; window.clearTimeout(timer); window.clearInterval(poll);
+        if (err) rej(new Error(`動画を読み込めませんでした（${err}・rs${v.readyState}・ns${v.networkState}・meta${gotMeta ? 1 : 0}・kick${kicked ? 1 : 0}）`));
+        else res();
+      };
+      const kick = () => {
+        if (kicked || v.readyState >= 2) return;
+        kicked = true;
+        v.play().then(() => v.pause()).catch(() => { /* 再生できなくても、読み込みが進めばよい */ });
+      };
+      const timer = window.setTimeout(() => finish('時間切れ'), 20000);
+      const poll = window.setInterval(() => { if (v.readyState >= 2) finish(); }, 250);
+      v.onloadeddata = () => finish();
+      v.oncanplay = () => finish();
+      v.onerror = () => finish('エラー');
+      v.onloadedmetadata = () => { gotMeta = true; window.setTimeout(kick, 500); };
+      window.setTimeout(kick, 3000);  // メタデータも来ないとき
+      v.load();
     });
+    v.pause();
     const dur = Math.min(v.duration || 0, MAX_SECONDS);
     const times: number[] = [];
     const fps = Math.min(SAMPLE_FPS, MAX_CANDIDATES / Math.max(1, dur));
@@ -219,7 +241,13 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
     const cands: Frame[] = [];
     for (const [i, t] of times.entries()) {
       progress?.('フレームを選んでいます', i + 1, times.length);
-      await new Promise<void>((res) => { v.onseeked = () => res(); v.currentTime = t; });
+      // seeked が来ないフレームは5秒でとばす（そのまま待ち続けないため）
+      const ok = await new Promise<boolean>((res) => {
+        const timer = window.setTimeout(() => res(false), 5000);
+        v.onseeked = () => { window.clearTimeout(timer); res(true); };
+        v.currentTime = t;
+      });
+      if (!ok) continue;
       const c = canvasOf(v, v.videoWidth, v.videoHeight);
       cands.push({ t, canvas: c, sharp: sharpnessOf(c) });
     }
