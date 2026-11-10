@@ -38,10 +38,10 @@
 
 | 先行研究の課題（原文） | 本作の設計 | ピッチでの言い方 |
 |---|---|---|
-| 寸法：「A central limitation across both groups was the inability to specify exact measurements or manipulate structural components.」（§5.4）。§7でも「dimensional accuracy」を課題に挙げている | 動画と1円玉で採寸し、mm単位の値から寸法を決め、範囲チェックを通す | 「先行研究では正確な寸法を指定できないことが中心的な限界でした。本作は手を測ったmmの値から寸法を決めます。誤差は○mmでした（11/9の検証の値）」 |
-| 印刷：「C2 discussed printability challenges, particularly related to orientation and strength」（§5.4） | 形は人が作って試し刷りした部品。立てて刷る向きを決め、張り出しの角度も機械的に確かめる | 「試し刷りで確かめた部品を組み合わせ、刷る向きの張り出しも自動で確かめます」（試し刷りしたのは一部の組み合わせなので、「どんな値でも刷れる」とは言わない） |
+| 寸法：「A central limitation across both groups was the inability to specify exact measurements or manipulate structural components.」（§5.4）。§7でも「dimensional accuracy」を課題に挙げている | 動画と1円玉で手の3Dメッシュを実寸（mm）にし、その面とmm単位の値から寸法を決め、範囲チェックを通す | 「先行研究では正確な寸法を指定できないことが中心的な限界でした。本作は、1円玉で実寸にした手の3Dの形から寸法を決めます」（2026-11-10 の時点：誤差を確かめる検証はしていない。長さの補正係数もメンバー1人の動画からの仮の値。誤差の数字は言わず、検証は今後と伝える） |
+| 印刷：「C2 discussed printability challenges, particularly related to orientation and strength」（§5.4） | 形は人が作って試し刷りした部品。立てて刷る向きを決め、張り出しの角度も機械的に確かめる | 「試し刷りで確かめた部品を組み合わせ、刷る向きの張り出しも自動で確かめます」（試し刷りしたのは一部の組み合わせなので、「どんな値でも刷れる」とは言わない。2026-11-10 の時点：張り出しは数えて印刷ガイドに出すだけで、不合格にはしない（R6g）。今の版の部品は刷っていない） |
 | 信頼：「Clinical makers were particularly cautious, expressing concerns about device safety, fit, and real-world performance.」（§6） | 決めた寸法と理由を一覧で見せ、OTが確認してから刷る | 「AIは決めた理由を説明し、最後はOTが確かめます」 |
-| 画一的な出力：「these models often generate 'one-size-fits-all' designs that overlook the functional, anatomical, and aesthetic considerations critical to AT design.」（§6.1.1） | 指のカプセルを握りからくり抜いて、本人の指に沿わせる。色も選べる | 「一人ひとりの指の曲がり方に合わせて、くぼみを付けます」（曲がったまま固まった指での検証はまだなので、メンバーの手での検証結果と合わせて言う） |
+| 画一的な出力：「these models often generate 'one-size-fits-all' designs that overlook the functional, anatomical, and aesthetic considerations critical to AT design.」（§6.1.1） | 本人の手の3Dメッシュの面から、すき間と厚みを取った殻で、こぶしの外側にかぶせるカバーを作る（[ADR-0011](adr/0011-dorsal-cover.md)）。道具はその人の道具の太さに合わせたC字クリップで付け、角度（60／70／80度）と色も選べる | 「一人ひとりのこぶしの形に沿うカバーを、その人の手の3Dの形から作ります」（曲がったまま固まった指での検証はまだ。11/9 にメンバーのこぶしに前の版のカバーが合ったところまでなので、そう言う） |
 
 注意：この論文は自らを「proof-of-concept」とし、「we do not claim that the tool is ready for market adoption」と書いている（§7）。批判ではなく「この課題に答える」という言い方にする。
 

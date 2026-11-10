@@ -11,6 +11,7 @@ Flutter Web の画面と、ブラウザの中で動く採寸エンジン（TypeS
 | `lib/main.dart` | 起動 |
 | `lib/app/` | 画面の行き先（`router.dart`）と URL（`paths.dart`） |
 | `lib/core/config.dart`・`session.dart` | 接続先などの設定、ログイン |
+| `lib/core/text_ja.dart` | AI が書いた文（`*_ja`）から、混ざった項目名（`tool_type=spoon` など）を表示の前に取り除く |
 | `lib/core/api/` | 生成APIの呼び出し（`api.dart`）、エラーの読み取り（`api_error.dart`）、モック（`mock_backend.dart`） |
 | `lib/core/models/` | 聞き取りの答え（`requirements.dart`）、取り付け具（`attachments.dart`） |
 | `lib/core/storage/` | Storage のファイル（`files.dart`） |
@@ -19,13 +20,15 @@ Flutter Web の画面と、ブラウザの中で動く採寸エンジン（TypeS
 | `lib/features/login/` | S0 ログイン |
 | `lib/features/home/` | S1 ホーム（ケースの一覧） |
 | `lib/features/interview/` | S2 聞き取り |
-| `lib/features/measure/` | S3〜S5 採寸：撮影の前（`capture_screen`）、カメラ（`live_capture_screen`）、1円玉の確認（`coin_screen`）、解析（`analyze_screen`）、結果の確認と点の修正（`measure_confirm_screen`・`point_editor`）、採寸エンジンの呼び出し（`measure_engine`、`window.jijoguMeasure`） |
+| `lib/features/measure/` | S3〜S5 採寸：撮影の前（`capture_screen`）、カメラ（`live_capture_screen`）、1円玉の確認（`coin_screen`）、解析（`analyze_screen`）、結果の確認と点の修正（`measure_confirm_screen`・`point_editor`）、採寸エンジンの呼び出し（`measure_engine`、`window.jijoguMeasure`）、撮影のあとの戻る操作で「撮り直しますか？」と確かめる（`keep_recording`） |
 | `lib/features/design/` | S6〜S8 形を作る・直す、OT に確認を頼む |
 | `lib/features/review/` | S9 OT の確認 |
-| `lib/features/print/` | S10 ダウンロード |
+| `lib/features/print/` | S10 ダウンロード（`print_screen`）、Storage のファイルを保存する（`download`） |
+| `assets/images/` | アプリ名のロゴ（`logo.png`。S0・S1）、Google の G（`google_g.svg`）、S10 の部品の絵（`part_cover.svg`・`part_c_clip.svg`） |
 | `web_engine/src/` | 採寸エンジン：アプリの中のカメラ、MediaPipe、1円玉の自動検出（OpenCV.js、Web Worker）、集計、hand-mesh の呼び出し |
 | `web/js/` | `measure_engine.js`・`coin_worker.js`（web_engine をまとめたもの）、`viewer.js`（three.js） |
 | `web/demo/` | モックで使う3Dの見本。形を変えたら `scripts/make_demo_assets.py` で作り直す |
+| `web/mediapipe/`・`web/opencv/` | MediaPipe の本体と手のモデル、OpenCV.js（リポジトリに入れない。下の「初回の準備」で取ってくる） |
 
 ## 初回の準備
 
@@ -71,4 +74,7 @@ cd .. && firebase deploy --only hosting
 cd app && flutter test
 ```
 
-`test/data_test.dart` で、聞き取りの答えの JSON、API のエラーの読み取り、続きから再開する画面の選び方を確かめています。
+- `test/data_test.dart`：聞き取りの答えの JSON、API のエラーの読み取り、続きから再開する画面の選び方
+- `test/attachments_preview_test.dart`：S7 の取り付け具の切り替え・足す・太さを直す（ADR-0014）
+- `test/attachments_print_test.dart`：S10 のダウンロードの行と、S9 の取り付け具の一覧
+- `test/text_ja_test.dart`：AI の文から項目名を取り除く（`text_ja.dart`）

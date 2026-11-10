@@ -20,7 +20,7 @@ flowchart LR
     CV["1円玉の自動検出<br/>OpenCV.js（Web Worker）"]
     GEO["採寸エンジン（JSモジュール）<br/>フレーム選び・縮尺・集計"]
     TV["three.js ビューア<br/>手のメッシュ・STL"]
-    PHOTO[("手の動画・写真<br/>メモリの中だけ")]
+    PHOTO[("手の動画<br/>メモリの中だけ")]
     CAM --> PHOTO --> GEO
     GEO <--> MP
     GEO <--> CV
@@ -41,7 +41,7 @@ flowchart LR
     PIPE["生成の流れ<br/>聞き取り・部品選び・寸法決め・確認"]
     VAL["範囲チェック<br/>catalog.json"]
     SHELL["カバーの殻<br/>距離場・マーチングキューブ"]
-    SCAD["OpenSCAD CLI<br/>カバー・C字クリップのSTL・PNG"]
+    SCAD["OpenSCAD CLI<br/>カバーのSTL・確認用PNG<br/>（C字クリップは固定STLから選ぶ）"]
     MESH["trimesh<br/>メッシュの確認"]
     API --> HM --> PIPE --> VAL --> SHELL --> SCAD --> MESH
   end
@@ -70,15 +70,15 @@ flowchart LR
 | コンポーネント | 置き場所 | 責務 | 持たない責務 |
 |---|---|---|---|
 | Flutter Web アプリ（`app/`） | Firebase Hosting | 画面と遷移、ログイン、生成中の進み具合の読み取り（`GET designs/{id}` を2秒ごと）、APIの呼び出し、採寸エンジンの呼び出しと結果の表示 | Firestore・Storageへの書き込み、Geminiの呼び出し、フレームの処理 |
-| 採寸エンジン（`app/web_engine/` のTypeScriptを、`app/web/js/measure_engine.js` の1ファイルにまとめる） | ブラウザ | アプリ内カメラでの録画（スマホは背面、PCはWebカメラ。握った形のこぶしを撮る）、フレームの取り出し、ぼけの判定、MediaPipeの呼び出し、1円玉の自動検出の呼び出しと縮尺、フレームごとの値、集計（[measurement.md §2〜§7](measurement.md)）、切り抜いたフレームを `hand-mesh` に送ること、S5で直した手首と指の付け根の5点から手の甲の長さを出し直すこと。Dartからは `dart:js_interop` で呼び、結果をJSONで返す。写真モードの計算も持つ | 手のメッシュの実寸化・手のモデルの組み立て（生成APIが行う） |
+| 採寸エンジン（`app/web_engine/` のTypeScriptを、`app/web/js/measure_engine.js` の1ファイルにまとめる） | ブラウザ | アプリ内カメラでの録画（スマホは背面、PCはWebカメラ。握った形のこぶしを撮る）、フレームの取り出し、ぼけの判定、MediaPipeの呼び出し、1円玉の自動検出の呼び出しと縮尺、フレームごとの値、集計（[measurement.md §2〜§7](measurement.md)）、切り抜いたフレームを `hand-mesh` に送ること、S5で直した手首と指の付け根の5点から手の甲の長さを出し直すこと。Dartからは `dart:js_interop` で呼び、結果をJSONで返す（写真2枚のモードは 2026-11-09 にやめた） | 手のメッシュの実寸化・手のモデルの組み立て（生成APIが行う） |
 | 1円玉の自動検出（`app/web_engine/src/coin_worker.ts` → `app/web/js/coin_worker.js`） | ブラウザ（Web Worker） | OpenCV.jsで、画像の中の楕円から1円玉を探す（指先と爪のまわりの丸を外し、手の甲に置いた1円玉を先に選び、手の大きさから大きさの見当をつける）。Web Workerで動かし、画面を止めない | 寸法の計算 |
 | MediaPipe（Hand Landmarker） | ブラウザ（WebAssembly） | フレームから21点を返す（`numHands: 2`。2つ以上見つかったら、そのフレームを捨てる）。Interactive Segmenterは使わない（CPUで1回約5秒かかり画面が止まる。GPUでは空のマスクが返った） | 寸法の計算 |
-| three.js ビューア（`app/web/js/stl_viewer.js`） | ブラウザ | STLの表示、手のメッシュ（GLB）の表示（S5）、手のメッシュにカバーとクリップと道具の棒を重ねる表示（S7。どれも手の座標系なので、そのまま重なる）、回転・拡大、色の変更 | 形を変えること |
+| three.js ビューア（`app/web/js/viewer.js`） | ブラウザ | STLの表示、手のメッシュ（GLB）の表示（S5）、手のメッシュにカバーとクリップと道具の棒を重ねる表示（S7。どれも手の座標系なので、そのまま重なる）、回転・拡大、色の変更 | 形を変えること |
 | 生成API（`api/`） | Cloud Run | IDトークンの検証、回数制限、同意の記録、`hand-mesh` の結果トークンと手のメッシュのハッシュの検証、聞き取り、手のモデル（`handmodel`：手の甲の4区間の倍率で実寸化、カバーの目印＝切る面・レールの位置・スリットの範囲）、カバーの殻と内側を守る立体の計算（距離場とマーチングキューブ）、スリット・空気穴・レールの位置の計算、基準値の計算、Geminiの呼び出し、範囲チェック、OpenSCADの実行、描いたあとの検査（手のひら側に材料がない・手首を覆わないなど、装具にしないための検査を含む）、Firestore・Storageへの書き込み、OTの確認の受け付け | 映像を受け取ること（受け取る口を作らない）、手の姿勢を作り直すこと（MHRのモデルとGPUは `hand-mesh` だけが持つ） |
 | `hand-mesh`（手のメッシュ復元、`hand_mesh/`） | Cloud Run GPU（asia-southeast1、L4） | 切り抜いたフレームからSAM 3D Bodyで手を復元し、形・比率・姿勢のパラメータの中央値で1つの手のメッシュに合成する。手首で切り出して閉じ、手の座標系に置き、未補正のままStorage（`cases/{caseId}/hand/raw/`）に書く。合成した手の関節から角度を出す。IDトークンとケースの持ち主・同意の記録の検証、共通の停止設定、GPUの回数・時間・1日の費用の上限、署名付きの結果トークンの発行。[ADR-0009](adr/0009-gpu-placement.md)、[ADR-0010](adr/0010-hand-mesh-fusion.md) | 画像の保存、画像のログへの記録、ケース・会話・版への書き込み、メッシュの実寸化 |
-| 部品ライブラリ（`scad/`） | 生成APIのコンテナに同梱 | 部品の形（カバーに付けるスリット・空気穴・アリ溝のレール、C字クリップ、TPUの筒）。殻は生成APIが作り、OpenSCADは `import()` して加工する。引数の定義（`catalog.json`） | 引数の妥当性の判断（範囲チェックが行う） |
+| 部品ライブラリ（`scad/`） | 生成APIのコンテナに同梱 | 部品の形（カバーに付けるスリット・空気穴・アリ溝のレール、C字クリップ、TPUの筒）。殻は生成APIが作り、OpenSCADは `import()` して加工する。C字クリップは、太さ4〜16mm（0.25mm刻み）× 角度60／70／80度の固定STLを、コンテナを作るときに先に描いておき（`scad/library/c_clip`、`api/app/geometry/cliplib.py`）、生成のときはそこから選ぶ。引数の定義（`catalog.json`） | 引数の妥当性の判断（範囲チェックが行う） |
 | Gemini 4 Argon | Agent Platform（`global`） | 聞き取り、部品選び、寸法の調整と理由、画像での確認、言葉での微調整 | 形を作ること、数値の最終判断 |
-| Firestore | asia-northeast1 | ケース・会話・版・回数の記録。生成の進み具合をブラウザへ伝える | — |
+| Firestore | asia-northeast1 | ケース・会話・版・回数の記録。生成の進み具合も版に書く（ブラウザは直接読まず、生成APIの `GET` を2秒ごとに読む） | — |
 | Cloud Storage | asia-northeast1 | 部品ごとのSTL・確認用画像・手のメッシュ（未補正と実寸）・カバーの殻の保存。OTの確認前は印刷用STLを読ませない（デモのケースを除く）。未補正のメッシュと殻はだれにも読ませない | 動画・写真の保存 |
 | Authentication | Firebase | Googleログイン。スマホとPCで同じアカウントにして引き継ぐ | OTかどうかの判定（Firestoreの許可リストで行う） |
 
@@ -157,9 +157,10 @@ sequenceDiagram
   API->>API: 手の面から c〜c+t の殻を作り、切る面となめらかにつなぐ（10〜20秒。同じなら前の版のものを使う）
   API->>ST: internal/…/cover/{measurement_id}/ の sdf・keepout・shell
   loop 最大3回
-    API->>SC: カバー（殻 − スリット − 空気穴 ＋ レール − 内側を守る立体）、C字クリップ、画像4枚
+    API->>SC: カバー（殻 − スリット − 空気穴 ＋ レール − 内側を守る立体）、画像4枚
     SC-->>API: 部品ごとのファイル
-    API->>API: 描いたあとの検査（厚さ・1つのかたまり・手のひら側が開いている・手首を覆わない・手に食い込まない・クリップが抜けない）
+    API->>API: C字クリップは固定STLのライブラリから選び、レールの位置に置く
+    API->>API: 描いたあとの検査（閉じた立体で造形サイズに収まる・1つのかたまり・手のひら側が開いている・手首を覆わない・手に食い込まない・スリットがふさがれていない・クリップの開き・道具の通り道。厚さは範囲チェックと作り方で守り、描いたあとには確かめない）
     API->>ST: 保存
     API->>G: review（画像4枚）
     API->>FS: progress=reviewing (n/3)
@@ -170,7 +171,7 @@ sequenceDiagram
   App->>App: 手にカバーとクリップと道具の棒を重ねて表示
   opt クリップの角度だけを変える（60／70／80度）
     App->>API: POST /refine（clip_angle_deg）
-    API->>SC: クリップだけ描き直す（カバーは前の版のものを使う）
+    API->>API: クリップを固定STLから選び直す（殻は前の版のものを使い、カバーの入力が同じなら前の版のSTLをそのまま使う）
   end
 ```
 
@@ -205,9 +206,9 @@ sequenceDiagram
 | 対象 | デプロイ先 | 方法 | 備考 |
 |---|---|---|---|
 | Flutter Web | Firebase Hosting | `flutter build web` → `firebase deploy --only hosting` | MediaPipeの本体（`@mediapipe/tasks-vision` 1.2.x のwasm）・手のモデル・OpenCV.js（約11MB、圧縮して約3.5MB）・three.jsも、同じHostingから配る（外部のCDNに頼らない）。採寸エンジンから `@mediapipe/tasks-vision` を直接呼ぶ（[ADR-0002](adr/0002-frontend-flutter-web.md)）ので、`FilesetResolver.forVisionTasks` に自前のパスを渡す。OpenCV.jsは、カメラを開くのを待たせないよう、MediaPipeの準備のあとでWeb Workerが裏で読む |
-| 生成API | Cloud Run（asia-northeast1） | `gcloud run deploy --source api/`（Cloud Buildでビルドし、Artifact Registryに置く） | 4 vCPU、4 GiB、同時に処理するリクエストは2、タイムアウト300秒、インスタンスは最小0・最大3。審査とデモの時間帯だけ最小1にする（`hand-mesh` も同じ時間帯だけ最小1）。前の版の2 vCPU・2 GiBから上げたのは、カバーの殻の計算（格子の距離場、手全体のボクセル）が加わったため。同じ仕組みのくり抜きは手元で約12秒（多コアのPC）。4 vCPUでの時間とメモリの最大は11/8に測る（要確認） |
+| 生成API | Cloud Run（asia-northeast1） | `gcloud builds submit --config deploy/cloudbuild.api.yaml .`（リポジトリの直下から。イメージは Artifact Registry の `asia-northeast1-docker.pkg.dev/<プロジェクト>/jijogu/api`）→ そのイメージを `gcloud run deploy` する | 2026-11-10 の時点：Cloud Run の台数・CPU・メモリの設定はリポジトリに入れていない（下は設計の値）。4 vCPU、4 GiB、同時に処理するリクエストは2、タイムアウト300秒、インスタンスは最小0・最大3。審査とデモの時間帯だけ最小1にする（`hand-mesh` も同じ時間帯だけ最小1）。前の版の2 vCPU・2 GiBから上げたのは、カバーの殻の計算（格子の距離場、手全体のボクセル）が加わったため。同じ仕組みのくり抜きは手元で約12秒（多コアのPC）。4 vCPUでの時間とメモリの最大は11/8に測る（要確認） |
 | Firestore・Storageのルール | Firebase | `firebase deploy --only firestore:rules,storage` | エミュレータでテストしてから出す |
-| 手のメッシュ復元 | Cloud Run GPU（asia-southeast1） | `gcloud run deploy hand-mesh --source hand_mesh/`（GPUはL4、ゾーン冗長なし、4 vCPU・16 GiB、最小0台・最大1台） | 重みはasia-southeast1のCloud Storageのバケットに置き、起動時に読む。未補正の手のメッシュは、アプリの既定のバケット（asia-northeast1）に書く（1回数百KBなので、地域をまたいでも時間と料金はほとんど変わらない）。[ADR-0009](adr/0009-gpu-placement.md) |
+| 手のメッシュ復元 | Cloud Run GPU（asia-southeast1） | `gcloud builds submit hand_mesh --config deploy/cloudbuild.hand_mesh.yaml` でイメージを作り、`gcloud run deploy hand-mesh --flags-file deploy/hand-mesh.flags.yaml` で出す（GPUはL4、ゾーン冗長なし、4 vCPU・16 GiB、最小0台・最大1台、同時に受けるリクエストは4、タイムアウト300秒） | 重みは非公開のバケット（`jijogu-hackathon-2026-weights`）を Cloud Storage のボリュームとして `/weights` につなぎ、起動時に読む（`/ready` が返るまで最大10分待つ）。未補正の手のメッシュは、アプリの既定のバケット（asia-northeast1）に書く（1回数百KBなので、地域をまたいでも時間と料金はほとんど変わらない）。[ADR-0009](adr/0009-gpu-placement.md) |
 | 予算アラート | Cloud Billing | コンソールで設定 | [non-functional.md](non-functional.md) |
 
 アプリ（Hosting・Firestore・Storage・生成API・Gemini・`hand-mesh`）は、Google CloudとFirebaseで同じ1つのプロジェクトを使う。クレジットと権限の管理を1か所にするため。ハッカソンのクーポンは個人の請求先アカウントで引き換え、2つのクレジットをまとめる（[non-functional.md §2.5](non-functional.md#25-どのクレジットで何を動かすか)）。
@@ -216,24 +217,40 @@ sequenceDiagram
 
 | 名前 | 例 | 意味 |
 |---|---|---|
-| `GOOGLE_CLOUD_PROJECT` | `jijogu-gen` | プロジェクトID |
+| `GOOGLE_CLOUD_PROJECT` | `jijogu-hackathon-2026` | プロジェクトID。CORSで許すHostingのURL（`https://<プロジェクト>.web.app`・プレビューチャンネル `https://<プロジェクト>--<チャンネル>.web.app`・`https://<プロジェクト>.firebaseapp.com`）も、ここから作る |
+| `AUTH_MODE` | `firebase` ／ `dev` | `firebase` はIDトークンを確かめる。`dev` は `X-User` ヘッダーだけの開発用 |
+| `STORE_BACKEND` | `gcp` ／ `local` | `gcp` はFirestore・Storage、`local` は `LOCAL_STORE_DIR`（既定 `.localstore/`）のファイル |
+| `STORAGE_BUCKET` | `jijogu-hackathon-2026-data` | 保存先（`firebase.json` のStorageと同じバケット） |
 | `GEMINI_MODEL` | `gemini-4-argon` | 使うモデル |
+| `GEMINI_FALLBACK_MODEL` | `gemini-3.8-flash` | 使うモデルが失敗したときに試す予備のモデル |
 | `GEMINI_LOCATION` | `global` | モデルのロケーション |
-| `GEMINI_MODE` | `live` ／ `mock` | `mock` なら保存した応答を返す |
-| `GENERATION_ENABLED` | `true` | 停止スイッチ |
+| `GEMINI_MODE` | `live` ／ `mock` | `mock` なら保存した応答を返す（既定は `mock`。コンテナでは `live`） |
+| `GENERATION_ENABLED` | `true` | このサービスだけを止めるスイッチ |
 | `DAILY_COST_LIMIT_USD` | `15` | GeminiとGPU推論のその日の概算費用を合算し、この値に達したら新しい処理を始めない（GPUは1回$0.40で数えるので、$4では1日10回しか呼べず、開発が止まるため引き上げた） |
-| `RATE_LIMIT_DESIGNS_PER_USER_DAY` | `10` | 1人1日あたりの生成の上限 |
-| `RATE_LIMIT_MESH_PER_USER_DAY` / `RATE_LIMIT_MESH_GLOBAL_DAY` | `20` / `100` | `hand-mesh` 側の1人・全体のGPU推論回数の上限。再試行も含む |
-| `MESH_MAX_EXECUTION_SECONDS` | `60` | `hand-mesh` 側の1回の推論の実行時間上限 |
-| `MESH_COST_PER_CALL_USD` | `0.40`（仮） | `hand-mesh` の1回あたりの固定の見積もり額。まばらに呼ぶと、起動・推論・止まるまでの待機の分（約18分×$1.26/時）がかかるため（[api.md §4](api.md#4-手のメッシュ復元サービス-hand-mesh)）。回数×この額を、その日の費用に足す |
+| `LIMIT_DESIGNS_PER_USER` ／ `LIMIT_REFINES_PER_USER` ／ `LIMIT_INTERVIEWS_PER_USER` | `10` ／ `30` ／ `60` | 1人1日あたりの生成・微調整・チャットの上限 |
+| `LIMIT_DESIGNS_TOTAL` | `100` | 全体で1日あたりの生成の上限 |
+| `REQUEST_TIMEOUT_S` | `280` | 1回の生成を打ち切るまでの秒数 |
+| `HOSTING_ORIGINS` | （空） | CORSで追加で許すオリジン（カンマ区切り）。Hostingの既定のURLは `GOOGLE_CLOUD_PROJECT` から作るので、ふつうは要らない |
 | `MESH_RESULT_HMAC_KEY` | （Secret Managerから） | `hand-mesh` の結果トークンの署名の鍵。生成APIと `hand-mesh` に、Secret Managerからだけ渡す。リポジトリやファイルには入れない |
-| `ALLOWED_ORIGINS` | `https://jijogu-gen.web.app,...` | CORSで許可するオリジン。Hostingのプレビューチャンネル（`https://jijogu-gen--<チャンネル名>-<ハッシュ>.web.app`）は `ALLOWED_ORIGIN_REGEX` で許可する |
-| `STORAGE_BUCKET` | `jijogu-gen.firebasestorage.app` | 保存先 |
-| `OPENSCAD_DISPLAY` | `egl` ／ `xvfb` | 画像を描く方式（[generation-pipeline.md §6.1](generation-pipeline.md#61-実行環境)） |
+| `OPENSCAD_BIN` | `openscad` | OpenSCADのコマンドの場所（コンテナでは `openscad`。手元では OpenSCAD.app の中のコマンドなど） |
+| `CLIP_LIBRARY_DIR` | （既定 `scad/library/c_clip`） | C字クリップの固定STLのライブラリの置き場所（コンテナを作るときに作る） |
+
+`hand-mesh` の環境変数（`hand_mesh/config.py`・`hand_mesh/backends.py`・`deploy/hand-mesh.flags.yaml`）：
+
+| 名前 | 例 | 意味 |
+|---|---|---|
+| `GOOGLE_CLOUD_PROJECT`・`STORAGE_BUCKET`・`AUTH_MODE`・`STORE_BACKEND`・`DAILY_COST_LIMIT_USD`・`MESH_RESULT_HMAC_KEY` | 生成APIと同じ | 生成APIと同じ意味（ただし `GOOGLE_CLOUD_PROJECT` からCORSのURLは作らない。CORSは下の `HAND_MESH_CORS_ORIGINS`） |
+| `MESH_PER_USER_DAILY` ／ `MESH_GLOBAL_DAILY` | `20` ／ `100` | 1人・全体の1日あたりのGPU推論の回数の上限。再試行も含む |
+| `MESH_MAX_EXECUTION_SECONDS` | `60` | 1回の推論の実行時間の上限 |
+| `MESH_MAX_FRAME_BYTES` | `200000` | 送られたフレーム1枚の大きさの上限 |
+| `MESH_COST_PER_CALL_USD` | `0.40`（仮） | 1回あたりの固定の見積もり額。まばらに呼ぶと、起動・推論・止まるまでの待機の分（約18分×$1.26/時）がかかるため（[api.md §4](api.md#4-手のメッシュ復元サービス-hand-mesh)）。回数×この額を、その日の費用に足す |
+| `HAND_MESH_CORS_ORIGINS` | `https://jijogu-hackathon-2026.web.app,https://jijogu-hackathon-2026.firebaseapp.com` | CORSで許すオリジン（localhost は常に許す） |
+| `HAND_MESH_CHECKPOINT_DIR` | `/weights/sam-3d-body-vith` | SAM 3D Body の重みの場所（つないだバケット） |
+| `HAND_MESH_BACKEND` | `auto` | 復元の方式。モックの手は `AUTH_MODE=dev` のときだけ使える |
 
 秘密の値は `MESH_RESULT_HMAC_KEY` の1つだけで、Secret Managerに置く（Geminiはサービスアカウントで呼ぶため、APIキーが要らない）。
 
-GPU用の4項目（`RATE_LIMIT_MESH_*`、`MESH_MAX_EXECUTION_SECONDS`、`MESH_COST_PER_CALL_USD`）は `hand-mesh` に設定する。`STORAGE_BUCKET` は両サービスに設定する（`hand-mesh` は未補正の手のメッシュを書くため）。カバーとこぶしのすき間（`HAND_CLEARANCE_MM`）やクリップのしめしろ（`CLIP_INTERFERENCE_MM`）などの形の固定値は、環境変数ではなく `scad/lib/common.scad` と `scad/catalog.json` に置く（[parts-library.md §3](parts-library.md#3-固定値aiは変えられない)）。`DAILY_COST_LIMIT_USD` は両サービスで同じ値を使い、共通の `usage` を判定する。全体の停止はFirestoreの `settings/runtime.generation_enabled=false` で行う。各サービスの環境変数 `GENERATION_ENABLED=false` は、そのサービスを追加で止めるためのもの。
+GPU用の項目（`MESH_PER_USER_DAILY`・`MESH_GLOBAL_DAILY`・`MESH_MAX_EXECUTION_SECONDS`・`MESH_COST_PER_CALL_USD`）は `hand-mesh` に設定する。`STORAGE_BUCKET` は両サービスに設定する（`hand-mesh` は未補正の手のメッシュを書くため）。カバーとこぶしのすき間（`HAND_CLEARANCE_MM`）やクリップのしめしろ（`CLIP_INTERFERENCE_MM`）などの形の固定値は、環境変数ではなく `scad/lib/common.scad` と `scad/catalog.json` に置く（[parts-library.md §3](parts-library.md#3-固定値aiは変えられない)）。`DAILY_COST_LIMIT_USD` は両サービスで同じ値を使い、共通の `usage` を判定する。全体の停止はFirestoreの `settings/runtime.generation_enabled=false` で行う。生成APIの環境変数 `GENERATION_ENABLED=false` は、生成APIだけを追加で止めるためのもの（`hand-mesh` にはこの環境変数はなく、共通の設定だけを見る）。
 
 ### 4.2 サービスアカウントと権限
 
@@ -265,7 +282,7 @@ IDトークンの検証は公開鍵で行うので、追加のロールは要ら
 | ブラウザ | three.js r187（STLLoader・GLTFLoader・OrbitControls） | STLと手のメッシュ（GLB）の表示 | MIT |
 | 生成API | FastAPI、`google-genai` 2.34.0、Firebase Admin SDK | API、Gemini、認証とFirestore・Storage | MIT／Apache-2.0 |
 | 生成API | trimesh、NumPy、SciPy（`cKDTree`・`ndimage`）、scikit-image（`marching_cubes`） | 手のメッシュの読み書き（GLB）、倍率とカバーの目印、カバーの殻（距離場・マーチングキューブ）、描いたあとの検査 | MIT／BSD |
-| 生成API | OpenSCAD 開発版（Manifold）、BOSL2 | 形を描く（ねじをやめたので、BOSL2は角の丸めなどに使う範囲だけ。使わなくなれば外す） | GPL-2.0（コマンドとして呼ぶだけ）／BSD-2-Clause |
+| 生成API | OpenSCAD 開発版（Manifold）、BOSL2 | 形を描く（ねじをやめたので、2026-11-10 の時点でBOSL2はどの .scad からも読み込んでいない。`scad/vendor/BOSL2` に置いたまま） | GPL-2.0（コマンドとして呼ぶだけ）／BSD-2-Clause |
 | `hand-mesh` | PyTorch（CUDA）、SAM 3D Body、MHR | 手のメッシュ復元と合成 | BSD／SAM License／Apache-2.0 |
 | `hand-mesh` | trimesh、NumPy、FastAPI | 手首での切り出し・ふさぐ・細分割・GLBの書き出し、API | MIT／BSD |
 

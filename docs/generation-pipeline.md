@@ -1,9 +1,9 @@
 # 生成の流れ
 
 > **このドキュメントで決めたこと**
-> 1. Geminiには、決まったJSONスキーマで「聞き取り」「部品選び」「寸法決め」「画像での確認」「言葉での微調整」の5種類を答えさせる。形（OpenSCADのコード）は書かせない（[ADR-0001](adr/0001-gemini-output-json-params.md)）。カバーの殻（`cover_shell.stl`）は、生成APIが手の3Dメッシュの距離場から決まった手順で作り、Geminiは厚みや切る位置などの引数だけを決める（[ADR-0011](adr/0011-dorsal-cover.md)）。クリップの角度はGeminiがやりたいことから選んで理由を書き、内径は道具の太さから決まる（Geminiは変えない）。
+> 1. Geminiには、決まったJSONスキーマで「聞き取り」「部品選び」「寸法決め」「画像での確認」「言葉での微調整」「取り付け具の角度」（取り付け具を足すときだけ。2026-11-09）の6種類を答えさせる。形（OpenSCADのコード）は書かせない（[ADR-0001](adr/0001-gemini-output-json-params.md)）。カバーの殻（`cover_shell.stl`）は、生成APIが手の3Dメッシュの距離場から決まった手順で作り、Geminiは厚みや切る位置などの引数だけを決める（[ADR-0011](adr/0011-dorsal-cover.md)）。クリップの角度はGeminiがやりたいことから選んで理由を書き、内径は道具の太さから決まる（Geminiは変えない）。
 > 2. Geminiの出力は、必ずサーバーの範囲チェックを通してからOpenSCADに渡し、描いたあとも実際の形を確かめる（**手のひら側に材料がない・手首を覆わない・手に食い込まない**・厚さ・1つのかたまり・クリップの開き）。画像での確認は最大3回まで。それでも合わなければ「要確認」として止め、未解決の点をOTに見せる。
-> 3. モデルは `gemini-4-argon`（ロケーション `global`）を本番に使う。開発中は安いモデルとモック（録っておいた応答）を使う。モデル名とロケーションは環境変数で切り替えられるようにする。
+> 3. モデルは `gemini-4-argon`（ロケーション `global`）を本番に使う。開発中はモック（`GEMINI_MODE=mock`。入力から決まった手順で答えを作る `api/app/gemini/mock.py`）を使う。モデル名とロケーションは環境変数（`GEMINI_MODEL`・`GEMINI_FALLBACK_MODEL`・`GEMINI_LOCATION`）で切り替えられる。
 
 関連：[parts-library.md](parts-library.md)、[measurement.md](measurement.md)、[api.md](api.md)、[non-functional.md](non-functional.md)（コスト）、[ADR-0011](adr/0011-dorsal-cover.md)・[ADR-0012](adr/0012-c-clip-dovetail.md)・[ADR-0013](adr/0013-clip-angle-variants.md)
 
@@ -14,17 +14,17 @@
 ```mermaid
 flowchart TD
   I[聞き取り<br/>interview] -->|requirements| M[採寸<br/>ブラウザ内]
-  M -->|measurement| B[基準値と位置の計算<br/>サーバー・決定的<br/>実寸の手のメッシュ→関節・カプセル・手のひらの高さ<br/>スリット・空気穴・レールの位置]
+  M -->|measurement| B[基準値と目印の計算<br/>PUT measurement のとき・決定的<br/>実寸の手のメッシュ→関節・カバーの目印・基準値]
   B --> S[部品選び<br/>select]
-  B --> K[距離場の計算<br/>手のメッシュ→符号付き距離<br/>採寸の版ごとに1回]
   S --> D[寸法決め<br/>dimension]
   D --> V{範囲チェック}
   V -->|NG・1回だけ| D
-  V -->|OK| L[殻の組み立て<br/>距離場＋切る所→cover_shell.stl<br/>数秒]
-  K --> L
+  V -->|OK| K[距離場の計算<br/>手のメッシュ→符号付き距離<br/>採寸の版ごとに1回。2回目からは読むだけ]
+  K --> L[殻の組み立て<br/>距離場＋切る所→cover_shell.stl]
   L --> R[OpenSCADで<br/>カバー・クリップと画像4枚]
   R --> Q{描いたあとの検査<br/>R6}
-  Q -->|NG| V
+  Q -->|R6c・R6d がNG：切る位置を動かして最大2回| L
+  Q -->|ほかのNG| H
   Q -->|OK| C[画像での確認<br/>review]
   C -->|ok| P[プレビュー]
   C -->|revise かつ 3回未満| V
@@ -37,24 +37,24 @@ flowchart TD
   P -->|デモのケース：印刷用データを作る| X2[印刷用STLを作る<br/>R6] --> Y
 ```
 
-- 「基準値と位置の計算」では、採寸の保存のときに作った実寸の手の3Dメッシュ（`cases/{caseId}/hand/{measurementId}.glb`）と、その関節から組み立てたカプセル（目安）を使い、カバーの目印（PIP関節の高さ `z_pip`、手首側を切る位置の基準値、人差し指側の端、親指のカプセル。[measurement.md §8.3](measurement.md#83-カバーの目印手の座標系の上)）と、スリット・空気穴・レールの位置を求める（`api/app/cover/`。[parts-library.md §5](parts-library.md#5-採寸値との対応)）。この計算はGeminiを使わない決まった手順で、位置はGeminiにも動かせない
-- 「距離場の計算」は、手のメッシュだけで決まる（Geminiの答えを待たない）ので、部品選び・寸法決めと**並行して**行う（10〜40秒かかる見込み。§6.2）。採寸の版ごとに1回だけ作って保存し、同じ採寸の2回目からの生成・微調整では読むだけにする
+- 「基準値と目印の計算」は、採寸の保存（`PUT measurement`）のときに行う（`api/app/geometry/design.py` の `prepare_measurement`）。実寸の手の3Dメッシュ（`cases/{caseId}/hand/{measurementId}.glb`）と、その関節から組み立てたカプセル（目安）を使い、カバーの目印（PIP関節の高さ `z_pip`、手首側を切る位置の基準値、人差し指側の端、親指のカプセル。[measurement.md §8.3](measurement.md#83-カバーの目印手の座標系の上)）と基準値（baseline）を求める。スリット・空気穴・レールの位置は、形を作るとき（`make_design`）に殻の外面から計算する（`api/app/geometry/placement.py`。[parts-library.md §5](parts-library.md#5-採寸値との対応)）。どちらもGeminiを使わない決まった手順で、位置はGeminiにも動かせない
+- 「距離場の計算」は、寸法決めと範囲チェックが終わったあと、`make_design` の中で順に行う（並行にはしていない）。採寸の版ごとに1回だけ作って保存し、同じ採寸の2回目からの生成・微調整では読むだけにする（§6.2）
 - 「殻の組み立て」は、保存した距離場に、Geminiが決めた厚み・切る位置・丸みを当てて面を取り出すだけなので数秒で済む（§6.2）。そのため、確認と直しのループや言葉での微調整で厚みや切る位置が変わっても、待ち時間は大きく増えない
 - 聞き取りの基本の情報（道具の種類と**太さ（mm）**を含む）は、選択式の質問で集める（[screens.md S2](screens.md#s2-やりたいこと選択式の質問任意のチャット)）。Geminiの `interview` は、任意のチャット（S2b）で文が送られたときだけ呼ぶ
-- `POST /v1/cases/{case_id}/designs` が1回呼ばれると、「基準値と位置の計算」から「プレビュー」までを1回のリクエストの中で続けて行う。途中経過はFirestoreの `designs/{designId}.progress` に書く。画面はそれを読んで進み具合を出す（[api.md](api.md)）
+- `POST /v1/cases/{case_id}/designs` が1回呼ばれると、「部品選び」から「プレビュー」までを1回のリクエストの中で続けて行う。途中経過はFirestoreの `designs/{designId}.progress` に書く。画面はそれを読んで進み具合を出す（[api.md](api.md)）
 
 ## 2. Geminiの呼び方（共通）
 
 | 項目 | 決めたこと | 理由 |
 |---|---|---|
 | 呼び先 | Gemini Enterprise Agent Platform（旧 Vertex AI）。API名は `aiplatform.googleapis.com` | 配布クレジットはAI Studioに使えないため |
-| モデル | 本番：`gemini-4-argon`（2026-10-13 GA）。開発：`gemini-3.5-flash-lite`。予備：`gemini-3.8-flash` | Argonは画像入力・構造化出力・思考レベルの調整に対応している。開発で回す回数が多いので、開発は安いモデルにする |
+| モデル | 本番：`gemini-4-argon`（2026-10-13 GA。`GEMINI_MODEL` の既定）。予備：`gemini-3.8-flash`（`GEMINI_FALLBACK_MODEL` の既定）。開発：Geminiを呼ばないモック（`GEMINI_MODE=mock`。コードの既定。本番のコンテナは `GEMINI_MODE=live`） | Argonは画像入力・構造化出力・思考レベルの調整に対応している。開発で回す回数が多いので、開発はモックでクレジットを使わない |
 | ロケーション | `global` | Argonは `global`／`us`／`eu` だけで提供されていて、`asia-northeast1` にはない。東京で完結させる必要があれば、`gemini-2.5-flash` か `gemini-3.5-flash`（どちらも asia-northeast1 で使える）に切り替える |
-| SDK | Python の `google-genai`。バージョンは1つに固定する | 3.0.0は2026-11-06公開の大きな更新で、既定の通信ライブラリが変わった。まず2.x系の最新版（Argonには2.30.1以上が必要）で動かし、3.0.0に上げるかは11/7の動作確認で決める（要確認） |
-| 接続の設定 | 2.x系は `vertexai=True`、3.x系は `enterprise=True`（`vertexai=True` も互換のため使える）。`project` と `location` は環境変数で渡す | — |
+| SDK | Python の `google-genai==2.34.0` に固定した（`api/requirements.txt`） | 3.0.0は2026-11-06公開の大きな更新で、既定の通信ライブラリが変わった。Argonには2.30.1以上が必要なので、2.x系の新しい版にした。3.0.0には上げていない |
+| 接続の設定 | `vertexai=True`。`project`（`GOOGLE_CLOUD_PROJECT`）と `location`（`GEMINI_LOCATION`）は環境変数で渡す | — |
 | 認証 | Cloud Runのサービスアカウントの自動認証（ADC）。ロールは `roles/aiplatform.user` | APIキーが要らないので、秘密情報がリポジトリに入る余地がない |
-| 構造化出力 | `response_mime_type="application/json"` と `response_json_schema`（Pydanticのモデルから作るJSON Schema） | スキーマで出力の形を縛り、崩れにくくする。使えるキーワードは `type`、`enum`、`minimum`、`maximum`、`anyOf`、`required` など（SDK 3.0.0 の型定義で確認） |
-| 思考レベル | `thinking_level` を LOW／MEDIUM で使い分ける（§3の表）。使える値はモデルごとに違うので、モデルごとの設定表を持つ | Argonは `thinking_budget` と `MINIMAL` を受け付けない（400エラーになる）。3.8 Flashには `MINIMAL` がなく、3.5 Flash-Liteは既定が `MINIMAL`。温度などのサンプリング設定はArgonと3.6 Flash以降で無視されるので、指定しない |
+| 構造化出力 | `response_mime_type="application/json"` と `response_json_schema`（手で書いたJSON Schemaの dict。`api/app/gemini/schemas.py`） | スキーマで出力の形を縛り、崩れにくくする。使えるキーワードは `type`、`enum`、`minimum`、`maximum`、`anyOf`、`required` など |
+| 思考レベル | `thinking_level` を LOW／MEDIUM で使い分ける（§3の表。`api/app/gemini/__init__.py` の `THINKING`）。リクエストの種類ごとに1つの表で、予備のモデルにも同じ値を渡す | Argonは `thinking_budget` と `MINIMAL` を受け付けない（400エラーになる）。3.8 Flashには `MINIMAL` がなく、3.5 Flash-Liteは既定が `MINIMAL`。温度などのサンプリング設定はArgonと3.6 Flash以降で無視されるので、指定しない |
 | 画像の解像度 | `media_resolution` を MEDIUM（1枚560トークン）にする | 既定のHIGH（1,120トークン）の半分で済む。形の確認なら768pxで足りる。精度が足りなければHIGHにする |
 | 失敗したとき | 1回の呼び出しは45秒で打ち切る。408／429／5xxは同じモデルで1回だけ再試行し、それでもだめなら予備のモデル（`GEMINI_FALLBACK_MODEL`、既定 `gemini-3.8-flash`）で答えさせる。どちらもだめなら `AI_UNAVAILABLE`。どのモデルが答えたかは `designs/{id}.usage.models` に残す（2026-11-07 に変えた。本番で Argon の最初の呼び出しが約6分返らず、Cloud Run の300秒で打ち切られたため） | 429はクォータ超過ではなく、共有リソースの一時的な混雑だと公式に説明されている |
 | キャッシュ | プロジェクトの `cacheConfig` を `disableCache: true` にする（既定では最長24時間キャッシュされる）。request-response logging は有効にしない | 健康に関わる会話を残さないため（[non-functional.md §4](non-functional.md#4-プライバシー)） |
@@ -70,7 +70,7 @@ flowchart TD
 - 作るのは、こぶしの外側にかぶせるカバーと、道具を挟むC字クリップ。形は作らない。カタログにある部品と引数だけを使い、カタログにない部品や引数を作らない
 - 寸法はmm、角度は度。数値は小数第1位まで
 - ユーザーに見せる文（`*_ja`）は、やさしい日本語で短く書く
-- 理由を書くときは、根拠にした採寸値や聞き取りの値の名前を挙げる（例：`hand.wrist_to_middle_mcp_mm=78 なので`）
+- 理由を書くときは、根拠にした採寸値や質問の答えを、日本語の言葉と数値で挙げる（例：「手首から中指の付け根まで78mmなので」）。英語の項目名や値（`tool_type`・`activity`・`spoon`・`eat`・`hand.〜_mm` など）や「=」は書かない（2026-11-10、`system.v2.md`。§3.3）
 - 手のひら側を覆う形、指を伸ばす・固定する形（装具）、口に入れる部品を求められたら、作らずに理由を説明する
 
 | リクエスト | 思考レベル | 入力 | 出力スキーマ |
@@ -130,7 +130,7 @@ flowchart TD
 
 - 必須の部品（カバー `cover`、空気穴 `air_holes`、ベルトのスリット `strap_slits`、レール `rail`、C字クリップ `c_clip`）は必ず選ぶ。種類はどれも `standard` だけ
 - 任意の部品（TPUの筒 `tpu_sleeve`）は、TPUが使えるとき（`requirements` の材料の欄、要確認）で、滑りやすい柄・重い道具・太さの違う道具を使い回したい、などの理由があるときだけ選び、理由を書く
-- クリップを2個にするか（先が細くなる筆の柄など）、ベルトを2本にするか（握る力がほとんどない、カバーが回りやすい）は、ここで理由を書いて提案し、値は寸法決めで決める
+- クリップを2個にするか（先が細くなる筆の柄など）は、ここで理由を書いて提案し、値（`c_clip.count`）は寸法決めで決める。ベルトは1本に固定（`strap_slits.strap_count` は `decided_by: fixed`。2026-11-08）なので、2本は提案しない。部品の種類（`variant`）は `standard` だけ（スキーマの enum）
 - MVPのカタログは、上の6つだけ。カムレバー式の固定やトンネルに差し込む部品（方式A）はカタログに入れない（[ADR-0011](adr/0011-dorsal-cover.md)・[ADR-0012](adr/0012-c-clip-dovetail.md)）
 
 ```json
@@ -188,8 +188,7 @@ flowchart TD
             "anyOf": [
               { "type": "number" },
               { "type": "boolean" },
-              { "type": "string" },
-              { "type": "array", "items": { "anyOf": [{ "type": "number" }, { "type": "boolean" }] } }
+              { "type": "string" }
             ]
           },
           "source": { "enum": ["measured", "rule", "interview", "ai", "default"] },
@@ -197,7 +196,16 @@ flowchart TD
         }
       }
     },
-    "summary_ja": { "type": "string", "description": "この形にした理由を2〜3文で" }
+    "summary_ja": { "type": "string", "description": "この形にした理由を2〜3文で" },
+    "attachments": {
+      "type": "array",
+      "description": "主でない取り付け具の角度（取り付け具が2つ以上のときだけ）",
+      "items": {
+        "type": "object",
+        "required": ["attachment_id", "angle_deg", "reason_ja"],
+        "properties": { "attachment_id": { "type": "string" }, "angle_deg": { "type": "number" }, "reason_ja": { "type": "string" } }
+      }
+    }
   }
 }
 ```
@@ -217,7 +225,7 @@ flowchart TD
 | C2 | カバーが、こぶしの外側（手の甲・付け根の関節の山・指の背）に沿っている。手がカバーを突き抜けていない、大きく浮いていない |
 | C3 | 手のひら側が開いている、手首が出ている、親指を包んでいない、指（基節から先）を覆っていない |
 | C4 | ふちが丸く、尖った所や極端に薄い所が見えない。スリット・空気穴・レールが関節の山にかかっていない |
-| C5 | 選択式の答えとチャットのメモの要望（例：ベルト2本、薄く軽く、TPUの筒、痛い所を避ける）が形に表れている |
+| C5 | 選択式の答えとチャットのメモの要望（例：薄く軽く、蒸れにくく、TPUの筒、痛い所を避ける）が形に表れている |
 
 - 直す必要があれば `verdict=revise` とし、直す引数と値を `changes` に入れる。直す必要がなければ `changes` は空にする
 
@@ -262,7 +270,7 @@ flowchart TD
         "properties": {
           "part_id": { "type": "string" },
           "name": { "type": "string" },
-          "value": { "anyOf": [{ "type": "number" }, { "type": "boolean" }, { "type": "string" }, { "type": "array" }] },
+          "value": { "anyOf": [{ "type": "number" }, { "type": "boolean" }, { "type": "string" }] },
           "reason_ja": { "type": "string" }
         }
       }
@@ -286,11 +294,11 @@ flowchart TD
 - 量の目安：「少し」＝5%（最低0.2mm）、無指定＝10%、「かなり」＝15%
 - 指示があいまいなら、何も変えずに確認の質問を返す（`clarify_ja`）
 - 採寸から決めた引数を「AIが変えてよい幅」を超えて変えたいとユーザーが言った場合は、変えたうえで `override_by_user=true` を付ける。「AIが変えてよい幅」（R3）では止めず、OT画面で目立たせる（ユーザーの意思を優先し、OTが判断する）。範囲（R2）・組み合わせ（R4）・**安全（R5）**のルールは、ユーザーの指示でも当てはめる（手のひらを覆う、手首を覆う、という指示には従わない）
-- 描き直す範囲：殻の引数（`cover_thickness_mm`・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が変わったら殻を組み立て直す（数秒。距離場は使い回す）。**クリップの引数だけ（角度を含む）の変更では、カバーは前の版のSTLを使い回し、クリップだけ描き直す**。空気穴・スリットだけの変更では、殻は使い回してOpenSCADだけ描き直す
+- 描き直す範囲：殻の引数（`cover_thickness_mm`・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が変わったら殻を組み立て直す（数秒。距離場は使い回す）。どの変更でも、カバー・クリップ・画像4枚をOpenSCADで描き直す（殻は、殻の引数が同じなら保存したものを使う）。カバーの入力（殻と `cover`・`air_holes`・`strap_slits`・`rail` の引数・採寸の版）が前の版と同じなら、カバーのプレビュー用STLの中身を前の版のものに差し替える（OpenSCADは同じ入力でも毎回少し違うSTLを出すため。`pipeline.py` の `_reuse_parent_cover`）
 
 出力：`changes`（§3.4 と同じ形）、`message_ja`、`clarify_ja`（なければ空文字）、`override_by_user`（真偽）
 
-色だけの変更（「青にして」）は、Geminiを呼ばず、版を作らずに `style` だけを書き換える（[api.md §3.5](api.md#35-post-v1casescase_iddesignsdesign_idrefine)）。プレビューの画面で角度のボタン（60／70／80度）を押した場合は、Geminiを呼ばない引数の直接の変更（`param_changes`）として扱い、クリップだけ描き直す。
+色だけの変更（「青にして」）は、Geminiを呼ばず、版を作らずに `style` だけを書き換える（[api.md §3.5](api.md#35-post-v1casescase_iddesignsdesign_idrefine)）。プレビューの画面で角度のボタン（60／70／80度）を押した場合は、Geminiを呼ばない `clip_angle_deg` の変更として扱う（`param_changes` で `c_clip.angle_deg` だけを送っても同じ。`origin=refine_clip_angle`）。画像での確認はしない。
 
 ## 4. 範囲チェック
 
@@ -301,14 +309,14 @@ flowchart TD
 | R1 | 出力がスキーマに合う。部品ID・引数名がカタログにある。必須の部品（`cover`・`air_holes`・`strap_slits`・`rail`・`c_clip`）がそろっている | Geminiに誤りの内容を伝えて1回だけ聞き直す。だめなら `AI_OUTPUT_INVALID` |
 | R2 | 各引数が範囲（最小〜最大、選択肢）に入っている | 違反の一覧を添えて1回だけ聞き直す。だめなら、範囲の端（選択肢なら基準値）に丸めて `clamped` に記録する |
 | R3 | 採寸から決めた引数（`wrist_cut_mm` など）が、基準値から「AIが変えてよい幅」以内にある。サーバーが決める引数（位置・ファイル・レールの寸法・クリップの内径・`tool_d_mm`）が出力に含まれていない、または基準値と同じ。ユーザーが言葉で求めた変更（`override_by_user`）と、画面で直接直した値（`param_changes`）には「AIが変えてよい幅」を当てはめない | 幅の端まで戻し、`clamped` に記録する。サーバーが決める引数は基準値に戻す |
-| R4 | 組み合わせのルール（[parts-library.md §4.8](parts-library.md#48-組み合わせのルール範囲チェックのr4r5)）：`wrist_cut_mm` の上限、丸みと厚みの比、クリップの開きと内径、TPUの筒と道具の太さ、ベルト2本の間隔、造形サイズの見積もり | 1回だけ聞き直す。だめなら、決まった順に自動で直し、**直すたびにR2〜R5をやり直す**：①`edge_radius_mm` を `cover_thickness_mm × 1.5` まで下げる ②`wrist_cut_mm` を範囲の中へ戻す ③`opening_ratio` を0.80以下に下げる ④`tpu_sleeve` を false にする ⑤`strap_count` を1にする。それでも満たせなければ、最初の寸法決めなら `DESIGN_INFEASIBLE`。確認と直しのループの途中や微調整のときは、生成全体を失敗にせず、**前に通った形のまま** `needs_attention` で終える |
-| R5 | 安全のルール：`edge_radius_mm ≥ 1.5`、`wrist_cut_mm ≥ WRIST_FREE_MM`（手首を覆わない）、対象外の依頼でない（手のひらを覆う形は、引数では作れない。§6.2の手順8で必ず捨てる） | 対象外の依頼は `OUT_OF_SCOPE` で止める。丸みは1.5に、`wrist_cut_mm` は25に引き上げる（ユーザーの指示でも同じ）。直したことを `clamped` に記録して画面で伝える |
-| R6 | **描いたあとの実際の形での検査**（描くたびに行う。プレビュー用でも印刷用でも。座標は正準形で見る）：<br/>R6a 閉じた立体になっている、体積が0より大きい、部品ごとに刷る向きの外形が `BED_MM` に収まる<br/>R6b カバーが1つのかたまり（距離場の層の、手から離れた小さな破片がない）。クリップも1つのかたまり<br/>R6c **手のひら側が開いている**：カバーの頂点のうち、手のひら側を切る面（`z_pip + palm_cut_offset_mm`）より0.3mm以上手のひら側にあるものがない。かつ、手の面のうち手のひら側を向いた所（面の向きが +z から50度以内）から `c + t + 1` mm以内に、カバーがない<br/>R6d **手首を覆わない**：カバーの頂点のうち、手首の関節から y の向きに `WRIST_FREE_MM`（25mm）より手首側にあるものがない<br/>R6e **手に食い込まない・厚さ**：カバーのすべての頂点で `sdf ≥ c − 0.3`（内側を守る立体を引いたあとでも確かめる）。殻の厚さ（内側の面から外側の面まで）がふちの丸みの所を除いて `MIN_WALL_MM` 以上。スリット・空気穴とふちの間が `MIN_WALL_MM` 以上。スリットの穴が開いている：穴の中（縁から1mm内側、壁の真ん中）に並べた点のうちカバーの中にあるものが10%以下（`R6e_slit_open`。レールの台がふさいでいないか。2026-11-08。開いた穴でも3〜5%出るので 2026-11-10 に2%から変えた。台がかかるときは、道具が手に当たらない範囲で台を手の甲側へずらして離す）。置く前の、穴とレールの台の箱どうしの距離は `R6e_slit_rail` に記録（目安）<br/>R6f クリップ：開きの幅が `tool_d_mm − 0.5` 未満、刷る向き（輪が机と平行）で下向きに45度を超えて張り出す面が0.5cm²以下（入口の面取りと底は数えない）<br/>R6g カバーの外側の張り出し：刷る向き（手のひら側の切り口が下）で、外側の面のうち下向きに45度を超えて張り出す面の面積を記録する（内側はサポートを付ける前提なので数えない）<br/>R6h **道具の通り道**（2026-11-08）：クリップの位置から道具の軸（先へ100mm・後ろへ50mm、太さ `tool_d_mm`）を引き、手との間が2mm以上、カバーとの間が1mm以上あり、机（手のひら側のいちばん低い点）に100mm以内で届くこと | R6a：`RENDER_FAILED`。<br/>R6b：0.5cm³未満の破片は自動で取り除き、記録する。それより大きい破片があれば、生成・微調整の中では前に通った形のまま `needs_attention`。<br/>R6c・R6d：安全の決まりなので、通るまで直す。`palm_cut_offset_mm` を2mmずつ手の甲側へ、`wrist_cut_mm` を5mmずつ指先側へ動かして殻を組み立て直す（最大2回、R2〜R5も再検証）。それでも通らなければ、前に通った形のまま `needs_attention` にし、**印刷用のデータは作らない**。<br/>R6e：食い込みは作り方の誤りなので `RENDER_FAILED`（ログに残す）。ふちとの間の不足は、かかった空気穴を自動で外して記録する（スリットなら `needs_attention`）。スリットが置けない、またはレールの台にかかる（側面が低い手の形）ときも `needs_attention` にし、未解決の点に「ベルトの幅を狭くするか、OTに相談」と書く。<br/>R6f：張り出しが多い角度のクリップは止めずに、「サポートが要るかもしれません」と印刷ガイドに出す（要確認：11/9に20度・40度を刷って確かめる）。開きの不足は `RENDER_FAILED`。<br/>R6g：3cm²を超えたら、外側にもサポートが要るおそれとして記録し、印刷ガイドに出す（止めない）。<br/>R6h：警告として記録し、画面とOTの確認に出す（止めない。角度を立てる助言を添える）。<br/>印刷用STLを作るとき（OTへの依頼、デモのケースの「印刷用データを作る」）のR6では引数を変えず、不合格なら `RENDER_FAILED` で止める |
+| R4 | 組み合わせのルール（[parts-library.md §4.8](parts-library.md#48-組み合わせのルール範囲チェックのr4r5)）：`edge_radius_mm ≤ cover_thickness_mm × 1.5`、`wrist_cut_mm ≤ max(WRIST_FREE_MM, 手首→中指の付け根 − 15)`、クリップの開き（`opening_ratio × tool_d_mm < tool_d_mm − 0.5`）、TPUの筒は道具の太さ4mm以上、平たい柄でない（`api/app/validator.py`）。ベルトは1本に固定なので、本数と間隔のルールはない。造形サイズは描いたあとのR6aで確かめる | 最初の寸法決めでは1回だけ聞き直す。だめなら、外れた引数を決まった値に直す：①`edge_radius_mm` を `cover_thickness_mm × 1.5` に ②`wrist_cut_mm` を上限に ③`opening_ratio` を0.80以下に ④`tpu_sleeve` を false に。直したあとも外れていれば（平たい柄も）`DESIGN_INFEASIBLE`。確認と直しのループの途中で外れたら、生成全体を失敗にせず、**前に通った形のまま** `needs_attention` で終える |
+| R5 | 安全のルール：`edge_radius_mm ≥ MIN_EDGE_RADIUS_MM`（1.5）、`wrist_cut_mm ≥ WRIST_FREE_MM`（25。手首を覆わない）。手のひらを覆う形は、引数では作れない（§6.2の手順8で必ず捨てる） | 丸みは1.5に、`wrist_cut_mm` は25に引き上げる（ユーザーの指示でも同じ）。直したことを `clamped` に記録して画面で伝える。対象外の依頼（装具・口に入れる部品など）を範囲チェックで止める `OUT_OF_SCOPE` は**未実装**（対象外かどうかは聞き取りの `out_of_scope` で伝えるだけ。§3.1） |
+| R6 | **描いたあとの実際の形での検査**（描くたびに行う。プレビュー用でも印刷用でも。座標は正準形で見る。`api/app/geometry/checks.py`）：<br/>R6a 閉じた立体になっている、体積が0より大きい、外形が `BED_MM` に収まる<br/>R6b カバーが1つのかたまり<br/>R6c **手のひら側が開いている**：カバーの頂点のうち、手のひら側を切る面（`z_pip + palm_cut_offset_mm`）より0.3mm以上手のひら側にあるものがない。かつ、カバーの頂点のうち、一番近い手の面が手のひら側を向き（面の向きが +z から50度以内）、その面から `c + t + 1` mm以内にあるものがない<br/>R6d **手首を覆わない**：カバーの頂点のうち、手首の関節から y の向きに `WRIST_FREE_MM`（25mm）− 0.3mm より手首側にあるものがない<br/>R6e **手に食い込まない**：カバーのすべての頂点で、手の面までの距離が `c − 0.3` 以上（内側を守る立体を引いたあとの形で確かめる）。殻の厚さが `MIN_WALL_MM` 以上かを描いたあとに測る検査は**未実装**（厚さは作り方で t になる。`MIN_WALL_MM` は、空気穴・スリットを置くときに、ふちや穴どうしの間を空けるのに使う。`api/app/geometry/placement.py`）。スリットの穴が開いている：穴の中（縁から1mm内側、壁の真ん中）に並べた点のうちカバーの中にあるものが10%以下（`R6e_slit_open`。レールの台がふさいでいないか。2026-11-08。開いた穴でも3〜5%出るので 2026-11-10 に2%から変えた。台がかかるときは、道具が手に当たらない範囲で台を手の甲側へずらして離す）。置く前の、穴とレールの台の箱どうしの距離は `R6e_slit_rail` に記録（目安）。置けなかったスリットは `R6e_slits`、減らした空気穴は `R6e_holes` に記録<br/>R6f クリップ：開きの幅が `tool_d_mm − 0.5` 未満、閉じた立体、1つのかたまり（刷る向きのクリップで見る）。刷る向き（輪が机と平行）で下向きに45度を超えて張り出す面（底は数えない）が0.5cm²を超えたら `R6f_overhang` として記録する（合否には入れない）<br/>R6g カバーの外側の張り出し：刷る向き（手のひら側の切り口が下）で、外側の面のうち下向きに45度を超えて張り出す面の面積を記録する（内側はサポートを付ける前提なので数えない）<br/>R6h **道具の通り道**（2026-11-08）：クリップの位置から道具の軸（先へ100mm・後ろへ50mm、太さ `tool_d_mm`）を引き、手との間が2mm以上、カバーとの間が1mm以上あり、机（手のひら側のいちばん低い点）に100mm以内で届くこと | **プレビュー（生成・微調整）では止めない**（`api/app/pipeline.py`）。<br/>R6a・R6b・R6e（食い込み）・R6f（取り付け具が1つのとき）の不合格：版を `needs_attention` にし、未解決の点に severity high で「形の検査に通らない所があります（…）。印刷用のデータは作れません」と書く。<br/>R6b：0.5cm³未満（かつ面積200mm²未満）の破片は自動で取り除き、`R6b_fragments` に記録する。<br/>R6c・R6d：安全の決まりなので、通るまで直す。`palm_cut_offset_mm` を2mmずつ手の甲側へ、`wrist_cut_mm` を5mmずつ指先側へ動かして描き直す（最大2回。動かしたあとに範囲チェックはかけ直さない）。それでも通らなければ `needs_attention` にし、severity high で「手のひら側か手首を覆うおそれがあります。印刷用のデータは作れません」と書く。<br/>R6e：スリットが置けない（`R6e_slits`）、またはふさがれている（`R6e_slit_open`）ときは `needs_attention` にし、未解決の点（severity medium）に「ベルトの幅を狭くするか、OTに相談」と書く。<br/>R6f：取り付け具が2つ以上のときは、落ちた取り付け具だけを版から外す（[api.md §3.4](api.md#34-post-v1casescase_iddesigns)）。張り出し（`R6f_overhang`）は「サポートが要るかもしれません」と記録するだけ。<br/>R6g：3cm²を超えたら、外側にもサポートが要るおそれとして記録する（止めない）。<br/>R6h：版を `needs_attention` にし、未解決の点（severity medium）に角度を立てる助言を書く（止めない）。<br/>**印刷用STLを作るとき**（OTへの依頼、デモのケースの「印刷用データを作る」）のR6では引数を変えず、どの部品・どの取り付け具でも不合格（severity error）なら `RENDER_FAILED` で止める。デモの `prepare-print` は、severity high の未解決の点がある版では描く前に `RENDER_FAILED` を返す |
 
 - R2〜R4の聞き直しは、§5の「確認と直し」の回数に数えない
-- R6c・R6d・R6e は、殻を組み立てた直後（OpenSCADで描く前）にも `cover_shell.stl` で確かめてよい。早く分かれば、OpenSCADの時間を無駄にしない。ただし、レールの土台とスリットを足したあとの形でも必ずもう一度確かめる
+- R6 は、OpenSCADで描いたあとの形（レールの土台・スリットを足し、内側を守る立体を引いたもの）だけで確かめる。殻を組み立てた直後に先に確かめる仕組みは作っていない（今後）
 - `clamped` に入った引数は、OT画面で「AIの値を自動で直しました」と目立つように出す
-- 造形サイズに収まるかは、プレビューの段階でもR4（手のメッシュの外接箱からの見積もり）で確かめる。そのうえで、**OTに頼むとき**（デモのケースでは「印刷用データを作る」を押したとき）に、部品ごとの印刷用のSTLを作り、R6で実際のメッシュを確かめる（[api.md §3.6](api.md#36-post-v1casescase_idreview-request)）
+- 造形サイズに収まるかは、プレビューの段階でもR6a（描いたカバーの外形）で確かめる。そのうえで、**OTに頼むとき**（デモのケースでは「印刷用データを作る」を押したとき）に、部品ごとの印刷用のSTLを作り、R6で実際のメッシュを確かめる（[api.md §3.6](api.md#36-post-v1casescase_idreview-request)）
 - OTに頼んだあとは、その版の引数を変えない。承認では描き直さず、頼んだときに作った印刷用STLを公開するだけにする。形を変える必要があれば `refine` で新しい版を作り、OTに頼み直す
 
 ## 5. 確認と直しのループ
@@ -329,15 +337,17 @@ round = 0
     前の回と同じ値に戻る引数があれば → needs_attention で終わる（行ったり来たりを防ぐ）
 ```
 
-- 「最大3回」は、確認（review）を呼ぶ回数で数える。最初の確認を含めて3回
-- C1〜C5の欠落・重複は、形の誤りなのでR1で1回だけ聞き直し、再び不正なら `AI_OUTPUT_INVALID`。一方、`verdict=ok` に low の指摘が付くのは正常な応答として扱う（Geminiはokでも補足を書くことが多いため）。ok と不合格のチェック・high/medium の指摘が食い違うときは、聞き直さずに `needs_attention` にする（生成全体を失敗にしない）。`revise` で修正案がない場合は、指摘を `unresolved_issues` に残して `needs_attention` にする。指摘自体が空でも「AIは修正が必要と判定しましたが、修正案を出せませんでした」を残す
-- 進み具合は `progress = { step: "reviewing", round: 2, max_rounds: 3 }` のようにFirestoreに書く。版の `status` は `queued`／`running`／`ready`／`needs_attention`／`failed` の5つだけにし、どの段階かは `progress.step`（`selecting`／`dimensioning`／`shelling`（距離場と殻の計算）／`rendering`／`reviewing`）で表す
+- 「最大3回」は、確認（review）を呼ぶ回数で数える。最初の確認を含めて3回（`pipeline.py` の `MAX_ROUNDS`）
+- 確認は、描いたあとの検査（R6）を通って版が `ready` のときだけ呼ぶ。R6 ですでに `needs_attention` なら、確認はしない
+- 残り時間（280秒の期限まで）が100秒を切っていたら、確認をせずに `needs_attention` で終え、「時間が足りず、AIによる画像の確認を最後までできませんでした」と残す。Geminiが混んでいる（`AI_UNAVAILABLE`／`AI_OUTPUT_INVALID`）ときも、生成は失敗にせず `needs_attention` で終える
+- 答えがJSONとして読めないときは、1回だけ聞き直し、再び読めなければ `AI_OUTPUT_INVALID`（確認の中なら上のとおり `needs_attention`）。C1〜C5の欠落・重複は聞き直さず、`ready` にしない（`verdict=ok` なら `needs_attention`）。一方、`verdict=ok` に low の指摘が付くのは正常な応答として扱う（Geminiはokでも補足を書くことが多いため）。ok と不合格のチェック・high/medium の指摘が食い違うときは、聞き直さずに `needs_attention` にする（生成全体を失敗にしない）。`revise` で修正案がない場合は、指摘を `unresolved_issues` に残して `needs_attention` にする。指摘自体が空でも「AIは修正が必要と判定しましたが、修正案を出せませんでした」を残す
+- 進み具合は `progress = { step: "reviewing", round: 2, max_rounds: 3 }` のようにFirestoreに書く。版の `status` は `running`／`ready`／`needs_attention`／`failed` の4つ（`queued` は使っていない。版は `running` で作る）にし、どの段階かは `progress.step`（`selecting`／`dimensioning`／`shelling`（距離場と殻の計算と描画）／`rendering`（確認のあとの描き直し）／`reviewing`／`done`）で表す
 - `needs_attention` になった場合
   - 最後に範囲チェックを通った形を、プレビューとして見せる（作り直さない）
   - 解決しなかった指摘（`issues`）を、ユーザーとOTの両方に見せる
   - ユーザーにできること：言葉で直す、数値を直接直す、採寸からやり直す
   - OTは、指摘を読んだうえで「確認済み」にするか差し戻すかを判断できる（AIの判断よりOTの判断を優先する）
-- 言葉での微調整（refine）のあとは、確認を1回だけ行う（待ち時間を短くするため）。`ready` の条件は上と同じで、`revise` なら変更案の有無にかかわらず `needs_attention` にして、その時点の形と未解決の指摘を見せる
+- 言葉での微調整（refine の `instruction`）のあとは、確認を1回だけ行う（待ち時間を短くするため）。数値・角度・太さの直しと、取り付け具を足すときは、確認をしない。`ready` の条件は上と同じで、`revise` なら変更案の有無にかかわらず `needs_attention` にして、その時点の形と未解決の指摘を見せる
 
 ## 6. OpenSCADの実行
 
@@ -353,7 +363,7 @@ round = 0
 
 ### 6.2 殻（`cover_shell.stl`）の作り方
 
-生成APIのPython（`api/app/cover/shell.py`）が、実寸の手の3Dメッシュから作る。距離場の仕組みは11/7のスパイクで動かしたもの（[ADR-0010](adr/0010-hand-mesh-fusion.md)）で、それを殻と「切る所」の組み合わせに作り直した。**距離場（手順1〜6）は採寸の版ごとに1回**、**殻の組み立て（手順7〜10）は殻の引数が変わるたび**に行う。
+生成APIのPython（`api/app/geometry/`。距離場は `field.py`、殻と内側を守る立体は `shell.py`、組み立ては `design.py` の `make_design`）が、実寸の手の3Dメッシュから作る。距離場の仕組みは11/7のスパイクで動かしたもの（[ADR-0010](adr/0010-hand-mesh-fusion.md)）で、それを殻と「切る所」の組み合わせに作り直した。**距離場（手順1〜6）は採寸の版ごとに1回**、**殻の組み立て（手順7〜10）は殻の引数が変わるたび**に行う。
 
 | 順 | 処理 | 理由・注意 |
 |---|---|---|
@@ -371,10 +381,10 @@ round = 0
 - **内側を守る立体**（`cover_keepout.stl`）：同じ距離場から、`sdf < c` の面を取り出す（手を c だけ広げた立体。第1弾のくり抜き `cavity.stl` と同じもの）。手のメッシュと c だけで決まるので、採寸の版ごとに1回作る。OpenSCADで、レールの土台やスリットを足したあとに引き、内側の面に何も出ないようにする
 - **スリット・空気穴・レールの位置**：手順1の関節と、手順10の殻の外面から、[parts-library.md §5](parts-library.md#5-採寸値との対応) の式で計算する（殻を組み立て直したら計算し直す）。右手なら鏡像に戻した座標で `-D` に渡す
 - **使い回し**：
-  - 距離場と `cover_keepout.stl` は、実寸の手のメッシュ（採寸の版）、`HAND_CLEARANCE_MM`、`CAVITY_VOXEL_MM`・`CAVITY_SMOOTH_SIGMA` だけで決まる。**採寸の版ごとに1回だけ**作り、`internal/cases/{caseId}/cover/{measurementId}/`（`sdf`・`keepout/c{c}`・`shell/<24桁>`）に保存して（だれも読めない場所。距離場は圧縮して数MBの見込み、要確認）、同じ採寸のすべての版で使い回す。採寸をやり直したとき、固定値を変えたときだけ作り直す
+  - 距離場と `cover_keepout.stl` は、実寸の手のメッシュ（採寸の版）、`HAND_CLEARANCE_MM`、`CAVITY_VOXEL_MM`・`CAVITY_SMOOTH_SIGMA` だけで決まる。**採寸の版ごとに1回だけ**作り、`internal/cases/{caseId}/cover/{measurementId}/`（`sdf`・`keepout/<メッシュのSHA-256の先頭16桁>_c<c を小数2桁>`・`shell/<殻の引数のハッシュ24桁>`）に保存して（だれも読めない場所。距離場は圧縮して数MBの見込み、要確認）、同じ採寸のすべての版で使い回す。採寸をやり直したとき、固定値を変えたときだけ作り直す
   - `cover_shell.stl` は、距離場と、殻の引数（`cover_thickness_mm`・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）で決まる。同じ組み合わせなら保存したものを使う。版には `cover_shell_sha256` を記録する
   - クリップの引数（角度を含む）、空気穴・スリットの引数だけの変更では、殻は作り直さない
-- 最初の生成では、距離場を部品選び・寸法決めと並行して作る（§1）。2回目からは保存したものを読むだけなので、待ち時間は殻の組み立て（数秒）だけになる
+- 最初の生成では、距離場を寸法決めのあとに作る（並行にはしていない。§1）。2回目からは保存したものを読むだけなので、待ち時間は殻の組み立て（数秒）だけになる
 - 確認用画像に重ねる手（`hand.stl`）は、実寸の手のメッシュを実際の手の座標のまま書いたもの。殻と同じ座標なので変換は要らない
 - 失敗（閉じた面にならない、体積が0、カバーが手のどこにもかからない）は `RENDER_FAILED` にする
 
@@ -388,22 +398,23 @@ round = 0
 | 出力 | 使う引数 | 主なオプション |
 |---|---|---|
 | プレビュー用STL（部品ごと、手の座標で組んだ位置） | `mode=assembled`、`quality=preview`。カバーは `cover_preview.stl`、クリップは `clip_preview.stl`（レールに差した位置）に分けて書く | `-o cover_preview.stl --export-format binstl`。画面（three.js）は部品ごとに色を変えて重ねる |
-| 確認用画像4枚 | `scad/view.scad` でプレビュー用STLを読み込み、手の3Dメッシュ（`hand_file`、半透明）と道具の目安の棒を添える | `--preview --imgsize=768,768 --viewall --autocenter --projection=p --camera=…`。4枚は並行して描く |
+| 確認用画像4枚 | `scad/view.scad` でプレビュー用STLを読み込み、手の3Dメッシュ（`hand_file`、半透明）と道具の目安の棒を添える | `--camera=<目の位置>,<見る点> --viewall --autocenter --imgsize=768,768 --projection=p --colorscheme=Tomorrow`（`api/app/geometry/scad.py` の `render_views`）。4枚は並行して描く |
 | 印刷用STL（部品ごと、刷る向き） | `mode=cover`／`mode=clip`／`mode=sleeve`、`quality=print`。クリップは角度ごとに `print_clip_<角度>.stl` | `-o print_cover.stl --export-format binstl`。描いたあとR6を確かめる。承認のときは描き直さない |
 | クリップ（固定STLのライブラリにあるとき） | OpenSCADは呼ばない。`scad/library/c_clip/<variant>.rail.stl` をレールの位置へ動かして `clip_preview.stl` に、`<variant>.print.stl` をそのまま `print_clip_<角度>.stl` に書く（[ADR-0012](adr/0012-c-clip-dovetail.md) の 4.） | R6f はライブラリの印刷用STLで確かめる（結果は `index.json` にもある） |
 
-- 画像は、いったん作ったSTLを読み込んで描く。毎回立体を作り直さずに済み、色付きの目安の棒も重ねられる。`--preview` で色が出るか、速さが足りるかは要確認
+- 画像は、いったん作ったSTLを読み込んで描く。毎回立体を作り直さずに済み、色付きの目安の棒も重ねられる
 - ここのファイル名は作業用のフォルダの中の名前。Storageに置くときの名前は [data-model.md §3](data-model.md#3-cloud-storageのパス) に従う（`cover_preview.stl` → `designs/{designId}/cover.preview.stl`、`clip_preview.stl` → `c_clip_{角度}.preview.stl`、`print_cover.stl` → `print/cover.stl`、`print_clip_<角度>.stl` → `print/c_clip_{角度}.stl`）
-- 角度だけを変えたときは、`clip_preview.stl`・画像・`print_clip_<角度>.stl` だけ描き直す（カバーのSTLは前の版のものを使う）
+- ほかの取り付け具のクリップは `clip_<ID>_preview.stl`・`print_clip_<ID>_<角度>.stl`（Storageの名前は [api.md §3.4](api.md#34-post-v1casescase_iddesigns)）
+- 角度だけを変えたときも、カバー・クリップ・画像を描き直す（殻は使い回す）。カバーの入力が前の版と同じなら、カバーのプレビュー用STLの中身は前の版のものにする（§3.5）
 
 ### 6.4 確認用画像
 
-視点は手の座標（実際の手）で決める。右手と左手で x の向きが逆になるので、カメラの回転は生成APIが手の左右で切り替える。
+視点は手の座標（実際の手）で決める。作業用のフォルダでは `top`・`radial`・`front`・`iso` の順に描き、Storageには `views/top.png`・`side.png`（`radial`）・`front.png`・`iso.png` として置く（`pipeline.py` の `_upload_preview`）。右手と左手で x の向きが逆になるので、カメラの回転は生成APIが手の左右で切り替える。
 
-| 名前 | 視点（`--camera=0,0,0,回転x,回転y,回転z,0` と `--viewall --autocenter`） | 見たいこと |
+| 名前 | 視点（目の位置と見る点で `--camera` を渡し、`--viewall --autocenter`。目は殻の中心から350mm） | 見たいこと |
 |---|---|---|
 | `top.png` | 手の甲の側から（−z の向きから見下ろす） | カバーが手の甲を覆う範囲、空気穴・スリットの位置 |
-| `radial.png` | 人差し指の側（親指側）から | レール・クリップ・道具の向き、筆先と指先の位置 |
+| `radial.png`（Storageでは `views/side.png`） | 人差し指の側（親指側）から | レール・クリップ・道具の向き、筆先と指先の位置 |
 | `front.png` | 指先の側から、付け根の関節の山を見る | カバーが関節の山に沿っているか、手のひら側が開いているか |
 | `iso.png` | 斜め上（手の甲側・人差し指側）から | 全体の印象、ふちの丸み |
 
@@ -415,7 +426,7 @@ round = 0
 
 | 処理 | 目安 |
 |---|---|
-| 距離場（採寸の版ごとに1回） | 10〜40秒の見込み。くり抜きのスパイク（約140万点）で約12秒。殻の箱は大きいが、粗い格子で表面の近くだけに絞る（§6.2の手順2）。部品選び・寸法決めと並行させるので、待ち時間には一部だけ出る |
+| 距離場（採寸の版ごとに1回） | 10〜40秒の見込み。くり抜きのスパイク（約140万点）で約12秒。殻の箱は大きいが、粗い格子で表面の近くだけに絞る（§6.2の手順2）。寸法決めのあとに順に作るので、最初の生成の待ち時間にそのまま出る |
 | 殻の組み立て（`cover_shell.stl`、殻の引数が変わるたび） | 数秒の見込み（なめらかな最大とマーチングキューブだけ） |
 | カバーのプレビュー用STL（殻の読み込み＋スリット・空気穴・レール＋内側を守る立体を引く） | 5〜20秒の見込み（Manifold。殻の面の数で変わる） |
 | クリップのプレビュー用STL | 1〜3秒 |
@@ -426,10 +437,10 @@ round = 0
 
 ## 7. モックとテスト
 
-- `GEMINI_MODE=mock` のときは、`api/tests/fixtures/` に保存した応答を返す。画面の開発はこれで行い、クレジットを使わない
-- 決まった入力（採寸JSONと聞き取りの結果）を5パターン用意し、プロンプトを直すたびに流して、範囲チェックの違反数・確認の回数・トークン数を比べる。5パターンには、握りこぶし・少し曲がった手・右手と左手・筆とペンとスプーンを入れる
-- 範囲チェックとコマンドの組み立ては、Geminiなしの単体テストで確かめる
-- 殻の計算（§6.2）は、形の分かっている立体で単体テストにする：①半径20mmの球を「手」として、c＝1.5・t＝2.5の殻が、半径21.5〜24mmの層になる（±0.25mm）②手のひら側の面で切ったあと、切る面より手のひら側に頂点がない ③切り口のふちの丸みが、`edge_radius_mm` の±30%に入る（直角に交わる面で）④閉じた面で、体積が正（面が外向き）⑤箱からはみ出す長い円柱（指の代わり）でも内外が正しく塗れる（スパイクの落とし穴の再現）
-- 安全の検査（R6c・R6d・R6e）は、わざと違反する形（手のひらまで回り込んだ殻、手首まで伸びた殻、手に食い込む殻）を作って、必ず止まることを確かめる
-- 11/7のスパイクで作った手のメッシュ（MediaPipeの見本の手の画像から復元したもの）を `api/tests/fixtures/hand_sample.glb` に置き、カバーとクリップの1回目の生成までを通すテストに使う。握りこぶしのメッシュも11/8に1つ用意する（メンバーの手で撮り、メッシュだけを置く）。顔や個人が分かる画像は入れない
+- `GEMINI_MODE=mock` のときは、`api/app/gemini/mock.py` が、入力から決まった手順で本物と同じ形の答えを作る（録っておいた応答ではない）。画面の開発はこれで行い、クレジットを使わない。モックの答えも、`*_ja` の文は `clean_ja` を通す
+- 決まった入力を5パターン用意してプロンプトを直すたびに比べる仕組みは、作っていない（今後）
+- いまあるテスト（`api/tests/`）：生成APIの通し（`test_api_flow.py`。モックと仮の形の計算）、取り付け具（`test_attachments.py`）、クリップの固定STL（`test_cliplib.py`）、利用者に見せる文の掃除（`test_gemini_text.py`）、形の計算（`test_geometry.py`・`test_geometry_scad.py`。OpenSCADがなければ一部を飛ばす）
+- 殻の計算（§6.2）の単体テストは、いまは球の距離場と内側を守る立体の体積（`test_field_sphere_keepout_and_band_volume`）だけ。次の①〜⑤は今後：①半径20mmの球を「手」として、c＝1.5・t＝2.5の殻が、半径21.5〜24mmの層になる（±0.25mm）②手のひら側の面で切ったあと、切る面より手のひら側に頂点がない ③切り口のふちの丸みが、`edge_radius_mm` の±30%に入る（直角に交わる面で）④閉じた面で、体積が正（面が外向き）⑤箱からはみ出す長い円柱（指の代わり）でも内外が正しく塗れる（スパイクの落とし穴の再現）
+- 安全の検査は、わざと違反する形で R6c・R6d が不合格になることを確かめる（`test_checks_catch_palm_and_wrist_violations`）。クリップの開きの不足は `test_clip_opening_too_wide_is_caught`
+- テスト用の手のメッシュは `api/tests/fixtures/hand_raw_right.glb`（右手）と `hand_raw_fist.glb`（握りこぶし）。どちらも未補正のメッシュだけで、顔や個人が分かる画像は入れない
 - `GEMINI_MODE=mock` でも、距離場・殻の計算とOpenSCADは本物を動かす（形の検査を毎回通すため）
