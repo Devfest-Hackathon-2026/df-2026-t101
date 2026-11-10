@@ -92,10 +92,10 @@ class _CaptureScreenState extends State<CaptureScreen> {
     });
     try {
       final eng = MeasureEngine.instance;
-      // 画像認識の準備（MediaPipe など、初回は数秒）は待たずに裏で始め、動画を選ぶ画面はすぐ開く。
-      // iPhone の Safari は、押してすぐでないと選ぶ画面や動画の読み込みを許さないことがあり、準備を待っていた
-      // 1回目だけ「動画を選んでください」のまま止まった（2回目は準備が済んでいて動いた。2026-11-10）。
-      // 動画を選ぶ処理は準備を使わない。準備が要る1円玉の検出（autoCoin）は、準備の終わりを自分で待つ
+      // 画像認識の準備（MediaPipe など、初回は数秒）は待たずに裏で始め、動画を選ぶ画面はすぐ開く（押してから待たせないため）。
+      // 動画を選ぶ処理は準備を使わない。準備が要る1円玉の検出（autoCoin）は、準備の終わりを自分で待つ。
+      // （iPhone で1回目だけ「動画を選んでください」のまま止まった原因は、ここではなく、選んだ動画の読み込み
+      // （web_engine の loadVideoFile）だった。2026-11-10）
       eng.init().ignore();
       final r = await eng.pickVideo((stage, i, n) {
         if (gen != _pickGen || !mounted) return;
