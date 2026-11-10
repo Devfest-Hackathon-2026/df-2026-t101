@@ -121,6 +121,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final empty = _error == null && _cases != null && _cases!.isEmpty;
     return AppPage(
       title: 'Hand-Some-Fit',
+      titleWidget: Image.asset(
+        'assets/images/logo.png',
+        height: 40,
+        semanticLabel: 'Hand-Some-Fit',
+        filterQuality: FilterQuality.medium,
+      ),
       large: true,
       actions: [
         _AccountMenu(name: Session.instance.displayName),
