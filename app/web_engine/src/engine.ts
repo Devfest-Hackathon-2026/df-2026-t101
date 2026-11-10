@@ -205,7 +205,13 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
   try {
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
-    await new Promise<void>((res, rej) => { v.onloadeddata = () => res(); v.onerror = () => rej(new Error('動画を読めませんでした。カメラの設定を「互換性優先」にして撮り直してください。')); });
+    // 読み込めないまま待ち続けないよう、20秒で止める（2026-11-10。iPhone で「動画を選んでください」のまま止まったことがある）
+    await new Promise<void>((res, rej) => {
+      const fail = () => rej(new Error('動画を読めませんでした。カメラの設定を「互換性優先」にして撮り直してください。'));
+      const timer = window.setTimeout(fail, 20000);
+      v.onloadeddata = () => { window.clearTimeout(timer); res(); };
+      v.onerror = () => { window.clearTimeout(timer); fail(); };
+    });
     const dur = Math.min(v.duration || 0, MAX_SECONDS);
     const times: number[] = [];
     const fps = Math.min(SAMPLE_FPS, MAX_CANDIDATES / Math.max(1, dur));
