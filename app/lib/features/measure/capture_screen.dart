@@ -87,16 +87,16 @@ class _CaptureScreenState extends State<CaptureScreen> {
     final gen = ++_pickGen;
     setState(() {
       _busy = true;
-      _status = 'カメラを準備しています（初回は少し時間がかかります）';
+      _waitingPick = true;
+      _status = '動画を選んでください';
     });
     try {
       final eng = MeasureEngine.instance;
-      await eng.init();
-      if (gen != _pickGen || !mounted) return;
-      setState(() {
-        _waitingPick = true;
-        _status = '動画を選んでください';
-      });
+      // 画像認識の準備（MediaPipe など、初回は数秒）は待たずに裏で始め、動画を選ぶ画面はすぐ開く。
+      // iPhone の Safari は、押してすぐでないと選ぶ画面や動画の読み込みを許さないことがあり、準備を待っていた
+      // 1回目だけ「動画を選んでください」のまま止まった（2回目は準備が済んでいて動いた。2026-11-10）。
+      // 動画を選ぶ処理は準備を使わない。準備が要る1円玉の検出（autoCoin）は、準備の終わりを自分で待つ
+      eng.init().ignore();
       final r = await eng.pickVideo((stage, i, n) {
         if (gen != _pickGen || !mounted) return;
         setState(() {
