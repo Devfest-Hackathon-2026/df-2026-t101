@@ -75,13 +75,17 @@ function drawOverlay(c: Cam, landmarks?: { x: number; y: number }[]) {
   for (const p of P) { ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill(); }
 }
 
-function startPreview(c: Cam, hand: HandLandmarker) {
+// video：hand が VIDEO モードなら true（detectForVideo で前の画像の手を追いかける。時刻は前より大きくする）
+let lastVideoTs = 0;
+function startPreview(c: Cam, hand: HandLandmarker, video: boolean) {
   const tick = () => {
     if (!cam || cam !== c) return;
     if (c.video.readyState >= 2) {
       try {
         const small = makeCanvas(c.video, 480);
-        const r = hand.detect(small);
+        let r;
+        if (video) { lastVideoTs = Math.max(lastVideoTs + 1, Math.round(performance.now())); r = hand.detectForVideo(small, lastVideoTs); }
+        else r = hand.detect(small);
         const lm = r.landmarks.length === 1 ? r.landmarks[0] : undefined;
         c.status.hand = !!lm;
         if (lm) c.status.lastSeen = performance.now();
@@ -93,7 +97,7 @@ function startPreview(c: Cam, hand: HandLandmarker) {
   tick();
 }
 
-export async function startCamera(el: HTMLElement, hand: HandLandmarker) {
+export async function startCamera(el: HTMLElement, hand: HandLandmarker, tracking = false) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('このブラウザではカメラを使えません（HTTPSで開いているか確かめてください）');
   stopCamera();
   el.innerHTML = '';
@@ -118,7 +122,7 @@ export async function startCamera(el: HTMLElement, hand: HandLandmarker) {
     if (name === 'NotFoundError') throw new Error('カメラが見つかりませんでした');
     throw new Error(`カメラを開けませんでした（${e?.message ?? name}）`);
   }
-  startPreview(c, hand);
+  startPreview(c, hand, tracking);
   return { cameras: c.devices.length, label: c.devices[c.deviceIndex]?.label ?? '', width: video.videoWidth, height: video.videoHeight };
 }
 
