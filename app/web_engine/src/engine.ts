@@ -117,12 +117,10 @@ async function initOnce(): Promise<void> {
   startOpenCV();  // 待たない
 }
 
-// 撮影中の表示（骨組みと「手が見えています」）だけに使う検出器。解析の検出器（IMAGE・既定のしきい値）とは分ける。
-// VIDEO モードは一度見つけた手を次の画像で追いかけるので、手のひらが見えない「真上からの握りこぶし」でも途切れにくい。
-// 手が1つ見つかったら手のひらを探し直さないよう numHands は1、しきい値は0.3（2026-11-10。上から撮った握りこぶしの動画
-// IMG_0144 で、手が見えた割合が 30/60 → 44/60 枚。解析の結果には関係しない）
-let previewHandP: Promise<HandLandmarker> | undefined;
-function previewHand(): Promise<HandLandmarker> {
+// 手を追いかける検出器（VIDEO モード）。一度見つけた手を次の画像で追いかけるので、手のひらが見えない「真上からの握りこぶし」
+// でも途切れにくい。手が1つ見つかったら手のひらを探し直さないよう numHands は1、しきい値は0.3（2026-11-10）。
+// 撮影中の表示と、解析の手の点の両方に使う（それぞれ別の検出器。時刻と追いかける手を混ぜないため）
+function makeTrackingHand(): Promise<HandLandmarker> {
   const make = (delegate: 'GPU' | 'CPU') =>
     HandLandmarker.createFromOptions(st.vision!, {
       baseOptions: { modelAssetPath: base() + 'mediapipe/models/hand_landmarker.task', delegate },
@@ -132,7 +130,14 @@ function previewHand(): Promise<HandLandmarker> {
       minHandPresenceConfidence: 0.3,
       minTrackingConfidence: 0.3,
     });
-  previewHandP ??= make('GPU').catch(() => make('CPU')).catch((e) => { previewHandP = undefined; throw e; });
+  return make('GPU').catch(() => make('CPU'));
+}
+
+// 撮影中の表示（骨組みと「手が見えています」）の検出器。上から撮った握りこぶしの動画 IMG_0144 で、手が見えた割合が
+// 30/60 → 44/60 枚（0.18秒ごとの IMG_0150・0152・0153 では 39〜63% → 93〜100%）
+let previewHandP: Promise<HandLandmarker> | undefined;
+function previewHand(): Promise<HandLandmarker> {
+  previewHandP ??= makeTrackingHand().catch((e) => { previewHandP = undefined; throw e; });
   return previewHandP;
 }
 
@@ -377,9 +382,19 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   let prev = st.coinRef;
   let prevS: number | undefined;
   const n = st.frames.length;
+  // 手の点は、手を追いかける検出器でフレームを時間の順に調べて取る（2026-11-10）。1枚ずつ探す検出器（IMAGE・0.5）は、
+  // 手のひらが見えない握りこぶしを見落としやすく、IMG_0150・0152・0153 で使えるフレームが 5・2・7 枚しかなく、
+  // 手首→中指の付け根が 57〜74mm とばらついた（追いかけると 17・5・13 枚、75〜79mm）。解析のたびに作り直す
+  // （前の動画の手を追いかけないため）。作れなければ今までの検出器を使う。手は1つだけ追う（2つ目の手は見ない）
+  const tracker = await makeTrackingHand().catch(() => undefined);
+  let ts = 0;
   for (const [i, f] of st.frames.entries()) {
     progress?.('手の形を調べています', i + 1, n);
     await paint();
+    if (tracker) {
+      ts = Math.max(ts + 1, Math.round(f.t * 1000));  // st.frames は時間の順
+      try { f.det = tracker.detectForVideo(f.canvas, ts); } catch { /* だめなら下で今までの検出器を使う */ }
+    }
     const r = detectHand(f);
     if (!r.landmarks.length) { f.reject = 'NO_HAND'; continue; }
     if (r.landmarks.length > 1) { f.reject = 'MULTIPLE_HANDS'; continue; }
@@ -405,6 +420,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     if (w.length === 21) f.side = w[5].z < w[17].z ? 'thumb_side' : 'pinky_side';
     perFrame(f);
   }
+  tracker?.close();
   progress?.('まとめています', n, n);
   const ok = st.frames.filter((f) => f.s);
   if (!ok.length) {
