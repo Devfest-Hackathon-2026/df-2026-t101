@@ -162,7 +162,7 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
                   ),
                 ),
                 // カメラは残りの場所いっぱいに広げる（スクロールさせない。撮り方の説明は前の画面にある）。
-                // 映像は切らずに収める（object-fit: contain）ので、写っている範囲がそのまま撮れる範囲
+                // 映像は枠いっぱいに広げる（object-fit: cover。web_engine/src/camera.ts）。はみ出た端は見えないが撮れている
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
