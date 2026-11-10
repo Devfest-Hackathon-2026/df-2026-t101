@@ -40,7 +40,7 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
       setState(() {
         _ready = true;
         _cameras = (r['cameras'] as num?)?.toInt() ?? 1;
-        _status = '1円玉を手の甲に置き、こぶし全体が画面に入るように構えてください';
+        _status = '1円玉を手の甲に置き、こぶし全体を画面に入れてください';
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -105,8 +105,8 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
         ? (_Tone.error, _error!)
         : _recording
         ? (_handVisible
-              ? (_Tone.success, '手が見えています。手は動かさずに、スマホをこぶしのまわりでゆっくり半周させてください。')
-              : (_Tone.warning, '手が見えません。こぶし全体が画面に入るようにしてください。'))
+              ? (_Tone.success, '手が見えています。スマホをゆっくり半周させてください')
+              : (_Tone.warning, '手が見えません。こぶし全体を画面に入れてください'))
         : (_Tone.info, _status);
 
     return Scaffold(
@@ -114,7 +114,8 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: AppPage.maxWidth),
+            // PCの横長のWebカメラも大きく映すため、ほかの画面（720）より広くする
+            constraints: const BoxConstraints(maxWidth: 1200),
             child: Column(
               children: [
                 // 上：閉じる・録画中の札・残り秒数
@@ -160,62 +161,46 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
                     ],
                   ),
                 ),
+                // カメラは残りの場所いっぱいに広げる（スクロールさせない。撮り方の説明は前の画面にある）。
+                // 映像は切らずに収める（object-fit: contain）ので、写っている範囲がそのまま撮れる範囲
                 Expanded(
-                  // ListView だと、下まで送ったときにカメラの部品が作り直されるので使わない
-                  child: SingleChildScrollView(
+                  child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(28),
+                      child: ColoredBox(
+                        color: AppColors.inverseSurface,
+                        child: SizedBox.expand(
+                          child: HtmlElementView.fromTagName(
+                            tagName: 'div',
+                            onElementCreated: (Object el) {
+                              final div = el as web.HTMLDivElement;
+                              div.style.width = '100%';
+                              div.style.height = '100%';
+                              unawaited(_open(div));
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // 手が見えているか・進み具合の棒。文が変わってもカメラの大きさが変わらないよう、高さをとっておく
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 88),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Center(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxHeight: MediaQuery.sizeOf(context).height * 0.62,
-                            ),
-                            child: AspectRatio(
-                              aspectRatio: 3 / 4,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(28),
-                                child: ColoredBox(
-                                  color: AppColors.inverseSurface,
-                                  child: HtmlElementView.fromTagName(
-                                    tagName: 'div',
-                                    onElementCreated: (Object el) {
-                                      final div = el as web.HTMLDivElement;
-                                      div.style.width = '100%';
-                                      div.style.height = '100%';
-                                      unawaited(_open(div));
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        // 手が見えているか・進み具合の棒
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-                          child: Column(
-                            children: [
-                              _StatusChip(tone: statusTone, text: statusText),
-                              if (_recording) ...[
-                                const SizedBox(height: 12),
-                                LinearProgressIndicator(value: _sec / maxSec),
-                              ],
-                            ],
-                          ),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(0, 8, 0, 16),
-                          child: InfoCard(
-                            icon: Icons.info_outline_rounded,
-                            child: Text(
-                              'いつもの握った形のまま、手の甲を上にしてこぶしを置きます。指を無理に開かないでください。'
-                              '1円玉は手の甲のまん中（手首と指の付け根の間）に平らに置きます。'
-                              '手は動かさずに、スマホのほうを親指側から手の甲の上、小指側へと、こぶしのまわりを半周させます。途中でこぶしの前（指の背と関節の出っ張り）が写る所も通ります。こぶし全体がいつも画面に入るようにします。'
-                              '家族や支援者に撮ってもらってもかまいません。',
-                            ),
-                          ),
+                        _StatusChip(tone: statusTone, text: statusText),
+                        const SizedBox(height: 10),
+                        Visibility(
+                          visible: _recording,
+                          maintainSize: true,
+                          maintainAnimation: true,
+                          maintainState: true,
+                          child: LinearProgressIndicator(value: _sec / maxSec),
                         ),
                       ],
                     ),
