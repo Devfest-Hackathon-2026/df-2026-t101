@@ -117,6 +117,25 @@ async function initOnce(): Promise<void> {
   startOpenCV();  // 待たない
 }
 
+// 撮影中の表示（骨組みと「手が見えています」）だけに使う検出器。解析の検出器（IMAGE・既定のしきい値）とは分ける。
+// VIDEO モードは一度見つけた手を次の画像で追いかけるので、手のひらが見えない「真上からの握りこぶし」でも途切れにくい。
+// 手が1つ見つかったら手のひらを探し直さないよう numHands は1、しきい値は0.3（2026-11-10。上から撮った握りこぶしの動画
+// IMG_0144 で、手が見えた割合が 30/60 → 44/60 枚。解析の結果には関係しない）
+let previewHandP: Promise<HandLandmarker> | undefined;
+function previewHand(): Promise<HandLandmarker> {
+  const make = (delegate: 'GPU' | 'CPU') =>
+    HandLandmarker.createFromOptions(st.vision!, {
+      baseOptions: { modelAssetPath: base() + 'mediapipe/models/hand_landmarker.task', delegate },
+      runningMode: 'VIDEO',
+      numHands: 1,
+      minHandDetectionConfidence: 0.3,
+      minHandPresenceConfidence: 0.3,
+      minTrackingConfidence: 0.3,
+    });
+  previewHandP ??= make('GPU').catch(() => make('CPU')).catch((e) => { previewHandP = undefined; throw e; });
+  return previewHandP;
+}
+
 function pickFile(accept: string): Promise<File[]> {
   return new Promise((resolve) => {
     let done = false;
@@ -645,7 +664,9 @@ const api = {
   /** アプリの中でカメラを開く（スマホは背面、PCはWebカメラ）。el は映像を出す要素 */
   async startCamera(el: HTMLElement) {
     await init();
-    return JSON.stringify(await Cam.startCamera(el, st.hand!));
+    // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
+    const ph = await previewHand().catch(() => undefined);
+    return JSON.stringify(await Cam.startCamera(el, ph ?? st.hand!, !!ph));
   },
   async switchCamera() { return JSON.stringify(await Cam.switchCamera()); },
   /** 録画する。maxSec 秒か stopRecording で終わる。終わったら最初のフレームを返す */
