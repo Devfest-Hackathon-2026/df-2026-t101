@@ -28,7 +28,7 @@
 
 ## 設計で大事にしたこと
 
-- **AI に形をまるごと作らせない**：Gemini が出すのは「どの部品を、どの寸法・角度で使うか」の JSON だけです。形は人が作って試し刷りした OpenSCAD の部品から組み立て、範囲チェックと、描いたあとの自動の検査（手のひら側が開いているか、手首を覆っていないか、厚み、角の丸み、クリップの開き）を通します。生成 AI で形を作ると寸法を保証できないことが、先行研究（ASSETS 2025）でも中心的な課題でした
+- **AI に形をまるごと作らせない**：Gemini が出すのは「どの部品を、どの寸法・角度で使うか」の JSON だけです。形は、手の 3D から作るカバーの殻と、人が作った OpenSCAD の部品から組み立てます。寸法は範囲チェック（厚みや角の丸みの下限など）を通し、描いたあとに自動の検査（手のひら側が開いているか、手首を覆っていないか、手に食い込まないか、ベルトの穴がふさがれていないか、クリップの開きと道具の通り道）をかけます。生成 AI で形を作ると寸法を保証できないことが、先行研究（ASSETS 2025）でも中心的な課題でした
 - **装具にしない**：カバーは手のひら側を開け、手首を覆わず、握った指を無理に開かせません。作れない依頼（指を伸ばす・固定する装具など）は理由を示して断ります
 - **手の映像を外に出さない**：手の点は MediaPipe でブラウザの中で取ります。動画はサーバーに送らず、保存もしません。手の 3D を作るためだけに、同意を得て、手を切り抜いた画像を最大 8 枚送り、保存しません。Gemini に渡すのは数値・文と、作った形を描いた画像だけです
 - **最後は人が確かめる**：通常の手順では、OT の確認が済むまで印刷用 STL を読めないことを、Firebase のルールで守っています
@@ -78,20 +78,30 @@ flutter run -d chrome --dart-define=MOCK_API=true
 
 - 画面と Firebase Hosting へのデプロイ：[app/README.md](app/README.md)
 - 手の 3D 復元（Cloud Run GPU）：[hand_mesh/README.md](hand_mesh/README.md)
-- 生成 API（Cloud Run）：[deploy/cloudbuild.api.yaml](deploy/cloudbuild.api.yaml)、手元で動かす手順は [docs/notes/prototype-lessons.md](docs/notes/prototype-lessons.md)
+- 生成 API（Cloud Run）：[deploy/cloudbuild.api.yaml](deploy/cloudbuild.api.yaml)
 
 Firebase の設定は [env/example.json](env/example.json) を写して値を入れます（本物はコミットしません）。
+
+生成 API を手元で動かすときは、Gemini をモックにし、データを手元のフォルダに置けます（OpenSCAD が要ります）。
+
+```sh
+cd api
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+AUTH_MODE=dev STORE_BACKEND=local GEMINI_MODE=mock OPENSCAD_BIN=<openscad のパス> \
+  .venv/bin/python -m uvicorn app.main:app --port 8080
+```
 
 ### テスト
 
 ```sh
-cd app && flutter test
-cd api && python -m pytest
+(cd app && flutter test)
+(cd api && .venv/bin/python -m pytest)   # 先に上の手順で api/.venv を作っておく
 ```
 
 ## 今できていること・まだのこと
 
 - 確かめたのは、チームのメンバーの手だけです。指が握った形で固まった方と作業療法士による評価は、まだしていません
+- 11/9 に、前の版の 3D モデルで刷ったカバーが、メンバーのこぶしに合うことを確かめました（その後に直した今の版では、まだ刷っていません）。すき間やしめしろの値は仮のままです
 - 採寸の大きさの補正係数は、メンバーの手での仮の値です
 - クリップを作れるのは丸い柄の道具だけです（平たい柄は今後）
 
@@ -104,4 +114,5 @@ cd api && python -m pytest
 このリポジトリのコードは [MIT License](LICENSE) です。ただし次のものは、それぞれのライセンスに従います。
 
 - `hand_mesh/vendor/sam-3d-body/`：SAM 3D Body（Meta、SAM License）。重みはリポジトリに入れていません
+- `scad/vendor/BOSL2/`：BOSL2（BSD-2-Clause）
 - MHR（Meta、Apache-2.0）、MediaPipe（Apache-2.0）、OpenCV.js（Apache-2.0）、three.js（MIT）、OpenSCAD（GPL-2.0。生成 API のコンテナの中でコマンドとして動かします）

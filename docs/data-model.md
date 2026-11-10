@@ -14,7 +14,7 @@
 | 項目 | 決めたこと | 理由 |
 |---|---|---|
 | Firestore | `(default)` データベース、asia-northeast1（東京） | 無料枠が付くのは1プロジェクト1データベースだけ。利用者の近くに置く |
-| Cloud Storage | 既定のバケット `<project>.firebasestorage.app`、asia-northeast1 | 健康に関わるデータを国内に置く。東京のバケットには無料枠がないが、保存するのは数十MB程度なので、料金は月$0.01未満の見込み（$0.023/GiB月） |
+| Cloud Storage | バケット `jijogu-hackathon-2026-data`（`firebase.json` のStorageと、両サービスの `STORAGE_BUCKET`）、asia-northeast1 | 健康に関わるデータを国内に置く。東京のバケットには無料枠がないが、保存するのは数十MB程度なので、料金は月$0.01未満の見込み（$0.023/GiB月） |
 | プラン | Blaze（従量課金）。配布クレジットを紐づける | 2026-02-03から、Cloud Storage for Firebaseを使うにはBlazeが必須 |
 
 ## 2. Firestoreのコレクション
@@ -68,6 +68,7 @@ settings/filaments
 | `measurement_id` | string | 最新の採寸のID（保存のたびに新しく作る。例：`m_02`）。実寸の手のメッシュのファイル名にも使う |
 | `hand_model` | map | 生成APIが作った手のモデル：実寸の手のメッシュのパス（`mesh_path`）、倍率（`scale_factor`、`scale_source`、`scale_spread_ratio`）、実寸の関節の位置（`joints_mm`）、カバーの目印（`cover_landmarks`：手のひら側を切る面の基準、手首→中指の付け根の長さ、レールの位置と向き、スリットを置ける範囲。[api.md §3.3](api.md#33-put-v1casescase_idmeasurement)）。メッシュそのものはStorageに置き、ここには入れない（Firestoreの1ドキュメントは1MiBまでのため） |
 | `measured_at` | timestamp | 採寸を保存した日時 |
+| `baseline` | array<map> | 部品の基準値 `{ part_id, name, value, source }`（`PUT measurement` が作る。[api.md §3.3](api.md#33-put-v1casescase_idmeasurement)）。形を作るときの範囲チェックの基準になる |
 | `current_design_id` | string | 最新の版 |
 | `active_operation` | map / null | `{ operation_id, kind, started_at, expires_at }`。`kind` は `design`／`refine`／`review_request`／`prepare_print`／`approval`。生成・微調整・依頼・デモの印刷用データ・承認の処理中の印。`expires_at` は開始から300秒。[api.md §1.1](api.md#11-生成の重複防止と異常終了からの復旧mvp) |
 | `reviewer_email` | string | 確認を頼んだOT（小文字） |
@@ -88,13 +89,17 @@ settings/filaments
 |---|---|---|
 | `revision` | number | 1から始まる版の番号 |
 | `parent_design_id` | string | 直す元にした版（最初の版は空） |
-| `origin` | string | `initial` ／ `refine_text` ／ `refine_params` ／ `refine_clip_angle` ／ `refine_tool_d`（取り付け具の柄の太さの直し）／ `refine_add_attachment`（取り付け具を足す）／ `refine_style` |
-| `status` | string | `queued` → `running` → `ready` ／ `needs_attention` ／ `failed` |
-| `progress` | map | `{ step, round, max_rounds, message_ja }`。`step` は `selecting`／`dimensioning`／`shelling`（カバーの殻の計算）／`rendering`／`reviewing`。画面の進み具合の表示に使う |
+| `origin` | string | `initial` ／ `refine_text` ／ `refine_params` ／ `refine_clip_angle` ／ `refine_tool_d`（取り付け具の柄の太さの直し）／ `refine_add_attachment`（取り付け具を足す）。色だけの変更は版を作らないので、`refine_style` はない |
+| `status` | string | `running` → `ready` ／ `needs_attention` ／ `failed`（`queued` は使っていない。版は `running` で作る） |
+| `progress` | map | `{ step, round, max_rounds, message_ja }`。`step` は `selecting`／`dimensioning`／`shelling`（カバーの殻の計算と描画）／`rendering`（確認のあとの描き直し）／`reviewing`／`done`。画面の進み具合の表示に使う |
 | `parts` | array<map> | 部品選びの結果 `{ part_id, variant, reason_ja }` |
 | `params` | array<map> | 引数の一覧 `{ part_id, name, value, unit, range, baseline, source, reason_ja, clamped, override_by_user }` |
 | `review` | map | `{ rounds: [ { round, verdict, checks, issues, changes } ], final_verdict, unresolved_issues }` |
-| `warnings` | array<string> | 範囲チェックと採寸の警告 |
+| `warnings` | array<string> | 採寸と手のモデルの警告（`MESH_SCALE_INCONSISTENT` など） |
+| `clamped` | array<map> | 自動で直した引数 `{ part_id, name, from, to, rule }`（取り付け具の分は `attachment_id` つき）。OT画面で「AIの値を自動で直しました」と目立たせる |
+| `checks` | array<map> | 描いたあとの検査（R6）の結果 `{ rule, ok, value, message_ja, fix_hint, severity }`（主なクリップとカバーの分） |
+| `hand_overlay` | map | `{ mesh_path, frame: "hand" }`。S7で重ねる実寸の手のメッシュ |
+| `summary_ja` | string | この形にした理由（寸法決めの `summary_ja`、言葉の直しなら `refine` の `message_ja`） |
 | `style` | map | `{ color, pattern }`。色だけの変更は、版を作らずにここだけ書き換える（`geometry_hash` に色は入らない） |
 | `files` | map | Storageのパス（§3）。`{ parts: { cover: { preview_stl }, c_clip: { preview_stl }, tpu_sleeve: { preview_stl } }, views: { front, side, top, iso }, print: { cover, c_clip, c_clip_a2, …, tpu_sleeve } }`。`print` は読める場所にできたときだけ入る。取り付け具ごとに1つで、キーは `attachments[i].print_key`、ファイル名はプレビューと同じ元に `.stl`（1つだけなら `c_clip_{角度}.stl`）。部品ごとに分けるのは、カバーとクリップを別々に刷り（材料・向きが違う）、角度違いのクリップだけを刷り直せるようにするため |
 | `approval` | map | `{ status: none ／ requested ／ approved ／ rejected, reviewer_email, requested_at, decided_at, comment_ja, checklist, geometry_hash, print_sha256 }`（`print_sha256` は部品ごとの map）。確認対象のハッシュと印刷ファイルのハッシュを承認に結び付ける |
@@ -102,16 +107,17 @@ settings/filaments
 | `hand_measurement_id` | string | この版が使った採寸のID。実寸の手のメッシュ `cases/{caseId}/hand/{hand_measurement_id}.glb` を指す |
 | `scale_factor` | number | この版が使った倍率 k（未補正のメッシュ → 実寸） |
 | `hand_clearance_mm` | number | この版のカバーとこぶしのすき間（`HAND_CLEARANCE_MM`。フェルトの厚みを含む。11/9に値を変えても、前の版を同じ形で描き直せるよう記録する） |
-| `cover_shell_sha256` | string | カバーの殻（`cover_shell.stl`）のSHA-256。ファイルは採寸の版ごとのフォルダ `internal/cases/{caseId}/cover/{measurementId}/` の下（殻は `shell/<殻の引数のハッシュ24桁>`、内側を守る立体は `keepout/c{c}`、距離場は `sdf`）。採寸の版と、殻を決める引数が同じ版では同じ値になる |
+| `cover_shell_sha256` | string | カバーの殻（`cover_shell.stl`）のSHA-256。ファイルは採寸の版ごとのフォルダ `internal/cases/{caseId}/cover/{measurementId}/` の下（殻は `shell/<殻の引数のハッシュ24桁>`、内側を守る立体は `keepout/<メッシュのSHA-256の先頭16桁>_c<c を小数2桁>`、距離場は `sdf`）。採寸の版と、殻を決める引数が同じ版では同じ値になる |
 | `clip_angle_deg` | number | C字クリップの角度（道具の立て具合。60／70／80。2026-11-08 に 0／20／40 から変えた）。角度だけを変えた版は、カバーのファイルを前の版と共有する |
 | `tool` | map | 道具の軸（実際の手の座標、mm）：`center`（クリップの輪の中心）、`axis`（先の向き。単位ベクトル）、`tip_mm`（先までの長さ、100）、`rear_mm`（後ろまで、50）、`diameter_mm`。S7の3D表示はこの値で道具の棒を描く（クリップの形から推定しない。2026-11-08） |
-| `clip` | map | 使ったクリップ：`source`（`library`＝先に作っておいた固定STL、`generated`＝その場で描いた）、`variant`（例 `c_clip_d0850_a20`）、`tool_d_mm`（刻みに丸めた太さ）、`angle_deg`（[ADR-0012](adr/0012-c-clip-dovetail.md) の 4.、2026-11-08） |
+| `clip` | map | 使ったクリップ：`source`（`library`＝先に作っておいた固定STL、`generated`＝その場で描いた）、`variant`（例 `c_clip_d0850_a70`）、`tool_d_mm`（刻みに丸めた太さ）、`angle_deg`（[ADR-0012](adr/0012-c-clip-dovetail.md) の 4.、2026-11-08） |
 | `attachments` | array<map> | 取り付け具（道具ごとのC字クリップ）の一覧。1〜4個で、`attachments[0]` が主な取り付け具（[ADR-0014](adr/0014-multiple-attachments.md)）。1つの要素は `{ id, tool_index, tool_type, activity, tool_d_mm, tool_d_source, angle_deg, angle_source, reason_ja, primary, print_key, files: { preview_stl }, tool, clip, checks }`。`id` は `a1`・`a2`…（`requirements.tools` の何番目か＋1）。`print_key` は印刷用のファイルの地図のキー（主は `c_clip`、ほかは `c_clip_a2`。Firestore の地図のキーなので `.`・`:` を使わない）。`tool`・`clip` は上の `tool`・`clip` と同じ形、`checks` はそのクリップの R6f・R6h の結果。主な取り付け具の値は、今までの項目（`params` の `c_clip`、`clip_angle_deg`、`clip`、`tool`、`files.parts.c_clip`）と同じ。平たい柄の道具と、作れなかった取り付け具は入らない（`review.unresolved_issues` で知らせる）。2026-11-09 より前の版にはない |
-| `print_prepared_at` / `print_sha256` | timestamp / map | 印刷用STLを作った日時と、部品ごとのファイルのSHA-256 |
+| `print_prepared_at` / `print_sha256` | timestamp / map | 印刷用STLを作った日時（デモの `prepare-print` のときだけ）と、部品ごとのファイルのSHA-256 |
+| `print_internal` | map | OTに頼んだときに作った `internal/` の印刷用STLのパス（部品のキー → パス）。承認のときに、ここから `print/` へコピーする |
 | `input_snapshot` | map | その版の採寸・要件・手のモデル。ケースの現在値が変わっても書き換えない |
 | `model` | map | `{ id, location }` |
-| `prompt_versions` | map | 例：`{ select: "v3", dimension: "v5", review: "v2" }` |
-| `usage` | map | `{ input_tokens, output_tokens, gemini_calls, openscad_ms }` |
+| `prompt_versions` | map | 例（11/10 時点）：`{ system: "v2", interview: "v1", select: "v1", dimension: "v3", attachment: "v2", review: "v1", refine: "v1" }` |
+| `usage` | map | `{ input_tokens, output_tokens, gemini_calls, models, openscad_ms }`。`models` は呼び出しの種類ごとに実際に答えたモデル（予備に切り替えたかが分かる） |
 | `error` | map | 失敗したときのエラー（[api.md §5](api.md#5-エラー)と同じ形） |
 | `created_at` | timestamp | — |
 
@@ -151,21 +157,21 @@ cases/{caseId}/designs/{designId}/cover.preview.stl          … カバー本体
 cases/{caseId}/designs/{designId}/c_clip_{angle}.preview.stl … C字クリップのプレビュー用（レールに差し込んだ位置。angle は 60／70／80）。取り付け具が2つ以上の版は c_clip_{tool}_{angle}.preview.stl（同じ道具が2つなら _d0900 のように太さを足す。ADR-0014）
 cases/{caseId}/designs/{designId}/tpu_sleeve.preview.stl     … TPUの筒（選んだときだけ）
 cases/{caseId}/designs/{designId}/views/front.png  … 確認用画像（768×768。手のメッシュ・カバー・クリップ・道具の棒を重ねたもの）
-cases/{caseId}/designs/{designId}/views/side.png
+cases/{caseId}/designs/{designId}/views/side.png   … 人差し指の側（親指側）から見たもの（作業用のフォルダでは radial.png）
 cases/{caseId}/designs/{designId}/views/top.png
 cases/{caseId}/designs/{designId}/views/iso.png
-cases/{caseId}/designs/{designId}/print/cover.stl           … 印刷用（刷る向きに置き直したもの、円の分割128）。承認のときに internal/ からコピーする。デモのケースは prepare-print で直接ここに作る
+cases/{caseId}/designs/{designId}/print/cover.stl           … 印刷用（刷る向きに置き直したもの、円の分割128）。承認のときに internal/ からコピーする。デモのケースは prepare-print で internal/ に作ってすぐコピーする
 cases/{caseId}/designs/{designId}/print/c_clip_{angle}.stl      … 取り付け具が2つ以上のときは c_clip_{道具}_{角度}.stl を取り付け具の数だけ
 cases/{caseId}/designs/{designId}/print/tpu_sleeve.stl
 cases/{caseId}/hand/{measurementId}.glb            … 実寸の手のメッシュ（手の座標系、mm）。PUT measurement のときに生成APIが書く
 cases/{caseId}/hand/raw/{meshId}.glb               … 未補正の手のメッシュ（hand-mesh が書く。関節の位置を extras.joints_mm に入れる）。だれも読めない
 internal/cases/{caseId}/designs/{designId}/print/*.stl … OTに頼むときに作る部品ごとの印刷用STL。承認まで、だれも読めない
-internal/cases/{caseId}/cover/{coverShellSha256}.stl       … カバーの殻。同じ採寸の版・同じ殻の引数の版で使い回す。だれも読めない
-internal/cases/{caseId}/cover/{measurementId}/keepout/c{c}.stl … 内側を守る立体（手を HAND_CLEARANCE_MM だけ広げたもの。レールの土台が内側へ出ないよう、最後に引く）。採寸の版ごとに1つ。だれも読めない
+internal/cases/{caseId}/cover/{measurementId}/shell/{殻の引数のハッシュ24桁}   … カバーの殻（STL）。同じ採寸の版・同じ殻の引数の版で使い回す。だれも読めない
+internal/cases/{caseId}/cover/{measurementId}/keepout/{メッシュのSHA-256の先頭16桁}_c{c を小数2桁} … 内側を守る立体（STL）（手を HAND_CLEARANCE_MM だけ広げたもの。レールの土台が内側へ出ないよう、最後に引く）。採寸の版ごとに1つ。だれも読めない
 internal/cases/{caseId}/cover/{measurementId}/sdf             … 手のメッシュの符号付き距離場（圧縮して数MBの見込み。要確認）。殻を組み立て直すときに使い回す。採寸の版ごとに1つ。だれも読めない
 ```
 
-- 前の版の `internal/cases/{caseId}/cavity/`（握りからくり抜く立体）はなくした。握りをやめ、カバー方式にしたため（[ADR-0011](adr/0011-dorsal-cover.md)）。手を広げた立体を作る仕組みは、内側を守る立体（`.guard.stl`）として残る
+- 前の版の `internal/cases/{caseId}/cavity/`（握りからくり抜く立体）はなくした。握りをやめ、カバー方式にしたため（[ADR-0011](adr/0011-dorsal-cover.md)）。手を広げた立体を作る仕組みは、内側を守る立体（上の `keepout/…`。作業用のフォルダでは `cover_keepout.stl`）として残る
 - 書き込むのは生成APIと、`hand-mesh`（`cases/{caseId}/hand/raw/` だけ）。どちらもサーバーの権限で書くので、ルールは関係しない
 - 手のメッシュの大きさは1ファイル数百KBの見込み（細分割1回で約9,000頂点。要確認）。数十ケースでも、料金は今の見込み（月$0.01未満）からほとんど変わらない
 - 未補正のメッシュをブラウザから読めなくするのは、生成APIが倍率を掛けて実寸にする前の値を、画面や他の人が使わないようにするため。生成APIは、結果トークンの `mesh_sha256` とファイルのハッシュが一致することを確かめてから使う（[api.md §3.3](api.md#33-put-v1casescase_idmeasurement)）

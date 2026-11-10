@@ -1,5 +1,7 @@
 # 取り付け具を複数持たせる 実装計画
 
+> **状態（2026-11-10）**：実装済み（2026-11-09）。チェックボックスは更新していない。画面側のパス（`app/lib/data/*`・`app/lib/screens/*`）は、そのあと `app/lib/core/*`・`app/lib/features/*` に移った（例：`core/models/attachments.dart`、`features/interview/interview_screen.dart`）。プロンプトは、計画の `dimension.v2`・`attachment.v1` のあと、2026-11-10 に `dimension.v3`・`attachment.v2`・`system.v2` に上げた（理由の文に項目名を書かせない）。決めたことは [ADR-0014](../adr/0014-multiple-attachments.md) を正とする。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 1つの版（カバー1つ）に道具ごとのC字クリップを複数持たせ、聞き取りで道具を複数選べ、できあがった版にもあとから足せる・直せるようにする。

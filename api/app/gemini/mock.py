@@ -50,7 +50,10 @@ def dimension(requirements: dict, param_defs: list, attachments: list | None = N
         src, why = d.get("source") or "default", "基準値のままにしました"
         if d["part_id"] == "c_clip" and d["name"] == "angle_deg":
             v = ANGLE_BY_TOOL.get(requirements.get("tool_type"), 20)
-            src, why = "ai", f"道具（{requirements.get('tool_type')}）とやりたいこと（{requirements.get('activity')}）から {v} 度にしました"
+            # 利用者に見せる文なので、英語の値（brush・draw など）は書かない（2026-11-10）
+            tool_ja = TOOL_JA.get(requirements.get("tool_type"), "道具")
+            act_ja = {"draw": "絵を描く", "write": "字を書く", "eat": "食べる"}.get(requirements.get("activity"))
+            src, why = "ai", (f"{tool_ja}で{act_ja}ので、{v}度にしました" if act_ja else f"{tool_ja}に合わせて{v}度にしました")
         if d["part_id"] == "c_clip" and d["name"] == "opening_ratio" and requirements.get("donning_by") == "helper":
             src, why = "ai", "家族や支援者が着け外しするので、押し込みやすさを優先しました"
         out.append({"part_id": d["part_id"], "name": d["name"], "value": v, "source": src, "reason_ja": why})

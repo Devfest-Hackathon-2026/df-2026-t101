@@ -20,7 +20,7 @@
 | 形式 | `Content-Type: application/json; charset=utf-8`。キーはスネークケース |
 | 単位 | 寸法はmm、角度は度。キーの末尾に `_mm`、`_deg` を付ける |
 | リクエストID | すべての応答に `X-Request-Id` を付ける。ログと突き合わせるため |
-| タイムアウト | Cloud Runのリクエストのタイムアウトは300秒。生成APIの中では280秒で打ち切る |
+| タイムアウト | Cloud Runのリクエストのタイムアウトは300秒。生成・微調整（`POST designs`・`refine`）は、生成APIの中で280秒（`REQUEST_TIMEOUT_S`）を期限にする（§1.1）。1回のGeminiの呼び出しは45秒、1回のOpenSCADは60秒で打ち切る |
 | 回数の制限 | 1人1日あたり：生成10回、微調整30回、聞き取り60回。全体で1日あたり生成100回。上限は環境変数で変えられる。超えたら `RATE_LIMITED` |
 | 生成の停止スイッチ | Geminiを呼ぶ処理と `hand-mesh` は、毎回共通の `settings/runtime.generation_enabled` を読む。`false`、設定なし、読み取り失敗なら `GENERATION_DISABLED`。両サービスの `GENERATION_ENABLED=false` でも停止する。全体を止める操作はFirestoreの共通設定を `false` にする（片方の環境変数だけでは他方は止まらない） |
 
@@ -30,10 +30,10 @@
 
 - 生成・微調整・OTへの依頼・承認を始めるとき、Firestoreのトランザクションで、ケースに処理中の印 `active_operation = { operation_id, kind, started_at, expires_at }` を書く。`expires_at` は開始から300秒（Cloud Runのタイムアウトと同じ）
 - 有効な印（`expires_at` が未来）があるあいだ、同じケースの生成・微調整・依頼・承認と、採寸・聞き取りの保存は `409 CONFLICT`。画面は送信中ボタンを押せなくし、二重の送信を防ぐ
-- 処理の中では280秒で打ち切る（Geminiの呼び出しとOpenSCADの子プロセスを止め、`GENERATION_TIMEOUT` を記録する）
+- 生成・微調整の中では、工程の合間（部品選び・寸法決め・描画・確認のあいだ）に280秒の期限を確かめ、過ぎていたら `GENERATION_TIMEOUT` で止めて版を `failed` にする。動いているGeminiの呼び出しやOpenSCADの子プロセスを途中で止める仕組みはない（それぞれ45秒・60秒で打ち切る）。画像での確認は、残りが100秒を切っていたら行わずに `needs_attention` で終える。OTへの依頼・デモの印刷用データ・承認には、この期限はない（Cloud Runの300秒と、処理中の印の300秒だけ）
 - 結果（進み具合、版の状態、ファイルの参照）を書くときは、トランザクションで `active_operation.operation_id` が自分のものかを確かめる。違えば（期限切れで回収されたあとなら）書かずに終える。終わったら印を消す
 - 期限切れの回収：新しい処理を始めるとき、または `POST /recover` を呼んだときに、`expires_at` を過ぎた印があれば、印を消し、`kind` ごとに次のように戻す
-  - 生成・微調整（`design`／`refine`）：処理中の版を `failed`（`GENERATION_INTERRUPTED`）にし、ケースを `previewing` に戻す
+  - 生成・微調整（`design`／`refine`）：処理中の版を `failed`（`GENERATION_INTERRUPTED`）にし、ケースを `previewing` に戻す（ケースに `current_design_id` がなければ `designing`）
   - OTへの依頼（`review_request`）・デモの印刷用データ（`prepare_print`）：版は変えない。`internal/` の作りかけの印刷用STLを捨て、`approval.status` を `none` に戻す（ケースは `previewing`）
   - 承認（`approval`）：版は変えない。`approval.status=requested` のまま（OTはもう一度押せる）
 - 通信が切れたときは、画面はまずFirestoreの版の状態を読む。処理が続いていれば待ち、`failed` になっていれば「もう一度作る」を出す（勝手に再送しない）
@@ -48,12 +48,15 @@
 
 | メソッド | パス | 役割 | 呼べる人 |
 |---|---|---|---|
-| GET | `/healthz` | 動作確認 | 誰でも（認証なし） |
+| GET | `/health`（`/healthz` も同じ） | 動作確認。Cloud Runでは `/healthz` をGoogle側が受けてしまうので、本番は `/health` を使う | 誰でも（認証なし） |
 | GET | `/v1/parts` | 部品カタログ（`scad/catalog.json` の公開部分） | ログインした人 |
 | POST | `/v1/cases` | ケース（1つの道具づくり）を作る | ログインした人 |
+| GET | `/v1/cases` | 自分のケースの一覧（新しい順。S1） | ログインした人 |
+| GET | `/v1/cases/{case_id}` | ケースを読む（§3.13） | 持ち主、依頼されたOT |
 | PUT | `/v1/cases/{case_id}/requirements` | 選択式の質問の答えを保存する（Geminiは呼ばない） | 持ち主 |
 | POST | `/v1/cases/{case_id}/interview` | 任意のチャットを1往復進める | 持ち主 |
 | PUT | `/v1/cases/{case_id}/measurement` | 採寸結果を保存する | 持ち主 |
+| GET | `/v1/cases/{case_id}/designs/{design_id}` | 版を読む（§3.4 の応答の `design` と同じ形） | 持ち主、依頼されたOT |
 | POST | `/v1/cases/{case_id}/designs` | 形を作る（部品選び → 寸法決め → カバーの殻の計算 → 描画 → 確認）。部品はカバー本体とC字クリップ（とTPUの筒） | 持ち主 |
 | POST | `/v1/cases/{case_id}/consent` | メッシュ復元のためにフレームを送ること、手の形の3Dデータを保存することへの同意を記録する（撮影の前） | 持ち主 |
 | POST | `/v1/cases/{case_id}/designs/{design_id}/refine` | 言葉や数値、クリップの角度、模様で直す（新しい版を作る）。色だけの変更は版を作らない | 持ち主 |
@@ -64,7 +67,7 @@
 | POST | `/v1/cases/{case_id}/recover` | 期限切れの処理中の印を回収し、最新状態を返す（AI・GPU処理なし） | 持ち主、依頼されたOT |
 | DELETE | `/v1/cases/{case_id}` | ケースを消す（手のメッシュ・版・チャット・STL・画像もまとめて消す） | 持ち主 |
 
-STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、FirebaseのStorage SDKでダウンロードする。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
+STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、FirebaseのStorage SDKでダウンロードする（開発で `STORE_BACKEND=local` のときだけ、`GET /v1/files/{path}` が同じ判定で返す。本番では `404`）。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
 
 ## 3. 各エンドポイント
 
@@ -181,10 +184,10 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 処理の順番
 
 1. スキーマと、[measurement.md §12](measurement.md#12-出力するjsonmeasurement22) の項目間の制約を確かめる。合わなければ `422 MEASUREMENT_INVALID`（どの項目がどの制約に違反したかを `details` に入れる）。手のモデルの計算の前に検証し、負の長さや欠けた付け根の位置を計算に渡さない
-2. ケースに同意の記録（`mesh_consent_at`、`consent_text_version = mesh-consent-2`）があることを確かめる
+2. ケースに同意の記録（`mesh_consent_at`、`consent_text_version = mesh-consent-2`）があることを確かめる。なければ `422 CONSENT_REQUIRED`
 3. `capture.mesh_result_token` の署名（`hand-mesh` と共有の鍵でHMAC-SHA256）・ケースID・角度のハッシュを確かめる。メッシュ復元を通らない角度を受け付けないため
 4. 未補正のメッシュ `cases/{case_id}/hand/raw/{mesh_id}.glb` を読み、ファイルのSHA-256が、トークンに入った `mesh_sha256` と一致することを確かめる。関節の位置（21点）は、ブラウザの値ではなく、このファイルに入った値（`extras.joints_mm`）を使う
-5. **倍率** `k = median(測った区間の長さ ÷ メッシュの関節どうしの長さ)` を、**手の甲で見える4区間**（手首→人差し指の付け根、手首→中指の付け根、手首→小指の付け根、人差し指の付け根→小指の付け根）の比から出す。握りこぶしでは指の区間が重なって隠れ、MediaPipeの点がずれやすいため（[measurement.md §8.2](measurement.md#82-メッシュの合成と実寸化)）。指の区間の比は、ばらつきの確かめにだけ使い、4区間の k から10%を超えて離れたら警告 `MESH_SCALE_INCONSISTENT` を付ける。k が0.5〜2.0の外なら、点の取り違えか1円玉の誤検出とみなして `422 MEASUREMENT_INVALID`（範囲は入力の安全のための仮の値。要確認）
+5. **倍率** `k = median(測った区間の長さ ÷ メッシュの関節どうしの長さ)` を、**手の甲で見える4区間**（手首→人差し指の付け根、手首→中指の付け根、手首→小指の付け根、人差し指の付け根→小指の付け根）の比から出す。握りこぶしでは指の区間が重なって隠れ、MediaPipeの点がずれやすいため（[measurement.md §8.2](measurement.md#82-メッシュの合成と実寸化)）。検証で求めた長さの補正係数（`calibration.length_factor`。[measurement.md §10.3](measurement.md#103-補正係数の求め方)）があれば k に掛ける。指の区間の比は、ばらつきの確かめにだけ使う。4区間の比の四分位範囲が k の10%を超えるか、指の区間の比の中央値が k から15%を超えて離れたら、警告 `MESH_SCALE_INCONSISTENT` を付ける（`api/app/geometry/scale.py`）。k が0.5〜2.0の外なら、点の取り違えか1円玉の誤検出とみなして `422 MEASUREMENT_INVALID`（範囲は入力の安全のための仮の値。要確認）
 6. メッシュの頂点に k を掛け、**実寸のメッシュ**（手の座標系、mm）を `cases/{case_id}/hand/{measurement_id}.glb` に保存する
 7. 実寸のメッシュから、**カバーの目印**を出す：手のひら側を切る面の基準（PIP関節の中心の平均の高さと、付け根の関節の中心＋8mmの浅い方）、手首側を切る位置の基準（手首→中指の付け根の長さ）、レールを付ける位置と向き（人差し指の基節の、親指側かつ手の甲側の外面）、ベルトのスリットと空気穴を置ける範囲（[generation-pipeline.md](generation-pipeline.md)）
 8. 部品の基準値（baseline）を作る
@@ -218,7 +221,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
     { "part_id": "cover", "name": "wrist_cut_mm", "value": 37.0, "source": "measured" },
     { "part_id": "cover", "name": "palm_cut_offset_mm", "value": 0.0, "source": "default" },
     { "part_id": "c_clip", "name": "tool_d_mm", "value": 9.5, "source": "interview" },
-    { "part_id": "c_clip", "name": "angle_deg", "value": 20, "source": "rule" }
+    { "part_id": "c_clip", "name": "angle_deg", "value": 70, "source": "rule" }
   ],
   "case_status": "designing"
 }
@@ -245,15 +248,16 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - 処理には中央値で約75秒、最大で約170秒かかる（カバーの殻の計算の10〜20秒を含む。[non-functional.md](non-functional.md)）。ブラウザは応答を待ちながら、2秒ごとに `GET /v1/cases/{case_id}`（`current_design_id`）と `GET /v1/cases/{case_id}/designs/{design_id}` を呼び、`progress` を読んで進み具合を出す（`app/lib/screens/design.dart`）
 - 部品は、**カバー本体**（`cover`。空気穴 `air_holes`・ベルトのスリット `strap_slits`・アリ溝のレール `rail` を含む）と**C字クリップ**（`c_clip`）を必ず作る。**TPUの筒**（`tpu_sleeve`）と2個目のクリップは、道具と要望からGeminiが選ぶ（[generation-pipeline.md](generation-pipeline.md)、[ADR-0011](adr/0011-dorsal-cover.md)〜[ADR-0013](adr/0013-clip-angle-variants.md)）
 - 描く前に、**カバーの殻**を作る：実寸の手のメッシュ（正準形）の符号付き距離から、手の面から距離 `HAND_CLEARANCE_MM`（c）〜 c ＋ `cover_thickness_mm`（t）の層を取り、手のひら側・手首側・親指・人差し指側の外を切る面と、なめらかな共通部分（半径 `edge_radius_mm`）でつなぎ、閉じた面（`cover_shell.stl`）にする。切り口のふちも丸くなる。続けて、手を c だけ広げた立体（**内側を守る立体** `cover_keepout.stl`。レールの土台が内側へ出ないように、最後に引く）を作る。右手なら最後に鏡像に戻す。11/7のスパイク（手元のPC）の同じ仕組みで約12秒。カバーの外接箱の大きさで変わるので、10〜20秒を見込む。Cloud Run（4 vCPU）での時間は要確認
-- 殻・内側を守る立体・距離場は、採寸の版ごとのフォルダ `internal/cases/{case_id}/cover/{measurement_id}/` の下（`shell/<24桁>`・`keepout/c{c}`・`sdf`）に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
-- OpenSCADは、殻を `import()` して、ベルトのスリット・空気穴を引き、アリ溝のレールを足し、最後に内側を守る立体を引く。スリット・空気穴・レールの位置と向きは、生成APIが手のメッシュとカバーの目印（§3.3）から計算して `-D` で渡す。クリップとTPUの筒は、それぞれ別に描く（`mode=c_clip` など）
-- **取り付け具（道具ごとのクリップ）**（[ADR-0014](adr/0014-multiple-attachments.md)）：`requirements.tools`（古いケースは今までの項目から1つ）の丸い柄の道具ごとに、C字クリップを1つずつ作る（1つの版に最大4つ。カバーは1つ）。最初の丸い柄の道具が**主な取り付け具**で、今までの項目（`params` の `c_clip`、`clip_angle_deg`、`clip`、`tool`、`files.parts.c_clip`）と確認用画像4枚は主な取り付け具の値・形にする。ほかの取り付け具の角度は、寸法決め（`dimension.v2`）が取り付け具ごとに60／70／80から選ぶ（モックは道具ごとの目安 筆70・ペン60・スプーン60。選択肢にない答えは目安に直して `clamped` に `attachment_id` つきで残す）。範囲チェック（R1〜R5）と描いたあとのクリップの検査（R6f・R6h）は取り付け具ごと
+- 殻・内側を守る立体・距離場は、採寸の版ごとのフォルダ `internal/cases/{case_id}/cover/{measurement_id}/` の下（`shell/<殻の引数のハッシュ24桁>`・`keepout/<メッシュのSHA-256の先頭16桁>_c<c を小数2桁>`・`sdf`）に置く（誰も読めない場所。[data-model.md §3](data-model.md#3-cloud-storageのパス)）。採寸の版（`hand_measurement_id`）と、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が同じなら、前の版の殻を使い回す。印刷用STLを作るとき（§3.6・§3.11）もこれを使う
+- OpenSCADは、殻を `import()` して、ベルトのスリット・空気穴を引き、アリ溝のレールを足し、最後に内側を守る立体を引く。スリット・空気穴・レールの位置と向きは、生成APIが手のメッシュとカバーの目印（§3.3）から計算して `-D` で渡す。クリップとTPUの筒は、それぞれ別に描く（印刷用は `mode=clip`・`mode=sleeve`、プレビューは `mode=assembled` と `part`。固定STLのライブラリにあるクリップはOpenSCADを呼ばない）
+- **取り付け具（道具ごとのクリップ）**（[ADR-0014](adr/0014-multiple-attachments.md)）：`requirements.tools`（古いケースは今までの項目から1つ）の丸い柄の道具ごとに、C字クリップを1つずつ作る（1つの版に最大4つ。カバーは1つ）。最初の丸い柄の道具が**主な取り付け具**で、今までの項目（`params` の `c_clip`、`clip_angle_deg`、`clip`、`tool`、`files.parts.c_clip`）と確認用画像4枚は主な取り付け具の値・形にする。ほかの取り付け具の角度は、寸法決め（`dimension.v3`）が取り付け具ごとに60／70／80から選ぶ（モックは道具ごとの目安 筆70・ペン60・スプーン60。選択肢にない答えは目安に直して `clamped` に `attachment_id` つきで残す）。範囲チェック（R1〜R5）と描いたあとのクリップの検査（R6f・R6h）は取り付け具ごと
   - 平たい柄の道具は取り付け具を作らず、「◯◯：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください」を `review.unresolved_issues`（severity `medium`）に書き、版は `needs_attention`
   - ある取り付け具だけが、範囲チェックの致命的な違反・R6f（クリップの開き）・描けない（OpenSCADの失敗）のどれかになったら、その取り付け具を版から外し、「◯◯のクリップは作れませんでした（理由）」を `unresolved_issues`（severity `medium`）に書いて、版は `needs_attention`。主な取り付け具が外れたら、次の取り付け具を主に繰り上げ、今までの項目をうめ直す。取り付け具が1つだけのときは今までどおり（R6f は `needs_attention`、描けなければ `RENDER_FAILED`）
   - どれかの取り付け具が R6h（道具の通り道）に落ちたら `needs_attention`。取り付け具が2つ以上なら、文に道具の名前を入れる（同じ道具が2つなら太さも。例「ペン 9mm」）
   - プレビュー用STLの名前は、取り付け具が1つなら今までどおり `c_clip_{角度}.preview.stl`、2つ以上なら `c_clip_{道具}_{角度}.preview.stl`（同じ道具が2つなら太さを `_d0900` のように足す。それでも同じ名前になるときは取り付け具のIDを足す）
-- 版に記録するもの：`hand_measurement_id`、`scale_factor`、`hand_clearance_mm`、`cover_shell_sha256`、`clip_angle_deg`、`clip`（使った固定STL）、`tool`（道具の軸。S7の3D表示が棒を描くのに使う）、部品ごとのファイル（下の応答の `files.parts`）、取り付け具の一覧 `attachments`（下の応答。[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）。`geometry_hash` は、引数・`cover_shell_sha256`・固定値の版から作る（[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）
-- 描いたあと、実際の形で検査する（R6。[generation-pipeline.md](generation-pipeline.md)）：カバーは閉じた面で1つのかたまり、最小の厚さ ≥ `MIN_WALL_MM`、**手のひら側に材料がない**（切る面より手のひら側に頂点がない）、**手首を覆わない**（手首から25mm以内に頂点がない）、内側の面と手の距離が c 以上。クリップは開きの幅が道具の太さより小さく（抜けない）、サポートなしで刷れること。手のひら側と手首の検査は、装具にしないための安全の決まりなので、AIや画面の操作で外すことはできない
+- 版に記録するもの：`hand_measurement_id`、`scale_factor`、`hand_clearance_mm`、`cover_shell_sha256`、`clip_angle_deg`、`clip`（使った固定STL）、`tool`（道具の軸。S7の3D表示が棒を描くのに使う）、部品ごとのファイル（下の応答の `files.parts`）、取り付け具の一覧 `attachments`（下の応答。[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）。`geometry_hash` は、OTへの依頼（§3.6）とデモの印刷用データ（§3.11）のときに、引数・`cover_shell_sha256`・カタログの版・取り付け具から作って記録する（形を作ったときには入らない。[data-model.md §2.5](data-model.md#25-casescaseiddesignsdesignid)）
+- 描いたあと、実際の形で検査する（R6。[generation-pipeline.md §4](generation-pipeline.md#4-範囲チェック)）：カバーは閉じた面で1つのかたまり、**手のひら側に材料がない**（切る面より手のひら側に頂点がない）、**手首を覆わない**（手首から25mm以内に頂点がない）、内側の面と手の距離が c − 0.3 以上。クリップは開きの幅が道具の太さ − 0.5mm より小さく（抜けない）、1つのかたまり。殻の最小の厚さ（`MIN_WALL_MM`）を描いたあとに測る検査は未実装。手のひら側と手首の検査は、装具にしないための安全の決まりなので、AIや画面の操作で外すことはできない
+- 形を作るとき（プレビュー）は、R6 に落ちても止めずに版を作る：手のひら側・手首（R6c・R6d）は切る位置を動かして最大2回描き直し、それでも落ちれば、ほかの不合格（R6a・R6b・R6e・R6f）と同じく版を `needs_attention` にして、`review.unresolved_issues` に severity `high`（「…印刷用のデータは作れません」）を書く。`RENDER_FAILED` になるのは、OpenSCADが失敗したとき・殻が作れないとき（と、印刷用STLを作るときのR6の不合格。§3.6・§3.11）
 - `design_id` は処理を始めた直後に作るので、Firestoreの `cases/{case_id}.current_design_id` を見れば、応答が返る前から追いかけられる
 - 同じケースに有効な処理中の印があれば `409 CONFLICT`。期限切れの回収は§1.1に従う
 
@@ -268,7 +272,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
     "parts": [
       { "part_id": "cover", "variant": "standard", "reason_ja": "握った形のまま、手の甲側からかぶせられる形にしました" },
       { "part_id": "air_holes", "variant": "standard", "reason_ja": "長い時間使うので、手の甲に空気穴を6つ開けました" },
-      { "part_id": "strap_slits", "variant": "single", "reason_ja": "ベルト1本で留めます。回ってしまう場合は2本にできます" },
+      { "part_id": "strap_slits", "variant": "standard", "reason_ja": "ベルト1本で、手のひら側を通して留めます" },
       { "part_id": "rail", "variant": "standard", "reason_ja": "人差し指の横にクリップを差し込みます" },
       { "part_id": "c_clip", "variant": "standard", "reason_ja": "筆の太さ9.5mmに合わせ、押し込むだけで留まるクリップにしました" }
     ],
@@ -287,7 +291,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
       }
     ],
     "review": {
-      "rounds": 2,
+      "rounds": [ { "round": 1, "verdict": "ok", "checks": [ { "id": "C1", "pass": true, "note_ja": "問題ありません" } ], "issues": [], "changes": [] } ],
       "final_verdict": "ok",
       "unresolved_issues": []
     },
@@ -357,11 +361,12 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 { "style": { "color": "#E76F51", "pattern": "none" } }
 ```
 
+- 共通の確かめ（版を作る前。回数にも数えない）：6つのうち2つ以上、または1つもないと `400 INVALID_ARGUMENT`。直す版がケースの `current_design_id` でなければ `409 STALE_DESIGN`、版の `status` が `ready`／`needs_attention` でなければ `409 CONFLICT`。`instruction` は300文字まで、`param_changes` は1〜10件（外れたら `INVALID_ARGUMENT`）。`clip_angle_deg` がカタログの選択肢にないと `INVALID_ARGUMENT`
 - `instruction`：Geminiの `refine` で引数の変更に直し、範囲チェック → 描画 → 確認1回、の順に進む
 - `param_changes`：画面で直接直した場合。Geminiは呼ばず、範囲チェック → 描画、の順に進む。ユーザーの意思による変更なので、「AIが変えてよい幅」（R3）は当てはめず、`override_by_user=true` として記録する（OT画面で目立たせる）。範囲（R2）と組み合わせ（R4）のルール、描いたあとの検査（R6。手のひら側・手首を含む）は当てはめる
-- `clip_angle_deg`：**クリップの角度だけを変える**（60／70／80のどれか。カタログの選択肢。S7の角度の選択）。Geminiは呼ばず、新しい版を作るが、**クリップだけを描き直し**、カバーのファイル・確認用画像のうちカバーだけのものは前の版のものを使い回す。確認用画像は、クリップと筆の向きが変わるので描き直す。角度を変える仕組み（回す部品）は作らず、角度違いのクリップを刷って差し替える（[ADR-0013](adr/0013-clip-angle-variants.md)）。`param_changes` で `c_clip.angle_deg` を送っても同じ扱いになる
+- `clip_angle_deg`：**クリップの角度だけを変える**（60／70／80のどれか。カタログの選択肢。S7の角度の選択）。Geminiは呼ばず、画像での確認もせずに新しい版を作る。カバー・クリップ・確認用画像をOpenSCADで描き直すが、殻は前の版のものを使い回し、カバーの入力が前の版と同じなら、カバーのプレビュー用STLの中身は前の版のものにする（OpenSCADは同じ入力でも毎回少し違うSTLを出すため）。角度を変える仕組み（回す部品）は作らず、角度違いのクリップを刷って差し替える（[ADR-0013](adr/0013-clip-angle-variants.md)）。`param_changes` で `c_clip.angle_deg` を送っても同じ扱いになる
 - 殻は、殻を決める引数（c・t・`palm_cut_offset_mm`・`wrist_cut_mm`・`edge_radius_mm`）が変わったときだけ作り直す（10〜20秒）。空気穴・スリット・レール・クリップだけの変更では、前の版の殻を使い回す（§3.4）
-- `style`：**色だけの変更なら、新しい版を作らず**、その版の `style.color` だけを書き換える（描き直さない。`geometry_hash` に色は入らないので、確認済みもそのまま）。OTの確認後でも変えられる
+- `style`：**色だけの変更なら、新しい版を作らず**、その版の `style.color` だけを書き換える（描き直さない。`geometry_hash` に色は入らないので、確認済みもそのまま）。OTの確認後でも変えられる。応答は §3.4 と同じ `{ design }`。**模様（`pattern`）の変更はいまは使えない**（`400 INVALID_ARGUMENT`「模様の変更は、いまは使えません」）
 - 色だけの変更以外は、新しい `design_id`（`revision` が1つ増える）を作り、§3.4と同じ形で返す。前の版の「確認済み」は引き継がない（角度だけの変更も、刷る部品が変わるので引き継がない）
 - 指示があいまいなときは、新しい版を作らずに `200` で `{ "clarify_ja": "人差し指の付け根の関節ですか？ 2つ目の関節ですか？" }` を返す
 - **取り付け具ごとに直す**（[ADR-0014](adr/0014-multiple-attachments.md) §4）：
@@ -374,7 +379,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
   - 足す取り付け具の ID は版の中の最大の番号＋1、`tool_index` は `requirements.tools` の最後の位置。角度は Gemini の `attachment` で60／70／80から選ぶ（モックは道具ごとの目安。選択肢にない答えは目安に直して `clamped` に残す）。ほかの取り付け具と主な取り付け具は前の版のまま。カバーは前の版の殻を使い、`cover_shell_sha256` とカバーのプレビュー用STLは前の版と同じ。画像での確認はしない
   - 足す取り付け具が範囲チェックの致命的な違反（`DESIGN_INFEASIBLE`）・R6f（クリップの開き）・描けない（OpenSCADの失敗）のどれかになったら、作りかけの版を消して、ケースを前の版・前の状態に戻し、エラーを返す（R6f と描けないときは `RENDER_FAILED`。`details` に検査の名前 `rule`（`R6f…`・`render`）と `attachment_id`）。`requirements.tools` にも足さない。§3.4 のように、その取り付け具だけ外して版を作ることはしない
   - 作れたら、足した道具を `requirements.tools` の最後に加える（`assumptions` も道具の名前つきで足す）。主な取り付け具と今までの項目は変わらない
-- 取り付け具を足す・直すと新しい版になる。確認済み（`approval`）は引き継がず `{"status": "none"}`、ケースは `previewing` に戻る（OTに頼んだ版や承認済みの版でも、版の `status` が `ready`／`needs_attention` なら直せる。もう一度OTに頼む）。`origin` は `refine_add_attachment`・`refine_tool_d` が加わる
+- 取り付け具を足す・直すと新しい版になる。確認済み（`approval`）は引き継がず `{"status": "none"}`、ケースは `previewing` に戻る（OTに頼んだ版や承認済みの版でも、版の `status` が `ready`／`needs_attention` なら直せる。もう一度OTに頼む）。`origin` は `refine_add_attachment`・`refine_tool_d` が加わる（ほかは `refine_text`・`refine_params`・`refine_clip_angle`。色だけの変更は版を作らないので、`origin` はない）
 
 ### 3.6 `POST /v1/cases/{case_id}/review-request`
 
@@ -386,8 +391,8 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 - 画面は `GET /v1/therapists` の一覧からOTを選ばせる（メールアドレスを打たなくてよい）。一覧にないOTは、メールアドレスを入れて頼める
 - `reviewer_email` が `therapists` の許可リストにない場合は `422 REVIEWER_NOT_ALLOWED`
-- 対象が最新の `ready`／`needs_attention` の版であることを確かめる
-- **この時点で部品ごとの印刷用STLを作る**：その版の引数で、カバー（`mode=cover`）・取り付け具ごとのC字クリップ（`mode=c_clip`）・TPUの筒（選んだときだけ）を `quality=print` で描き、それぞれ刷る向きに置き直して、R6を通す。カバーの殻は、版に記録した `cover_shell_sha256` の `internal/cases/{case_id}/cover/` のファイルを使う（作り直さない）。できたファイルは、まだ誰も読めない場所（`internal/`）に置き、部品ごとのSHA-256（`print_sha256` の map）と、`geometry_hash` を版に記録する。クリップのファイルは取り付け具の数だけできる（キーは `attachments[i].print_key`：主は `c_clip`、ほかは `c_clip_a2`…。名前はプレビューと同じ元に `.stl` をつけたもの。1つなら今まで通り `c_clip_{角度}.stl`）。`geometry_hash` には取り付け具の `(id, tool_d_mm, angle_deg)` も入れる。どれか1つでも（どの取り付け具でも）R6が不合格なら `RENDER_FAILED` を返し、依頼しない（持ち主が `refine` で直してから頼み直す）
+- 対象が最新の `ready`／`needs_attention` の版であることを確かめる（違えば `409 STALE_DESIGN`。`design_id` を省くと、ケースの `current_design_id` を使う）
+- **この時点で部品ごとの印刷用STLを作る**：その版の引数で、カバー（`mode=cover`）・取り付け具ごとのC字クリップ（`mode=clip`。固定STLのライブラリにあればそれを使う）・TPUの筒（`mode=sleeve`。選んだときだけ）を `quality=print` で描き、それぞれ刷る向きに置き直して、R6を通す。カバーの殻は、採寸の版のフォルダ `internal/cases/{case_id}/cover/{measurement_id}/shell/` に保存したものを使う（殻の引数が同じなので、作り直さない）。できたファイルは、まだ誰も読めない場所（`internal/`）に置き、部品ごとのSHA-256（`print_sha256` の map）と、`geometry_hash` を版に記録する。クリップのファイルは取り付け具の数だけできる（キーは `attachments[i].print_key`：主は `c_clip`、ほかは `c_clip_a2`…。名前はプレビューと同じ元に `.stl` をつけたもの。1つなら今まで通り `c_clip_{角度}.stl`）。`geometry_hash` には取り付け具の `(id, tool_d_mm, angle_deg)` も入れる。どれか1つでも（どの取り付け具でも）R6が不合格なら `RENDER_FAILED` を返し、依頼しない（持ち主が `refine` で直してから頼み直す）
 - こうすると、OTが見る画像と印刷用STLは同じ引数から作られ、承認のときに描き直さずに済む。デプロイで描画のコンテナが新しくなっても、確認待ちの版はそのまま承認できる
 - 処理には20〜60秒かかる。画面は「印刷用のデータを準備しています」と出す
 - ケースの `reviewer_email` と `status = in_review` を書き込み、その版の `approval.status` を `requested` にする
@@ -395,8 +400,10 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 応答 `200 OK`
 
 ```json
-{ "case_status": "in_review", "review_url": "https://<project>.web.app/review/c_8f3k2m" }
+{ "case_status": "in_review", "review_url": "https://<project>.web.app/#/review/c_8f3k2m" }
 ```
+
+- `review_url` は `APP_BASE_URL`（環境変数）＋ `/#/review/{case_id}`（Flutter のハッシュのルート）
 
 通知メールは送らない（MVPでは、`review_url` を画面に出してユーザーが伝える）。
 
@@ -425,7 +432,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - `decision` は `approve` か `reject`。`approve` のときは、`checklist` がすべて `true` でないと `422 CHECKLIST_INCOMPLETE`。`palm_open_wrist_free` は「手のひら側が開いていて、手首を覆っていない（握った指を開かせない・固定しない）」ことをOTが目で確かめた印（自動の検査 R6 と二重にする）
 - `geometry_hash` は、OT画面が表示した版の値を送る。最新の版でない、`approval.status` が `requested` でない、またはハッシュが一致しなければ `409 STALE_DESIGN`
 - `approve` のとき、サーバーは描き直さない。依頼のときに作った `internal/` の部品ごとの印刷用STLの `print_sha256` を確かめてから、読める場所（`print/` の下。取り付け具ごとのクリップも）にコピーし、トランザクションで `approval.status=approved` にする
-- 形を変えたい場合は、OTは差し戻し（`reject`）を選ぶ。持ち主が `refine` で新しい版を作り、OTに頼み直す
+- 形を変えたい場合は、OTは差し戻し（`reject`）を選ぶ。ケースは `changes_requested` になる（応答は `files` が空で `case_status: changes_requested`）。持ち主が `refine` で新しい版を作り、OTに頼み直す
 
 応答 `200 OK`
 
@@ -465,8 +472,11 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 - ケースの `demo` は、ケースを作るときに `settings/runtime.demo_mode` が `true` なら生成APIが `true` にする（管理者がコンソールで切り替える。ケースを作ったあとで変わることはない）
 - `demo` でないケースで呼ぶと `403 FORBIDDEN`（ふだんの流れでは、必ずOTの確認を通る）
-- 中身は `review-request` と同じ（クリップは取り付け具ごとに1つ。`files.print` は `{ cover, c_clip, c_clip_a2, … }`）：その版の引数で部品ごとに `quality=print` で描き、刷る向きに置き直し、R6を通し、`print/` の下に置く。R6が不合格なら `RENDER_FAILED`
-- 版に `print_prepared_at` と `print_sha256` を記録する。`approval.status` は `none` のまま（OTの確認は受けていない）
+- 本文は空。最新の版でない、または版が `ready`／`needs_attention` でなければ `409 STALE_DESIGN`
+- 版の `review.unresolved_issues` に severity `high` の点（安全の検査や形の検査に落ちた）があれば、描く前に `500 RENDER_FAILED`（「安全の検査に通っていないので、印刷用のデータは作れません」）
+- 中身は `review-request` と同じ（クリップは取り付け具ごとに1つ。`files.print` は `{ cover, c_clip, c_clip_a2, … }`）：その版の引数で部品ごとに `quality=print` で描き、刷る向きに置き直し、R6を通す。いったん `internal/` に置き、SHA-256を確かめてから `print/` の下にコピーする。R6が不合格なら `RENDER_FAILED`
+- 版に `print_prepared_at`・`print_sha256`・`geometry_hash`・`files.print` を記録する。`approval.status` は `none` のまま（OTの確認は受けていない）
+- 応答 `200 OK`：`{ "files": { "print": { "cover": "cases/…/print/cover.stl", "c_clip": "cases/…/print/c_clip_70.stl" } }, "demo_notice_ja": "デモ用：OTの確認を省略しています。実際に使う前には必ずOTの確認が必要です" }`
 - 画面（S7・S10）には「デモ用：OTの確認を省略しています。実際に使う前には必ずOTの確認が必要です」と必ず出す
 
 ### 3.12 `DELETE /v1/cases/{case_id}`
@@ -478,6 +488,12 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - 消すもの（[data-model.md §5](data-model.md#5-保存期間と削除)）：Storageの `cases/{case_id}/`（実寸と未補正の手のメッシュ、STL、画像）と `internal/cases/{case_id}/`、Firestoreの `cases/{case_id}/designs` と `cases/{case_id}/messages`、最後に `cases/{case_id}` 本体。途中で失敗しても、ケースの文書が残っていればもう一度消せる
 - OTに確認を頼んでいる途中（`in_review`）でも消せる。消すと、OTの確認の画面も開けなくなる（画面の確認の文で伝える）
 - 応答は `200` で `{ "deleted": true, "case_id": "...", "files_deleted": 12 }`
+
+### 3.13 `GET /v1/cases` と `GET /v1/cases/{case_id}`
+
+- `GET /v1/cases`：持ち主のケースの一覧 `{ "cases": [ … ] }`（`updated_at` の新しい順）。S1のカードに使う
+- `GET /v1/cases/{case_id}`：持ち主か依頼されたOTが読める（ほかは `403`、なければ `404`）。返すのは `case_id` と、`title`・`status`・`demo`・`requirements`・`turn_count`・`measurement_id`・`hand_model`・`current_design_id`・`active_operation`・`reviewer_email`・`mesh_consent_at`・`consent_text_version`・`created_at`・`updated_at`・`baseline`（ある項目だけ。`measurement` そのものは返さない）
+- `GET /v1/cases/{case_id}/designs/{design_id}`：`{ "design": { … } }`（§3.4 の応答と同じ形。`progress`・`error`・`clamped`・`origin`・`parent_design_id`・`print_prepared_at`・`geometry_hash` も入る）。形を作っている間は2秒ごとに呼ばれる
 
 ## 4. 手のメッシュ復元サービス `hand-mesh`
 
@@ -580,27 +596,28 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 | 401 | `UNAUTHENTICATED` | IDトークンがない、または無効 | false |
 | 403 | `FORBIDDEN` | 持ち主でも、依頼されたOTでもない | false |
 | 404 | `NOT_FOUND` | ケースや版がない | false |
-| 409 | `CONFLICT` | 同じケースで生成中のものがある | true（少し待つ） |
+| 409 | `CONFLICT` | 同じケースで生成中のものがある（ほかに、採寸の前に形を作ろうとした、採寸のあとで手の左右を変えようとした、直せない状態の版を直そうとした） | true（少し待つ） |
 | 409 | `STALE_DESIGN` | 確認しようとした版が最新ではない | false |
-| 422 | `MEASUREMENT_INVALID` | 採寸データがスキーマに合わない。結果トークンや手のメッシュのハッシュが合わない。倍率が範囲外 | false |
-| 422 | `OUT_OF_SCOPE` | 装具や口に入れる部品など、対象外 | false |
+| 422 | `MEASUREMENT_INVALID` | 採寸データがスキーマに合わない。結果トークンや手のメッシュのハッシュが合わない。倍率が範囲外。手の左右が質問の答えと違う | false |
+| 422 | `REQUIREMENTS_INVALID` | `PUT requirements` の本文が `schemas/requirements.schema.json` に合わない（道具が5個以上など） | false |
 | 422 | `REVIEWER_NOT_ALLOWED` | 許可リストにないOT | false |
 | 422 | `CHECKLIST_INCOMPLETE` | 確認項目が埋まっていない | false |
-| 422 | `DESIGN_INFEASIBLE` | 自動で直しても、組み合わせのルール（厚さ、造形サイズなど）を満たせない。例：道具が太すぎる・細すぎてクリップが作れない、道具がすべて平たい柄（MVPのC字クリップでは挟めない。丸い柄の道具が1つでもあれば、平たい柄の道具の取り付け具だけを作らずに版を作る） | false |
-| 429 | `RATE_LIMITED` | 回数の上限に達した | true（翌日） |
-| 500 | `RENDER_FAILED` | OpenSCADの失敗、カバーの殻が作れなかった、または描いたあとの検査（R6：最小の厚さ、1つのかたまり、手のひら側に材料がない、手首を覆わない、手に食い込まない、クリップが抜けない）で不合格。どの検査かを `details` に入れる | false |
+| 422 | `DESIGN_INFEASIBLE` | 自動で直しても、組み合わせのルール（R4：丸みと厚み、手首側を切る位置、クリップの開き、TPUの筒）を満たせない。例：道具が太すぎる・細すぎてクリップが作れない、道具がすべて平たい柄（MVPのC字クリップでは挟めない。丸い柄の道具が1つでもあれば、平たい柄の道具の取り付け具だけを作らずに版を作る） | false |
+| 429 | `RATE_LIMITED` | 回数の上限、またはその日の費用の上限（`DAILY_COST_LIMIT_USD`）に達した | false（翌日まで待つ。画面は自動でやり直さない） |
+| 500 | `RENDER_FAILED` | OpenSCADの失敗、カバーの殻が作れなかった。印刷用STLを作るとき（§3.6・§3.11）の検査（R6：閉じた立体、1つのかたまり、手のひら側に材料がない、手首を覆わない、手に食い込まない、クリップが抜けない）の不合格。デモの印刷用データで、版に severity high の未解決の点がある。取り付け具を足すときに、足すクリップが描けない・R6f に落ちた（§3.5）。どの検査かを `details` に入れる。形を作るとき（プレビュー）のR6の不合格は、このエラーではなく版の `needs_attention`（§3.4） | true |
 | 502 | `AI_OUTPUT_INVALID` | 聞き直してもGeminiの出力がスキーマに合わない | true |
 | 503 | `AI_UNAVAILABLE` | Geminiが混雑している、または一時的なエラー（再試行したあと） | true |
 | 503 | `GENERATION_DISABLED` | 停止スイッチが入っている | false |
-| 504 | `RENDER_TIMEOUT` | OpenSCADが60秒を超えた | true |
-| 504 | `GENERATION_TIMEOUT` | 生成・微調整・OTへの依頼（印刷用STLの作成を含む）・デモの印刷用データ・承認の処理が280秒を超えた | true |
-| 422 | `CONSENT_REQUIRED` | `hand-mesh`：ケースに同意の記録がない、または同意の文の版が古い | false |
+| 500 | `RENDER_TIMEOUT` | OpenSCADが60秒を超えた | true |
+| 500 | `GENERATION_TIMEOUT` | 生成・微調整が280秒の期限を過ぎた（工程の合間で確かめる。§1.1） | true |
+| 422 | `CONSENT_REQUIRED` | `hand-mesh` と `PUT measurement`：ケースに同意の記録がない、または同意の文の版が古い | false |
 | 422 | `NO_HAND_DETECTED` | `hand-mesh`：どのフレームでも手の姿勢が出なかった（撮り直し） | false |
 | 503 | `MESH_UNAVAILABLE` | `hand-mesh`：起動中・混雑・処理の60秒超過 | true（自動で最大3回） |
 | 503 | `MESH_STORE_FAILED` | `hand-mesh`：未補正の手のメッシュをStorageに書けなかった | true（自動で1回） |
-| 503 | `GENERATION_INTERRUPTED` | 処理中の印が期限切れになり、異常終了した処理を回収した | true |
+| — | `GENERATION_INTERRUPTED` | 処理中の印が期限切れになり、異常終了した処理を回収した。HTTPのエラーとしては返さず、回収した版の `error.code` に書くだけ（§3.9） | — |
 | 500 | `INTERNAL` | その他 | true |
 
 - `retryable` が `true` のエラーでは、画面に「もう一度試す」ボタンを出す
 - 生成の途中で失敗した場合は、その版の `status` を `failed` にし、`error` に同じ形で記録する
 - `MESH_SCALE_INCONSISTENT` はエラーではなく警告（`PUT measurement` の `warnings`）。保存は受け付け、OT画面で目立たせる
+- 対象外の依頼（装具や口に入れる部品）で止める `OUT_OF_SCOPE` は未実装。聞き取りのチャットが `out_of_scope` を `200` で返すだけ（§3.2.1）
