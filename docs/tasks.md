@@ -9,62 +9,99 @@
 
 ---
 
+## 0. 11/10 の結果・現状
+
+下の §3 以降は 11/7 夜に立てた予定表のまま残す。済んだこと・やめたこと・やっていないことは、ここにまとめる（2026-11-10、コードフリーズの日）。
+
+**できたこと**
+
+- `impl` ブランチで中心の流れを作り直し、本番のURL（https://jijogu-hackathon-2026.web.app）に出した。聞き取り → 撮影 → 1円玉の確認 → 手の3D → カバーとクリップ → 角度の変更 → OTへの依頼・確認 → ダウンロード（デモのケースは確認を省く）までの画面とAPIがそろった。`impl` は main にもマージした（11/9）
+- `hand-mesh` は Cloud Run GPU（asia-southeast1、L4、最小0台）に出した（`deploy/hand-mesh.flags.yaml`）
+- クリップは筆・ペン・スプーンの3つとも作れる。角度は60／70／80度の3つとも、固定STLのライブラリで用意した（§4.2 の1・2は入った）。平たい柄は作れない（`DESIGN_INFEASIBLE`）
+- 1つのカバーに、道具ごとのクリップ（取り付け具）を4つまで持てる（[ADR-0014](adr/0014-multiple-attachments.md)。予定になかった追加）
+- ベルトは1本に固定した（`strap_count`）
+- 1円玉は手の甲のまん中に置き、手は動かさずにカメラを半周させる撮り方にした（11/9。机の上の1円玉では手が1.2〜1.5倍に大きく測られた）
+- OT確認の画面、回数と1日の費用の上限、共通の停止スイッチは入った
+
+**やめたこと**
+
+- 写真2枚のモード（M5・A5）は 11/9 にやめた（ボタン・採寸エンジン・アプリの処理を消した）。§4.3 の1番目を実際に落とした形
+
+**やっていないこと・仮のままのもの**
+
+- 精度の検証（A6）はしていない。`docs/measurement-validation.md` は作っていない。長さの補正係数 `length_factor` は 1.05 の仮の値（1人・動画1本から。`app/web_engine/src/engine.ts`）
+- 11/9 の試し刷りでは、前の版の3Dモデルで刷ったカバーがメンバーのこぶしに合った。今の版のカバーとクリップは刷っていない。`HAND_CLEARANCE_MM`・`DOVETAIL_CLEARANCE_MM`・`CLIP_INTERFERENCE_MM`・フェルトの厚みは、`scad/catalog.json` で「仮」のまま（B1〜B4 は完了条件まで確かめていない）
+- 殻の最小の厚さ（`MIN_WALL_MM`）を描いたあとに確かめる検査はない（§7。厚みは範囲チェックと作り方で守る）
+- 指が握った形で固まった方と、作業療法士による評価はしていない
+
 ## 1. リポジトリのディレクトリ構成
 
-`impl` ブランチでの構成。プロトタイプから移すものには（proto）と書く。
+`impl` ブランチの実際の構成（2026-11-10 に実装に合わせて直した）。リポジトリに入れないもの（取ってくる・作るもの）には（入れない）と書く。
 
 ```
 /
 ├── README.md                 提出用の説明（概要・構成図・動かし方・Google技術の理由）
-├── docs/                     設計仕様書（このフォルダ）
-├── app/                      Flutter Web（担当：D。採寸の画面はA）
+├── LICENSE
+├── docs/                     設計仕様書（このフォルダ）。images/ に構成図とロゴ
+├── app/                      Flutter Web（担当：D。採寸の画面はA）。中身の表は app/README.md
 │   ├── lib/
 │   │   ├── main.dart
-│   │   ├── router.dart
-│   │   ├── screens/          S0〜S11（screens.md）。S3〜S5は（proto）を作り直す
-│   │   ├── bridge/           採寸エンジン（A）とthree.js（D）とのつなぎ込み（dart:js_interop）
-│   │   ├── data/             APIの呼び出し、Firestore・Storageの読み取り、データの型
-│   │   └── widgets/          進み具合の表示、拡大鏡、点のドラッグのハンドル、角度の選択など
-│   ├── web_engine/           採寸エンジン（TypeScript。担当A。proto）
-│   │   └── src/              engine（フレームの選び方・MediaPipe・集計・写真モード・直した点からの長さ）、camera（アプリの中のカメラ）、
+│   │   ├── app/              画面の行き先（router.dart）と URL（paths.dart）
+│   │   ├── core/             設定（config.dart）、ログイン（session.dart）、api/（生成APIの呼び出し・モック）、
+│   │   │                     models/（聞き取りの答え・取り付け具）、storage/（Storageのファイル）、ui/（色・共通の部品）、
+│   │   │                     viewer/（three.js とのつなぎ込み）、text_ja.dart
+│   │   └── features/         機能ごとの画面：login（S0）・home（S1）・interview（S2）・measure（S3〜S5）・
+│   │                         design（S6〜S8）・review（S9）・print（S10）
+│   ├── web_engine/           採寸エンジン（TypeScript。担当A）
+│   │   └── src/              engine（フレームの選び方・MediaPipe・集計・直した点からの長さ）、camera（アプリの中のカメラ）、
 │   │                         coin_cv（1円玉の自動検出）、coin_worker（OpenCV.jsを動かすWeb Worker）、geometry
 │   ├── web/
 │   │   ├── index.html
 │   │   ├── js/               measure_engine.js・coin_worker.js（web_engine をまとめたもの）、viewer.js（three.js。D）
-│   │   ├── mediapipe/        MediaPipeの本体（wasm）と手のモデル（自前で配る。リポジトリには入れない）
-│   │   └── opencv/           OpenCV.js（自前で配る。リポジトリには入れない。scripts で取得）
+│   │   ├── demo/             モックで使う3Dの見本（scripts/make_demo_assets.py で作る）
+│   │   ├── mediapipe/        MediaPipeの本体（wasm）と手のモデル（入れない。scripts で取得）
+│   │   └── opencv/           OpenCV.js（入れない。scripts で取得）
+│   ├── assets/images/        ロゴなど
 │   └── test/
-├── api/                      Cloud Runの生成API（Python。担当C）
+├── api/                      Cloud Runの生成API（Python。担当C、geometry/ は担当B）
 │   ├── app/
-│   │   ├── main.py
-│   │   ├── routes/           エンドポイント（api.md）
-│   │   ├── handmesh/         手の3Dメッシュ：結果トークンの確認、倍率（手の甲の4区間）、実寸メッシュの保存、カバーの目印（担当B）
-│   │   ├── shell/            カバーの殻と内側を守る立体：距離場 → 切る面となめらかにつなぐ → マーチングキューブ → 閉じたSTL（担当B）
-│   │   ├── placement/        スリット・空気穴・レールの位置と向き（手のメッシュとカバーの目印から。担当B）
-│   │   ├── pipeline/         interview / select / dimension / review / refine（proto）
-│   │   ├── gemini/           クライアントとモック（proto）
-│   │   ├── validator/        範囲チェック（catalog.json を読む。proto）
-│   │   ├── scad/             OpenSCADの実行と、描いたあとの検査（厚さ・かたまりの数・手のひら側・手首・食い込み・クリップの開き）
-│   │   └── store/            Firestore・Storageへの書き込み、回数の記録
+│   │   ├── main.py           FastAPI、CORS
+│   │   ├── config.py         環境変数（architecture.md §4.1）
+│   │   ├── routes/           エンドポイント（api.md）：cases・measurement・designs・misc
+│   │   ├── pipeline.py       形を作る流れ（部品選び・寸法決め・確認・微調整・角度の変更・取り付け具を足す）
+│   │   ├── validator.py      範囲チェック（catalog.json を読む）
+│   │   ├── measure.py        採寸の保存の確かめ
+│   │   ├── tokens.py         hand-mesh の結果トークンの確かめ
+│   │   ├── attachments.py    取り付け具（道具ごとのクリップ）の一覧
+│   │   ├── ops.py            処理中の印、回数と費用の上限、停止スイッチ
+│   │   ├── auth.py・errors.py
+│   │   ├── gemini/           クライアント・モック・出力のスキーマ
+│   │   ├── geometry/         形の計算（担当B）：scale（倍率）、handframe（手の座標とカバーの目印）、field・shell（距離場と殻）、
+│   │   │                     placement（スリット・空気穴・レール）、scad（OpenSCADの実行と確認用画像）、checks（描いたあとの検査）、
+│   │   │                     cliplib・clipgeom（C字クリップの固定STLと寸法）、design（入口）
+│   │   └── store/            Firestore・Storageの窓口（開発は .localstore/）
 │   ├── prompts/              プロンプト本文（版の番号付き）
-│   ├── tests/fixtures/       モックの応答、決まった入力5パターン、試験用の手のメッシュ（握った形を含む）
-│   ├── Dockerfile
-│   └── pyproject.toml
+│   ├── tests/                fixtures/（試験用の手のメッシュ）と単体テスト
+│   ├── Dockerfile            OpenSCAD 開発版＋Python。クリップの固定STLのライブラリもここで作る
+│   └── requirements.txt
 ├── scad/                     部品ライブラリ（担当B。parts-library.md）
-│   ├── main.scad             mode で部品を選ぶ（cover／c_clip／tpu_sleeve／assembled）
+│   ├── main.scad             mode で部品を選ぶ
 │   ├── view.scad             確認用画像（手のメッシュ・カバー・クリップ・道具の棒）
 │   ├── catalog.json
-│   ├── parts/                cover（殻を import して加工）・strap_slits・air_holes・rail（アリ溝）・c_clip・tpu_sleeve
-│   ├── lib/                  固定値（common.scad）、角の丸め
-│   └── test_pieces/          clip_test（壁の厚さ×しめしろ）・dovetail_test（すき間3通り）・clearance_test（指の背の一部ですき間を比べる）
-├── hand_mesh/                手のメッシュ復元サービス（Python、Cloud Run GPU。SAM 3D Body。担当E1。proto）
-│                             フレームごとの推定 → 合成 → 手の切り出し → 生メッシュをStorageへ。重みはリポジトリに入れない
-├── schemas/                  measurement.schema.json（2.2）、requirements.schema.json などの共有スキーマ
-├── firebase/                 firestore.rules、storage.rules、firestore.indexes.json（担当C・D）
+│   ├── parts/                cover・strap_slits・air_holes・rail（アリ溝）・c_clip・tpu_sleeve
+│   ├── lib/                  固定値（common.scad）
+│   ├── test_pieces/          clip_test・dovetail_test・clearance_test
+│   ├── vendor/BOSL2/         （今は読み込んでいない）
+│   └── library/              C字クリップの固定STL（入れない。コンテナを作るときに作る）
+├── hand_mesh/                手のメッシュ復元サービス（Python、Cloud Run GPU。SAM 3D Body。担当E1）
+│                             app.py・fusion.py（合成）・angles.py・store.py・result_token.py など。vendor/sam-3d-body。重みは入れない
+├── schemas/                  measurement.schema.json（2.2）と見本、requirements.schema.json
+├── firebase/                 firestore.rules、storage.rules、firestore.indexes.json、storage-cors.json（担当C・D）
+├── deploy/                   cloudbuild.api.yaml・cloudbuild.hand_mesh.yaml（イメージを作る）、hand-mesh.flags.yaml（GPUへのデプロイの設定）
 ├── firebase.json
 ├── .firebaserc
 ├── env/example.json          Firebaseの設定値の見本（本物の env/*.json は .gitignore）
-├── scripts/                  MediaPipe・OpenCV.jsの取得、デプロイと初期設定の手順
+├── scripts/                  fetch_mediapipe.sh（MediaPipe・OpenCV.jsの取得と採寸エンジンのビルド）、make_demo_assets.py、check_hand_size.py
 └── .gitignore
 ```
 
@@ -74,7 +111,7 @@
 
 | 担当 | 持ち場 | 主な成果物 | 頼られること |
 |---|---|---|---|
-| **A 採寸** | 採寸エンジン（アプリの中のカメラ・1円玉の自動検出・MediaPipe・集計・写真モード・直した点からの長さ）、S3〜S5の画面（点の修正を含む）、精度の検証 | `app/web_engine/`、S3〜S5、`schemas/measurement.schema.json`（2.2）、`docs/measurement-validation.md` | 採寸JSON（2.2）の見本をBとCに渡す（11/8の朝） |
+| **A 採寸** | 採寸エンジン（アプリの中のカメラ・1円玉の自動検出・MediaPipe・集計・写真モード（11/9にやめた）・直した点からの長さ）、S3〜S5の画面（点の修正を含む）、精度の検証 | `app/web_engine/`、S3〜S5、`schemas/measurement.schema.json`（2.2）、`docs/measurement-validation.md`（作っていない。§0） | 採寸JSON（2.2）の見本をBとCに渡す（11/8の朝） |
 | **B 3Dモデルと部品** | OpenSCADの部品（スリット・空気穴・レール・C字クリップ・TPUの筒）、`catalog.json`、試し刷りと印刷、手の3Dメッシュの実寸化・カバーの目印・殻・位置の計算（Python）、印刷ガイドの文 | `scad/` 一式、`api/app/handmesh/`・`shell/`・`placement/`、印刷した実物、S10の文面 | 部品の引数をCに渡す（`catalog.json`、11/8午前）。印刷の結果を全員に共有する |
 | **C 生成APIとAI** | Google Cloud・Firebaseの設定、2つのクレジットと予算、生成API、プロンプト（クリップの角度の選び方を含む）、範囲チェック、OpenSCADの実行、デプロイ | `api/` 一式（B の持ち場以外）、Cloud Run、予算アラート、`firebase/*.rules`（Dと） | APIの見本の応答をDに渡す（11/8の朝） |
 | **D 画面と提出物** | 画面の骨組み、ログイン、S0〜S2（道具の太さの数値入力）・S6〜S11（クリップの角度の選択、部品ごとのダウンロード）、three.js（手の3Dメッシュ・カバー・クリップ）、Hosting、提出物 | `app/`（採寸エンジン以外）、Hosting、README、スライド、デモ動画、提出用リポジトリへのpush | HTTPSのURLを11/8の昼までに用意する（スマホの実機でカメラを試すのに要るため） |
@@ -82,7 +119,7 @@
 
 ## 3. 日程
 
-時刻は日本時間。今は11/7（土）の夜。
+時刻は日本時間。この節は11/7（土）の夜に立てた予定のまま（結果は §0）。
 
 ### 11/7（土）夜：済んだこと
 
@@ -114,7 +151,7 @@
 | B（続けて） | `clearance_test`（指の背と関節の一部を、すき間を変えて3通り）を刷り、フェルトを貼って当ててみて、`HAND_CLEARANCE_MM` を決める。決めた値（`CLIP_INTERFERENCE_MM`・`DOVETAIL_CLEARANCE_MM`・壁の厚さの既定・`HAND_CLEARANCE_MM`）を `catalog.json` と `common.scad` に入れ、Cがデプロイし直す |
 | B（昼から） | **アプリで作ったカバーとクリップ（1回目）を刷る**（カバーは約3〜4時間の見込み。要確認）。夕方に刷り上がったら、こぶしに着けて、関節の当たり・回らないか（ベルト1本で足りるか）・筆の固定・筆先が指先の近くに来るかを確かめ、直す点を固定値とプロンプトに返す |
 | 全員（午前） | 精度の検証（[measurement.md §10](measurement.md#10-精度の確かめ方)）。3人以上の握った手で動画を3回ずつ撮り、手の甲の長さ（手首〜指の付け根）をノギスで測って比べる。倍率の補正と、点の修正の効き目を記録する |
-| A | 結果を `docs/measurement-validation.md` にまとめる。使い勝手を直す |
+| A | 結果を `docs/measurement-validation.md` にまとめる。使い勝手を直す（11/10 の時点：検証とこのファイルはできていない。§0） |
 | C | プロンプトの調整（決まった入力5パターン、Argon。角度の選び方の理由を含む）。エラーの扱い、ログ、費用の確認。回数とコストの上限（最小限） |
 | D | 読み込み中・エラー・空の状態、アクセシビリティ。OT確認画面（最小限）。ピッチの構成案とデモの台本（審査員にその場で手を握ってもらい、カバーを着けてもらう場面を入れる） |
 | E1 | 検証で撮った動画で、合成した手の形を比べる。起動待ち・再試行の表示を確かめる。デモの時間帯に最小台数を1にする手順を確かめる |
@@ -145,12 +182,12 @@
 | M2 | 選択式の質問（道具の種類と**太さの数値**、指の状態、着け外しをする人など）とまとめ、任意のチャット（Gemini、最大3往復、対象外の判定） | D・C |
 | M3 | アプリの中のカメラでの撮影（握った形のこぶし。スマホは背面、PCはWebカメラ、手の骨組みを重ねる）と、ブラウザの中での解析（フレームの選び方、MediaPipe、集計）。予備として動画ファイルの選択 | A |
 | M4 | 1円玉の自動検出（OpenCV.js、Web Worker）と確認、違うときのタップ、動画での追いかけ | A |
-| M5 | 写真2枚のモード（写真ごとに1円玉を確かめる。手の3Dは `hand-mesh`） | A |
+| M5 | （11/9にやめた）写真2枚のモード（写真ごとに1円玉を確かめる。手の3Dは `hand-mesh`） | A |
 | M6 | 手の3Dメッシュ（`hand-mesh` の `POST /v1/hand`：合成・切り出し・生メッシュの保存）、同意の画面（`mesh-consent-2`）、再試行 | E1・A・D |
 | M7 | 採寸の保存：結果トークンの確認、倍率（手の甲の4区間）、実寸メッシュの保存、カバーの目印。S5の手の3Dメッシュと「合っている／ずれている／撮り直す」、**代表の2〜3枚での手首と指の付け根の5点の修正** | B・C・A・D |
 | M8 | 部品選び・寸法決め（クリップの角度の選び方と理由を含む）、範囲チェック | C |
-| M9 | カバーの殻（距離場、切る面となめらかにつなぐ）と、OpenSCADによるカバー（スリット・空気穴・レール）とC字クリップのSTLと画像4枚（手と道具を重ねる）、描いたあとの検査（厚さ・かたまりの数・**手のひら側が開いている・手首を覆わない**・手に食い込まない・クリップが抜けない）、画像での確認（最大3回） | B・C |
-| M10 | 3Dプレビュー（手にカバーとクリップと道具の棒を重ねる）、言葉と数値での微調整、**クリップの角度の選択（60／70／80度。クリップだけ描き直す）**、色の選択 | D・C |
+| M9 | カバーの殻（距離場、切る面となめらかにつなぐ）と、OpenSCADによるカバー（スリット・空気穴・レール）とC字クリップのSTL（C字クリップは 11/8 から固定STLのライブラリから選ぶ）と画像4枚（手と道具を重ねる）、描いたあとの検査（厚さ・かたまりの数・**手のひら側が開いている・手首を覆わない**・手に食い込まない・クリップが抜けない。11/10 の時点で、厚さの検査は作っていない）、画像での確認（最大3回） | B・C |
+| M10 | 3Dプレビュー（手にカバーとクリップと道具の棒を重ねる）、言葉と数値での微調整、**クリップの角度の選択（60／70／80度。クリップだけ取り替える。11/8 からは固定STLのライブラリから選び、描き直さない）**、色の選択 | D・C |
 | M11 | デモのケースの「印刷用データを作る」（`prepare-print`）とデモの表示、部品ごとの印刷用STLのダウンロード、印刷ガイド（刷る向き・材料・ベルトとフェルトの用意・痛みや赤みが出たらやめる） | D・B・C |
 | M12 | OTへの依頼・OT確認画面・確認済み（最小限：依頼、一覧表と3D、確認済み／差し戻し） | D・C |
 | M13 | 停止スイッチと1日の費用の上限、予算アラート（回数の上限は最小限） | C |
@@ -159,8 +196,8 @@
 
 ### 4.2 拡張機能（優先順位の高い順。11/9 21:00までに入らなければ見送る）
 
-1. 角度違いのクリップ（MVPの1種類に加えて、60／70／80度のほかの角度を刷る）
-2. ペン・スプーンのクリップ
+1. 角度違いのクリップ（MVPの1種類に加えて、60／70／80度のほかの角度を刷る）（11/10：3つとも固定STLで用意した。刷ってはいない）
+2. ペン・スプーンのクリップ（11/10：入った。丸い柄だけ）
 3. TPUの筒（C字クリップの内側に入れる）
 4. クリップを2か所にする（先が細い筆）
 5. 合成＋輪郭での補正（[ADR-0010](adr/0010-hand-mesh-fusion.md) の案D）
@@ -177,7 +214,7 @@
 
 11/8 12:00の中間の通しで遅れが見えたら、次の順に落とす（朝の打ち合わせで決める案）。
 
-1. 写真2枚のモード（動画の撮影だけにする）
+1. 写真2枚のモード（動画の撮影だけにする）（11/9に実際に落とした）
 2. OT確認画面（デモのケースの「印刷用データを作る」で最後まで見せる。安全の約束は画面とピッチで伝える）
 3. 空気穴（スリットとレールは残す）
 4. 点の修正（S5は「合っている／ずれている／撮り直す」だけにする）
@@ -199,12 +236,12 @@
 | B6 | `handmesh` | B | 11/8 18:00 | 試験用の生メッシュと測った長さから、倍率（手の甲の4区間の比の中央値）・実寸メッシュ・カバーの目印が出る。点を直したときは直した値だけを使う。指の区間の比が10%を超えて離れたら `MESH_SCALE_INCONSISTENT`。単体テストが通る |
 | B7 | `shell` と `placement` | B | 11/8 18:00 | 試験用の手のメッシュ（握った形を含む）から、閉じていて外向きの面の殻（`cover_shell.stl`）と内側を守る立体が40秒以内にでき、手のひら側と手首側が切れていて、切り口のふちが丸い。スリット・空気穴・レールが殻の上の正しい位置にあり、レールの土台が内側に出ていない |
 | B8 | `view.scad` と視点 | B | 11/8 | 4枚の画像で、手・カバー（関節に沿う形、手のひら側が開いていること）・クリップ・道具の棒が見分けられる |
-| A1 | 採寸エンジンを移す | A | 11/8 12:00 | proto の採寸エンジン（カメラ・1円玉の自動検出・集計・写真モード）が `impl` で動き、採寸JSON 2.2 が出る |
+| A1 | 採寸エンジンを移す | A | 11/8 12:00 | proto の採寸エンジン（カメラ・1円玉の自動検出・集計・写真モード（のちに11/9にやめた））が `impl` で動き、採寸JSON 2.2 が出る |
 | A2 | 縮尺の確かめ | A | 11/8 | 1円玉と定規を一緒に写した動画で、定規の50mmの区間が、フレームの中央値で±2mm以内に出る |
 | A3 | 集計と単体テスト | A | 11/8 | [measurement.md §6〜§7](measurement.md#6-フレームごとに求める値) の値（手の甲の4区間を含む）が出る。決まったフレームの点に対して、期待値と一致するテストが通る。直した点から手の甲の長さを出し直せる |
 | A4 | S3〜S5と保存 | A・D | 11/8 20:00 | 本番のURLで、撮影 → 1円玉の確認 → 解析 → 手の3D → 3Dの手で確認 → （必要なら）5点の修正 → 保存ができ、Firestoreに数値だけが入る（映像が送られていないことを、ブラウザの開発ツールの通信記録で確かめる） |
-| A5 | 写真2枚のモード | A | 11/8 | 写真2枚から同じ形のJSON（2.2）が出る。写真ごとに1円玉を確かめられる |
-| A6 | 精度の検証 | A（全員） | 11/9 午前 | 3人以上の結果が `docs/measurement-validation.md` にあり、手の甲の長さの目標との差と、点の修正の効き目が書いてある |
+| A5 | （11/9にやめた）写真2枚のモード | A | 11/8 | 写真2枚から同じ形のJSON（2.2）が出る。写真ごとに1円玉を確かめられる |
+| A6 | 精度の検証 | A（全員） | 11/9 午前 | 3人以上の結果が `docs/measurement-validation.md` にあり、手の甲の長さの目標との差と、点の修正の効き目が書いてある（11/10 の時点：していない。補正係数は1人・動画1本からの仮の1.05） |
 | C1 | クラウドの準備 | C | 11/8 11:00 | クーポンを個人の請求先アカウントで引き換えた。Blaze、予算アラート（3,000円・5,000円・10,000円・30,000円、クレジットを含めない設定）、必要なAPIの有効化、生成API用と `hand-mesh` 用のサービスアカウントとロール（`hand-mesh` は生メッシュの置き場に書ける）、Secret Managerの `MESH_RESULT_HMAC_KEY`、`settings/runtime` |
 | C2 | Argonの動作確認 | C | 11/8 12:00 | `global` で構造化出力と画像入力が動く。1回あたりのトークン数を測り、[non-functional.md §2.2](non-functional.md#22-1ケースあたりのgeminiのコスト仮定) を直した |
 | C3 | Cloud RunでのOpenSCADと殻 | C・B | 11/8 18:00 | Cloud Run上で、殻の計算とカバー・クリップのSTL・画像4枚が、合わせて90秒以内にできる。EGLかxvfbか決まった |
@@ -226,8 +263,8 @@
 |---|---|---|
 | 大学の3DプリンタでPETG・TPUが使えるか。使える時間（11/9・11/10それぞれ）と朝いちばんの枠の予約、機種、造形サイズ、ノズル径 | B | [non-functional.md §9](non-functional.md#9-印刷)、[parts-library.md](parts-library.md) |
 | カバーとこぶしのすき間（`HAND_CLEARANCE_MM`）と、フェルトの厚み | B | [parts-library.md](parts-library.md) |
-| ベルトを1本にするか2本にするか（カバーが手の上で回らないか） | B | [adr/0011](adr/0011-dorsal-cover.md) |
-| 角度違いのクリップを何種類用意するか（60／70／80度のどれを刷るか） | B・C | [adr/0013](adr/0013-clip-angle-variants.md) |
+| （11/8に決めた：1本に固定）ベルトを1本にするか2本にするか（カバーが手の上で回らないか） | B | [adr/0011](adr/0011-dorsal-cover.md) |
+| （11/8に決めた：60／70／80度の3つとも固定STLで用意。刷るのはまだ）角度違いのクリップを何種類用意するか（60／70／80度のどれを刷るか） | B・C | [adr/0013](adr/0013-clip-angle-variants.md) |
 | C字クリップの壁の厚さ・しめしろ、アリ溝のすき間（11/9の朝の試作で決める） | B | [adr/0012](adr/0012-c-clip-dovetail.md) |
 | カバーを刷る時間（内側のサポート込み） | B | §3 |
 | クーポンの規約（使えるサービス、引き換える請求先の制限）。Agent PlatformのGeminiに使えるか | C | [non-functional.md §2.5](non-functional.md#25-どのクレジットで何を動かすか) |
@@ -249,11 +286,11 @@
 | 倍率（B6） | 生メッシュの手の甲の4区間に対して、測った長さを一様に1.2倍にしたもの／指の区間だけ1.4倍にしたもの／`manual_points` で1区間だけ直したもの | 一様のときは倍率1.2で警告なし。指の区間だけ違うときは倍率は1.2のままで `MESH_SCALE_INCONSISTENT`。直した区間は直した値だけを使う |
 | 殻（B7・C4） | 試験用の手のメッシュ（開いた形と握った形）で、すき間1.0／1.5／2.0mm、厚み2.0／3.5mm。手が計算の箱からはみ出す配置 | どれも閉じた外向きの面になる。内側の面と手の距離がすき間以上、厚さが厚み±0.5mm以内。切り口のふちに `MIN_EDGE_RADIUS_MM` 未満の角がない。面に階段がない |
 | 安全の検査（C4） | 手のひら側を切る位置を手のひら側へ大きくずらした引数／手首側を切る位置を手首から10mmにした引数を、範囲チェックを通さずに描画と検査にかける | 手のひら側に頂点があれば不合格、手首から25mm以内に頂点があれば不合格（`RENDER_FAILED`、`details` にどの検査か）。範囲チェックでも `wrist_cut_mm < 25` は止まる |
-| 描いたあとの検査（C4） | カバーを薄くしてスリットの間の壁が細くなるようにする。空気穴を重ねて破片ができるようにする。開きの幅が道具の太さ以上のクリップ | 最小の厚さが `MIN_WALL_MM` 未満なら不合格。かたまりが2つ以上なら不合格。開きが道具の太さ以上のクリップは不合格 |
+| 描いたあとの検査（C4） | カバーを薄くしてスリットの間の壁が細くなるようにする。空気穴を重ねて破片ができるようにする。開きの幅が道具の太さ以上のクリップ | 最小の厚さが `MIN_WALL_MM` 未満なら不合格（11/10 の時点：この検査は作っていない。厚みは範囲チェックと作り方で守る）。かたまりが2つ以上なら不合格。開きが道具の太さ以上のクリップは不合格 |
 | レールと内側（B7） | レールを殻の曲がりの強い所に置く | レールの土台が殻の内側の面より内側に出ていない（内側を守る立体を最後に引いているため） |
 | 角度だけの変更（C4・D3） | `clip_angle_deg` を70 → 80にする | 新しい版ができ、クリップのファイルだけが新しく、`cover_shell_sha256` とカバーのファイルは前の版と同じ。確認済みは引き継がない |
 | 承認対象の固定（C4・D3・D4） | 検査で不合格になる版でOTに頼む。依頼のあと、デプロイで描画のコンテナを新しくしてから承認する。依頼時と異なるハッシュで承認を送る | 依頼の時点で `RENDER_FAILED` になり、依頼されない。コンテナが変わっても、依頼済みの版は描き直さずに承認でき、公開される部品ごとのSTLの `print_sha256` が依頼時と同じ。ハッシュ不一致は `STALE_DESIGN` |
-| 採寸入力（A3・C4） | 正常な動画・写真の採寸、0・負・上限超過の長さ、手首や付け根の欠落、座標・フレーム数の不整合、非有限値、範囲外の `manual_points`（フレームの外の座標、存在しないフレーム番号）、`mesh_id` の欠落 | 正常値だけ受理。不正値は手のモデルを組み立てる前に `MEASUREMENT_INVALID` とフィールド別のdetailsを返す |
+| 採寸入力（A3・C4） | 正常な動画の採寸（写真モードは11/9にやめた）、0・負・上限超過の長さ、手首や付け根の欠落、座標・フレーム数の不整合、非有限値、範囲外の `manual_points`（フレームの外の座標、存在しないフレーム番号）、`mesh_id` の欠落 | 正常値だけ受理。不正値は手のモデルを組み立てる前に `MEASUREMENT_INVALID` とフィールド別のdetailsを返す |
 | 道具の太さ（C4） | `tool_d_mm` を3.0（範囲外）・9.5・区分だけ（`medium`）・平たい柄で送る | 3.0は `INVALID_ARGUMENT`。9.5はクリップの内径9.2mm。区分だけなら8.5を入れて `assumptions` に推定と残す。平たい柄は生成で `DESIGN_INFEASIBLE` |
 | メッシュ復元の必須（C4・E1） | 結果トークンなし、署名の違うトークン、別のケースのトークン、角度を書き換えた採寸JSON、別のメッシュの `mesh_id` を `PUT measurement` に送る。同意の記録がないケースで `hand-mesh` を呼ぶ | どれも `422`。同意の記録がなければ `CONSENT_REQUIRED` |
 | AIの確認結果（C4・C6） | `verdict=revise`、問題あり、`changes=[]`。微調整後のrevise、okと不合格チェックの矛盾も用意する | 修正案のないreviseと微調整後のreviseは `needs_attention`。ok＋lowの指摘だけなら `ready`。ok なのに high・medium の指摘や不合格のチェックがあれば `needs_attention`。C1〜C5の欠落は聞き直す |
