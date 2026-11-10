@@ -60,9 +60,9 @@ function drawOverlay(c: Cam, landmarks?: { x: number; y: number }[]) {
   const ctx = o.getContext('2d')!;
   ctx.clearRect(0, 0, o.width, o.height);
   if (!landmarks) return;
-  // video は object-fit: contain で置いているので、表示の範囲を計算する
+  // video は object-fit: cover で置いているので、表示の範囲（はみ出た所は見えない）を計算する
   const vw = c.video.videoWidth, vh = c.video.videoHeight;
-  const s = Math.min(o.width / vw, o.height / vh);
+  const s = Math.max(o.width / vw, o.height / vh);
   const ox = (o.width - vw * s) / 2, oy = (o.height - vh * s) / 2;
   const P = landmarks.map((p) => ({ x: ox + p.x * vw * s, y: oy + p.y * vh * s }));
   ctx.strokeStyle = '#2fd3b0'; ctx.lineWidth = 3;
@@ -102,7 +102,8 @@ export async function startCamera(el: HTMLElement, hand: HandLandmarker) {
   const video = document.createElement('video');
   video.muted = true; video.playsInline = true; video.autoplay = true;
   video.setAttribute('playsinline', '');
-  Object.assign(video.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'contain' });
+  // 枠いっぱいに広げる（cover）。はみ出た端は見えないが撮れているので、画面にこぶし全体が入っていれば、撮ったフレームにも必ず入る
+  Object.assign(video.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' });
   const overlay = document.createElement('canvas');
   Object.assign(overlay.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none' });
   el.append(video, overlay);
