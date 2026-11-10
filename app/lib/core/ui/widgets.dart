@@ -18,8 +18,12 @@ class AppPage extends StatelessWidget {
     this.large = false,
     this.floatingActionButton,
     this.showAppBar = true,
+    this.titleWidget,
   });
   final String title;
+
+  /// 見出しを文字の代わりに出す部品（S1 ホームのロゴなど）。[large] のときだけ使う
+  final Widget? titleWidget;
   final List<Widget> children;
   final Widget? bottom;
   final VoidCallback? onBack;
@@ -55,7 +59,7 @@ class AppPage extends StatelessWidget {
               ),
             ),
             child: SliverAppBar.large(
-              title: Text(title),
+              title: titleWidget ?? Text(title),
               leading: leading,
               actions: actions,
             ),

@@ -69,40 +69,30 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
       children: [
-        const SizedBox(height: 48),
-        Center(
-          child: Container(
-            width: 140,
-            height: 140,
-            decoration: BoxDecoration(
-              color: AppColors.primaryContainer,
-              borderRadius: BorderRadius.circular(48),
-            ),
-            child: const Icon(
-              Icons.back_hand_outlined,
-              size: 72,
-              color: AppColors.onPrimaryContainer,
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
+        // スマホ（iPhone 15 の Safari）で、下の「手の動画は保存しません」まで最初の画面に収まる高さにする
+        const SizedBox(height: 40),
         Semantics(
           header: true,
-          child: Text(
-            'Hand-Some-Fit',
-            textAlign: TextAlign.center,
-            style: AppText.headlineMedium,
+          label: 'Hand-Some-Fit',
+          child: ExcludeSemantics(
+            child: Center(
+              child: Image.asset(
+                'assets/images/logo.png',
+                height: 52,
+                filterQuality: FilterQuality.medium,
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         const _GoogleColorBar(),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         Text(
           'スマホで撮ったこぶしの形から、筆やペンを持つためのカバーを作ります',
           textAlign: TextAlign.center,
           style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         const Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -131,7 +121,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
