@@ -58,3 +58,19 @@ def current_user(request: Request) -> User:
 
 def is_therapist(user: User) -> bool:
     return bool(user.email and user.email_verified and db.get(f"therapists/{user.email}"))
+
+
+def fabricator_ids_for(user: User) -> list[str] | None:
+    """受託者アカウント（fabricator_staff/{email}）なら受け持つ受託者のID。["*"] は全員。なければ None"""
+    if not (user.email and user.email_verified):
+        return None
+    doc = db.get(f"fabricator_staff/{user.email}")
+    if not doc:
+        return None
+    from . import fabrication
+
+    ids = list(doc.get("fabricator_ids") or [])
+    if "*" in ids:
+        return [f["id"] for f in fabrication.fabricators()]
+    known = {f["id"] for f in fabrication.fabricators()}
+    return [i for i in ids if i in known]

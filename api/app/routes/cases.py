@@ -36,7 +36,19 @@ def create_case(body: dict = Body(default={}), user: User = Depends(current_user
 
 @router.get("/v1/cases")
 def list_cases(user: User = Depends(current_user)):
-    out = [case_view(cid, c) for cid, c in db.list("cases") if c.get("owner_uid") == user.uid]
+    latest: dict[str, tuple[str, dict]] = {}
+    for oid, o in db.list("orders"):  # ケースごとの、いちばん新しい取り消し以外の注文（ホームの札）
+        if o.get("owner_uid") != user.uid or o.get("status") == "cancelled":
+            continue
+        cur = latest.get(o.get("case_id"))
+        if cur is None or str(o.get("created_at", "")) > str(cur[1].get("created_at", "")):
+            latest[o.get("case_id")] = (oid, o)
+    out = []
+    for cid, c in db.list("cases"):
+        if c.get("owner_uid") != user.uid:
+            continue
+        lo = latest.get(cid)
+        out.append({**case_view(cid, c), "latest_order": {"order_id": lo[0], "status": lo[1]["status"]} if lo else None})
     out.sort(key=lambda c: str(c.get("updated_at", "")), reverse=True)
     return {"cases": out}
 
@@ -57,6 +69,9 @@ def delete_case(case_id: str, user: User = Depends(current_user)):
     for sub in ("designs", "messages"):
         for doc_id, _ in db.list(f"cases/{case_id}/{sub}"):
             db.delete(f"cases/{case_id}/{sub}/{doc_id}")
+    for oid, o in db.list("orders"):  # 届け先を残さない（発注の設計 §6.1）
+        if o.get("case_id") == case_id:
+            db.delete(f"orders/{oid}")
     db.delete(f"cases/{case_id}")
     return {"deleted": True, "case_id": case_id, "files_deleted": n_files}
 

@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from . import ops
 from .config import settings
 from .errors import ApiError
-from .routes import cases, designs, measurement, misc
+from .routes import cases, designs, measurement, misc, orders
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("api")
@@ -74,5 +74,5 @@ async def internal(request: Request, e: Exception):
     return JSONResponse(ApiError("INTERNAL").body(rid), status_code=500)
 
 
-for r in (misc.router, cases.router, measurement.router, designs.router):
+for r in (misc.router, cases.router, measurement.router, designs.router, orders.router):
     app.include_router(r)
