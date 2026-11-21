@@ -29,6 +29,8 @@ usage/{yyyymmdd}
 usage/{yyyymmdd}/users/{uid}
 settings/runtime
 settings/filaments
+fabricator_staff/{email}
+orders/{orderId}
 ```
 
 ### 2.1 `users/{uid}`
@@ -150,6 +152,42 @@ settings/filaments
 - ブラウザからは読み書きできない
 
 
+### 2.8 `fabricator_staff/{email}`（受託者アカウントの許可リスト）
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `fabricator_ids` | array<string> | 受け持つ受託者のID（`api/app/data/fabrication.json` の `id`）。`["*"]` なら全員 |
+| `name` | string | 表示名 |
+| `added_at` | timestamp | 追加した日時 |
+
+- ドキュメントIDはメールアドレス（小文字）。`therapists` と同じく、管理者がFirebaseコンソールから手で追加する。デモではメンバーのアカウントを1つ `["*"]` で登録し、受託者の役を演じる
+- 受託者は架空の見本なので、受託者そのものの情報は Firestore ではなく `api/app/data/fabrication.json` に置く
+
+### 2.9 `orders/{orderId}`（発注）
+
+ケースの下ではなく上の階層に置く（受託者ごとの一覧を、ケースをまたいで引くため）。書くのは生成APIだけ。
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `owner_uid`・`case_id`・`design_id` | string | 頼んだ人と、どの版の部品か |
+| `display_id` | string | 画面に出す短い番号（注文IDの3〜6文字目を大文字に） |
+| `fabricator_id`・`fabricator_snapshot` | string・map | 受託者と、頼んだときの名前・地域・料金・日数 |
+| `status` | string | `received` → `printing` → `shipped` → `delivered`。`received` からだけ `cancelled` |
+| `items` | array<map> | 部品ごと：`print_key`・`name_ja`・`material`・`path`・`sha256`・`grams`・`minutes` |
+| `quantity` | number | 個数（1〜3） |
+| `color` | map | 刷る色 `{ hex, name_ja }`（頼んだときの版の `style.color`） |
+| `felt` | boolean | フェルトを貼って送るか |
+| `price` | map | `parts_yen`・`felt_yen`・`total_yen`（目安） |
+| `lead_days` | number | 発送までの日数 |
+| `printer` | map | 頼んだときの印刷の決まり（機種・積層の厚さ・充填率・サポート・刷る向き） |
+| `approval` | map | `kind`（`ot`／`demo`）。`ot` なら `reviewer_email`・`decided_at` |
+| `shipping` | map | `name`・`postal_code`・`address`・`phone` |
+| `demo` | boolean | デモのケースからの注文か |
+| `created_at`・`printing_at`・`shipped_at`・`delivered_at`・`cancelled_at`・`updated_at` | timestamp | 状態が変わった日時 |
+
+- 版には `print_estimates`（`{ print_key: { volume_mm3, grams, minutes } }`）を足す。最初に発注の入口が呼ばれたときに、印刷用STLから計算して書き足す
+- ケースを消すと、そのケースの注文も消す
+
 ## 3. Cloud Storageのパス
 
 ```
@@ -192,6 +230,8 @@ internal/cases/{caseId}/cover/{measurementId}/sdf             … 手のメッ�
 | `cases/{caseId}/designs/*` | 親のケースを読める人 | 不可 |
 | `usage/**` | 不可 | 不可 |
 | `settings/filaments` | ログインした人 | 不可 |
+| `fabricator_staff/{email}` | 不可 | 不可（管理者がコンソールから） |
+| `orders/{orderId}` | 不可（APIだけ。持ち主と担当の受託者に、生成APIが返す） | 不可（APIだけ） |
 | `settings/**`（それ以外） | 不可 | 不可 |
 
 - 「親のケースを読める人」かどうかは、`get()` で親のケースを読んで判定する（1回の評価で読み取り1回分の料金がかかる）

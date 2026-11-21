@@ -66,6 +66,16 @@
 | POST | `/v1/cases/{case_id}/designs/{design_id}/approval` | OTが「確認済み」にするか、差し戻す | 依頼されたOT |
 | POST | `/v1/cases/{case_id}/recover` | 期限切れの処理中の印を回収し、最新状態を返す（AI・GPU処理なし） | 持ち主、依頼されたOT |
 | DELETE | `/v1/cases/{case_id}` | ケースを消す（手のメッシュ・版・チャット・STL・画像もまとめて消す） | 持ち主 |
+| GET | `/v1/cases/{case_id}/designs/{design_id}/fabricators` | 架空の受託者の一覧（金額の目安の安い順）と、部品ごとの重さ・時間の目安（§3.14） | 持ち主（発注できる版だけ） |
+| POST | `/v1/cases/{case_id}/designs/{design_id}/orders` | 受託者に発注する（§3.15） | 持ち主（発注できる版だけ） |
+| GET | `/v1/cases/{case_id}/orders` | ケースの注文の一覧（新しい順） | 持ち主 |
+| POST | `/v1/orders/{order_id}/cancel` | 注文を取り消す（受付のときだけ） | 頼んだ人 |
+| POST | `/v1/orders/{order_id}/delivered` | 受け取ったことを知らせる（発送済みのときだけ） | 頼んだ人 |
+| GET | `/v1/fabricator/me` | 受け持つ受託者の一覧（§3.16） | 受託者アカウント |
+| GET | `/v1/fabricator/orders?fabricator_id=…` | その受託者への注文の一覧 | 受託者アカウント（受け持つ受託者だけ） |
+| GET | `/v1/fabricator/orders/{order_id}` | 注文の詳細（受託者に見せてよい中身だけ） | 同上 |
+| GET | `/v1/fabricator/orders/{order_id}/files/{print_key}` | 注文の印刷用STLの中身 | 同上 |
+| POST | `/v1/fabricator/orders/{order_id}/status` | 造形を始める（受付 → 造形中）、発送した（造形中 → 発送済み） | 同上 |
 
 STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、FirebaseのStorage SDKでダウンロードする（開発で `STORE_BACKEND=local` のときだけ、`GET /v1/files/{path}` が同じ判定で返す。本番では `404`）。読めるかどうかはStorageのセキュリティルールで決める（[data-model.md](data-model.md)）。
 
@@ -485,7 +495,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 - 呼べるのは持ち主だけ（ほかの人は `403 FORBIDDEN`、ケースがなければ `404 NOT_FOUND`）
 - 有効な処理中の印（`active_operation`）があるあいだは `409 CONFLICT`（形を作っている途中に消すと、書き込みと食い違うため）
-- 消すもの（[data-model.md §5](data-model.md#5-保存期間と削除)）：Storageの `cases/{case_id}/`（実寸と未補正の手のメッシュ、STL、画像）と `internal/cases/{case_id}/`、Firestoreの `cases/{case_id}/designs` と `cases/{case_id}/messages`、最後に `cases/{case_id}` 本体。途中で失敗しても、ケースの文書が残っていればもう一度消せる
+- 消すもの（[data-model.md §5](data-model.md#5-保存期間と削除)）：そのケースの注文（`orders`。届け先を残さないため）、Storageの `cases/{case_id}/`（実寸と未補正の手のメッシュ、STL、画像）と `internal/cases/{case_id}/`、Firestoreの `cases/{case_id}/designs` と `cases/{case_id}/messages`、最後に `cases/{case_id}` 本体。途中で失敗しても、ケースの文書が残っていればもう一度消せる
 - OTに確認を頼んでいる途中（`in_review`）でも消せる。消すと、OTの確認の画面も開けなくなる（画面の確認の文で伝える）
 - 応答は `200` で `{ "deleted": true, "case_id": "...", "files_deleted": 12 }`
 
@@ -494,6 +504,31 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 - `GET /v1/cases`：持ち主のケースの一覧 `{ "cases": [ … ] }`（`updated_at` の新しい順）。S1のカードに使う
 - `GET /v1/cases/{case_id}`：持ち主か依頼されたOTが読める（ほかは `403`、なければ `404`）。返すのは `case_id` と、`title`・`status`・`demo`・`requirements`・`turn_count`・`measurement_id`・`hand_model`・`current_design_id`・`active_operation`・`reviewer_email`・`mesh_consent_at`・`consent_text_version`・`created_at`・`updated_at`・`baseline`（ある項目だけ。`measurement` そのものは返さない）
 - `GET /v1/cases/{case_id}/designs/{design_id}`：`{ "design": { … } }`（§3.4 の応答と同じ形。`progress`・`error`・`clamped`・`origin`・`parent_design_id`・`print_prepared_at`・`geometry_hash` も入る）。形を作っている間は2秒ごとに呼ばれる
+
+### 3.14 `GET /v1/cases/{case_id}/designs/{design_id}/fabricators`
+
+発注の設計（[superpowers/specs/2026-11-21-in-app-ordering-design.md](superpowers/specs/2026-11-21-in-app-ordering-design.md)）の入口。受託者は架空の見本で、`api/app/data/fabrication.json` に置く。
+
+- **発注できる版**：持ち主で、ケースの今の版で、`approval.status == "approved"`、またはデモのケースで `print_prepared_at` がある版（印刷用STLが読める場所にある版）。ほかは `403 FORBIDDEN`
+- 部品ごとの目安（`print_estimates`）がなければ、印刷用STLの体積から計算して版に書き足す（重さ ＝ 体積 × 材料の密度 × 係数、時間 ＝ 重さ × 1gあたりの分 ＋ 準備の分。係数は仮）
+- 応答：`{ "fabricators": [{ id, name, region, fictional, base_fee_yen, yen_per_gram, lead_days, felt_service, felt_fee_yen, "price": { parts_yen, felt_yen, total_yen } }], "estimates": { "<print_key>": { volume_mm3, grams, minutes } }, "printer": {...}, "materials": { "<print_key>": "PLA" }, "names": { "<print_key>": "カバー" }, "color": { hex, name_ja }, "felt": { thickness_mm }, "delivery_days_after_ship": 2 }`。`price` は「全部の部品・1個・フェルトなし」の目安で、一覧はこの安い順
+
+### 3.15 `POST /v1/cases/{case_id}/designs/{design_id}/orders` と、頼んだ人の入口
+
+- 本文：`{ "fabricator_id", "print_keys": [...], "quantity": 1〜3, "felt": bool, "shipping": { name, postal_code, address, phone } }`
+- 検査（違えば `400 INVALID_ARGUMENT`。届け先は欄ごとの文と `details: [{ field: "shipping.postal_code" }]` の形で返す。発注できない版は `403`。今の版でないときは「形が新しくなっています。今の版の画面から頼んでください」）：`print_keys` が1つ以上で、どれも版の `files.print` にある。受託者がいる。`felt` は受託者が `felt_service` で、`cover` を含むときだけ。届け先は、全角の数字・ハイフン・空白と先頭の〒を直したうえで、名前1〜40字、住所1〜200字、郵便番号は数字とハイフン10字まで、電話は数字とハイフン40字まで
+- 金額：`parts_yen = 基本料 + 1gあたり × 選んだ部品の重さの合計 × 個数`、`felt_yen = フェルト料 × 個数`。どちらも10円単位に四捨五入。サーバーが計算した値を保存して返す
+- 注文の形は [data-model.md §2.9](data-model.md#29-ordersorderid発注)。応答は `201` で `{ "order": {...} }`
+- 1つの版に、注文はいくつでも作れる（合わない部品だけ頼み直すため）
+- `cancel` は `received` のとき、`delivered` は `shipped` のときだけ。ほかは `409 CONFLICT`（「注文の状態が変わりました。読み込み直してください」）。状態はトランザクションの中で読んでから書く
+- `GET /v1/cases` の各ケースに `latest_order: { order_id, status } | null`（ケースのすべての版の注文のうち、いちばん新しい取り消し以外の注文。S1の札）
+
+### 3.16 受託する側の入口（`/v1/fabricator/...`）
+
+- 呼べるのは受託者アカウント（`fabricator_staff/{email}` があり、メールが確認済み）だけ。ほかは `403`。受け持たない受託者の注文も `403`（あるかどうかを知らせない）
+- 返す注文は、受託者に見せてよい中身だけ：`order_id`・`display_id`・`fabricator_id`・`fabricator_snapshot`・`status`・`items`（`path` を除く）・`quantity`・`color`・`felt`・`price`・`lead_days`・`printer`・`approval`・`shipping`・`demo`・各日時。`case_id`・`design_id`・`owner_uid`・採寸・手のメッシュ・聞き取りは返さない。`approval` は `{ kind }`（`ot` なら `decided_at` も）だけで、OTのメールは返さない。取り消した注文の `shipping` は `null`
+- `files/{print_key}`：取り消された注文は `403`。Storage から読み、注文の `sha256` と違えば `409 STALE_DESIGN`、ファイルがなければ `404`。`Content-Type: model/stl`
+- `status`：本文 `{ "status": "printing" }`（`received` から）か `{ "status": "shipped" }`（`printing` から）。順番が違えば `409`、ほかの値は `400`
 
 ## 4. 手のメッシュ復元サービス `hand-mesh`
 
