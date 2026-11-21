@@ -9,6 +9,8 @@ import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/session.dart';
 import 'package:jijogu_app/core/storage/files.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
+import 'package:jijogu_app/features/order/order_logic.dart';
+import 'package:jijogu_app/features/order/order_status_card.dart';
 
 const caseStatusJa = {
   'interviewing': '聞き取り中',
@@ -42,10 +44,23 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   bool _busy = false;
 
+  /// 受託者アカウントなら「受けた注文」の入口を出す（設計 §6.4）
+  bool _isFabricator = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _checkFabricator();
+  }
+
+  Future<void> _checkFabricator() async {
+    try {
+      await Api.instance.get('/v1/fabricator/me');
+      if (mounted) setState(() => _isFabricator = true);
+    } catch (_) {
+      // 受託者アカウントでなければ 403。入口を出さない
+    }
   }
 
   Future<void> _load() async {
@@ -129,6 +144,12 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       large: true,
       actions: [
+        if (_isFabricator)
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).pushNamed(Paths.fabricator()),
+            icon: const Icon(Icons.storefront_rounded),
+            label: const Text('受けた注文'),
+          ),
         _AccountMenu(name: Session.instance.displayName),
         const SizedBox(width: 4),
       ],
@@ -325,6 +346,8 @@ class _CaseCardState extends State<_CaseCard> {
     }
     final title = '${c['title'] ?? '道具'}';
     final updated = _updated(c['updated_at']);
+    final lo = c['latest_order'] is Map ? Map<String, dynamic>.from(c['latest_order'] as Map) : null;
+    final orderLabel = lo == null ? '' : '注文：${orderStatusJa('${lo['status']}')}';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Material(
@@ -337,7 +360,7 @@ class _CaseCardState extends State<_CaseCard> {
             Expanded(
               child: Semantics(
                 button: true,
-                label: '$title、$label、$updated',
+                label: '$title、$label${orderLabel.isEmpty ? '' : '、$orderLabel'}、$updated',
                 excludeSemantics: true,
                 child: InkWell(
                   onTap: widget.onTap,
@@ -354,6 +377,14 @@ class _CaseCardState extends State<_CaseCard> {
                               Text(title, style: AppText.titleMedium),
                               const SizedBox(height: 4),
                               StatusLabel(label: label, tone: tone, icon: icon),
+                              if (lo != null) ...[
+                                const SizedBox(height: 4),
+                                StatusLabel(
+                                  label: orderLabel,
+                                  tone: OrderStatusCard.toneOf('${lo['status']}'),
+                                  icon: Icons.local_shipping_rounded,
+                                ),
+                              ],
                               if (updated.isNotEmpty) ...[
                                 const SizedBox(height: 4),
                                 Text(

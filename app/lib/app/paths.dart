@@ -7,6 +7,10 @@ class Paths {
       '/cases/$c/designs/${d ?? 'new'}';
   static String print(String c, String d) => '/cases/$c/designs/$d/print';
   static String review(String c) => '/review/$c';
+  static String order(String c, String d) => '/cases/$c/designs/$d/order';
+  static String orderForm(String c, String d, String f) => '/cases/$c/designs/$d/order/$f';
+  static String fabricator() => '/fabricator';
+  static String fabricatorOrder(String o) => '/fabricator/orders/$o';
 }
 
 /// ケースの状態から、続きの画面を決める（docs/screens.md §1）
