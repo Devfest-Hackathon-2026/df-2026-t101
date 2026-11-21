@@ -129,7 +129,8 @@ void main() {
         ),
       ));
       expect(find.textContaining('今の版の画面から頼んでください'), findsOneWidget);
-      expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget); // 押せるのは「自分で刷る」だけ
+      expect(find.byIcon(Icons.chevron_right_rounded), findsNothing); // 「刷ってもらう」は押せない
+      expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget); // 押せるのは「自分で刷る」だけ
     });
     test('mock: 受託者にはOTのメールを見せない', () async {
       final m = MockBackend.instance;
@@ -148,6 +149,30 @@ void main() {
       expect(v['approval']['kind'], 'ot');
       expect((v['approval'] as Map).containsKey('reviewer_email'), isFalse);
       expect('$v'.contains('ot@example.com'), isFalse);
+    });
+  });
+
+  group('自分で刷る（開いて、もう一度押すと閉じる）', () {
+    Widget choice(bool open, VoidCallback onSelf) => MaterialApp(
+      home: Scaffold(
+        body: PrintChoice(onOrder: () {}, onSelfPrint: onSelf, fabricators: null, selfPrintOpen: open),
+      ),
+    );
+    testWidgets('閉じているときは下向き、開いているときは上向きの矢印（説明の文は変えない）', (tester) async {
+      await tester.pumpWidget(choice(false, () {}));
+      expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.expand_less_rounded), findsNothing);
+      await tester.pumpWidget(choice(true, () {}));
+      expect(find.byIcon(Icons.expand_less_rounded), findsOneWidget);
+      expect(find.textContaining('もう一度押すと閉じます'), findsNothing); // 矢印の向きだけで伝える
+      expect(find.text('印刷用のファイル（STL）をダウンロードします'), findsOneWidget);
+    });
+    testWidgets('押すたびに呼ばれる', (tester) async {
+      var n = 0;
+      await tester.pumpWidget(choice(false, () => n++));
+      await tester.tap(find.text('自分で刷る'));
+      await tester.tap(find.text('自分で刷る'));
+      expect(n, 2);
     });
   });
 }

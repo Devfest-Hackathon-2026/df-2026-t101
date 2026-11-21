@@ -13,7 +13,11 @@ class PrintChoice extends StatelessWidget {
     required this.fabricators,
     this.compact = false,
     this.unavailableReason,
+    this.selfPrintOpen = false,
   });
+
+  /// 「自分で刷る」のダウンロードの欄を開いているか（もう一度押すと閉じる）
+  final bool selfPrintOpen;
 
   /// null なら「刷ってもらう」は押せず、[unavailableReason] を出す
   final VoidCallback? onOrder;
@@ -53,6 +57,8 @@ class PrintChoice extends StatelessWidget {
           title: '自分で刷る',
           sub: '印刷用のファイル（STL）をダウンロードします',
           onTap: onSelfPrint,
+          trailing: selfPrintOpen ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+          expanded: selfPrintOpen,
         ),
       ],
     );
@@ -67,7 +73,13 @@ class _Option extends StatelessWidget {
     required this.title,
     required this.sub,
     required this.onTap,
+    this.trailing = Icons.chevron_right_rounded,
+    this.expanded,
   });
+  final IconData trailing;
+
+  /// 開け閉めするボタンなら、開いているか（読み上げに伝える）
+  final bool? expanded;
   final bool primary;
   final bool compact;
   final IconData icon;
@@ -85,6 +97,7 @@ class _Option extends StatelessWidget {
       child: Semantics(
         button: true,
         enabled: enabled,
+        expanded: expanded,
         label: '$title。$sub',
         excludeSemantics: true,
         child: Material(
@@ -119,7 +132,7 @@ class _Option extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (enabled) Icon(Icons.chevron_right_rounded, color: fg),
+                    if (enabled) Icon(trailing, color: fg),
                   ],
                 ),
               ),

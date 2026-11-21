@@ -146,7 +146,8 @@ class _PrintScreenState extends State<PrintScreen> {
     final choice = PrintChoice(
       onOrder: _fabs == null ? null : _openOrder,
       unavailableReason: _fabsError,
-      onSelfPrint: () => setState(() => _selfPrint = true),
+      onSelfPrint: () => setState(() => _selfPrint = !_selfPrint),
+      selfPrintOpen: _selfPrint,
       fabricators: _fabs,
       compact: active != null,
     );
