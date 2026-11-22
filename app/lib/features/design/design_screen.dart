@@ -528,7 +528,8 @@ class _DesignScreenState extends State<DesignScreen> {
     final locked = approval == 'requested';
     final idle = _busy == null;
     return AppPage(
-      title: '形を確かめる（${d['revision'] ?? 1}版）',
+      // 版の番号は見出しに出さない（使う人には「版」が分かりにくい。2026-11-22）
+      title: '形を確かめる',
       onBack: () =>
           Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
       bottom: _bottom(
@@ -540,7 +541,7 @@ class _DesignScreenState extends State<DesignScreen> {
       ),
       children: _spaced(12, [
         if (demo) const DemoBanner(),
-        // 直してできた版：何を直したか（版の番号は見出しにある）
+        // 直してできた版：何を直したか
         if (widget.doneNotice != null)
           Semantics(
             liveRegion: true,
