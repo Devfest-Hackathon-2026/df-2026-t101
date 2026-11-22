@@ -46,7 +46,7 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
       setState(() {
         _ready = true;
         _cameras = (r['cameras'] as num?)?.toInt() ?? 1;
-        _status = '1円玉を手の甲に置き、こぶし全体を画面に入れてください';
+        _status = '1円玉を手の甲にのせて、指先から手首までを画面に入れてください';
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -137,7 +137,7 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
         : _recording
         ? (_handVisible
               ? (_Tone.success, '手が見えています。スマホをゆっくり半周させてください')
-              : (_Tone.warning, '手が見えません。こぶし全体を画面に入れてください'))
+              : (_Tone.warning, '手が見えません。指先から手首までを画面に入れてください'))
         : (_Tone.info, _status);
 
     // 録画中は、閉じる前に確かめる（左上の「×」もブラウザの戻るも、ここを通る）

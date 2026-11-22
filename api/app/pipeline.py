@@ -630,7 +630,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "cover_shell_sha256": result.get("cover_shell_sha256"),
             "clip_angle_deg": angle, "clip": result.get("clip"), "tool": result.get("tool"), "checks": result.get("checks", []),
             "attachments": atts,
-            "summary_ja": summary_ja or "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
+            "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
             "input_snapshot": {"requirements": new_req or req, "measurement_id": case.get("measurement_id"),
                                "hand_model": case.get("hand_model")},
             "usage": {**usage.as_dict(), "openscad_ms": (result.get("timings_ms") or {}).get("openscad", 0)},

@@ -19,8 +19,8 @@ import 'package:jijogu_app/core/viewer/viewer_3d.dart';
 const _stepJa = {
   'selecting': '部品を選んでいます',
   'dimensioning': '寸法を決めています',
-  'shelling': 'カバーの形を作っています（こぶしに沿った殻とクリップ）',
-  'rendering': 'カバーの形を作っています（こぶしに沿った殻とクリップ）',
+  'shelling': 'カバーの形を作っています（手の甲に沿った殻とクリップ）',
+  'rendering': 'カバーの形を作っています（手の甲に沿った殻とクリップ）',
   'reviewing': '画像で確認しています',
 };
 const _steps = ['selecting', 'dimensioning', 'shelling', 'reviewing'];

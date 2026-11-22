@@ -118,7 +118,7 @@ orders/{orderId}
 | `print_internal` | map | OTに頼んだときに作った `internal/` の印刷用STLのパス（部品のキー → パス）。承認のときに、ここから `print/` へコピーする |
 | `input_snapshot` | map | その版の採寸・要件・手のモデル。ケースの現在値が変わっても書き換えない |
 | `model` | map | `{ id, location }` |
-| `prompt_versions` | map | 例（11/10 時点）：`{ system: "v2", interview: "v1", select: "v1", dimension: "v3", attachment: "v2", review: "v1", refine: "v1" }` |
+| `prompt_versions` | map | 例（11/22 時点）：`{ system: "v3", interview: "v1", select: "v1", dimension: "v3", attachment: "v2", review: "v1", refine: "v1" }` |
 | `usage` | map | `{ input_tokens, output_tokens, gemini_calls, models, openscad_ms }`。`models` は呼び出しの種類ごとに実際に答えたモデル（予備に切り替えたかが分かる） |
 | `error` | map | 失敗したときのエラー（[api.md §5](api.md#5-エラー)と同じ形） |
 | `created_at` | timestamp | — |

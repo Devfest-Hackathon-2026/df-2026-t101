@@ -695,7 +695,7 @@ class MockBackend {
       'style': {'color': color, 'pattern': 'none'},
       'approval': {'status': 'none'},
       'summary_ja':
-          'こぶしの外側に沿うカバーに、道具の太さ${toolD}mmに合わせた$angle度のクリップを付けました。手のひら側と手首は開けてあります。${note == null ? '' : '（「$note」に合わせて直しました）'}',
+          '手の甲に沿うカバーに、道具の太さ${toolD}mmに合わせた$angle度のクリップを付けました。手のひら側と手首は開けてあります。${note == null ? '' : '（「$note」に合わせて直しました）'}',
     };
     _designs[id] = d;
     c['current_design_id'] = id;
