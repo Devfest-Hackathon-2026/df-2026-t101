@@ -573,9 +573,10 @@ class _DesignScreenState extends State<DesignScreen> {
         if (_error != null) ErrorCard(message: _error!),
         // 取り付け具の切り替え（2つ以上のときだけ。ADR-0014 §5）
         if (multi) _attachmentTabs(atts, attId),
-        // 3D表示（three.js）
+        // 3D表示（three.js）。3D表示の上では1本指のスワイプで3Dが回り、ページはスクロールしない。片手の親指で
+        // スクロールしにくかったので、326から240に縮めた（2026-11-22）
         SizedBox(
-          height: 326,
+          height: 240,
           child: parts.isEmpty
               ? Container(
                   decoration: BoxDecoration(

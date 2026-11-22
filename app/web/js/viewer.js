@@ -27,7 +27,8 @@ function setup(el) {
   scene.add(dir2);
   const camera = new THREE.PerspectiveCamera(35, 1, 1, 5000);
   const controls = new TrackballControls(camera, renderer.domElement);
-  controls.rotateSpeed = 3.0;
+  // 回す速さ。3.0 では少し触れただけで大きく回り、指が震える人や曲がったまま触れる人が向きを保てなかった（2026-11-22 に 3.0 から）
+  controls.rotateSpeed = 1.2;
   controls.zoomSpeed = 1.2;
   controls.panSpeed = 0.6;
   controls.dynamicDampingFactor = 0.15;
