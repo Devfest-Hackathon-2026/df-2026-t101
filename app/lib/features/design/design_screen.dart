@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
+import 'package:jijogu_app/core/models/param_step.dart';
 import 'package:jijogu_app/core/models/refine_choice.dart';
 import 'package:jijogu_app/core/models/requirements.dart' show ToolAnswer;
 import 'package:jijogu_app/core/storage/files.dart';
@@ -1220,7 +1221,7 @@ class _ParamLabel {
 }
 
 const Map<String, _ParamLabel> _paramLabels = {
-  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '軽い', highJa: '丈夫'),
+  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '薄い', highJa: '厚い'),
   'cover.palm_cut_offset_mm': _ParamLabel('手のひら側をどこまで覆うか', 'プラスにするとカバーが手のひら側へ深くなり、マイナスにすると浅く小さくなります。手のひらは覆いません', lowJa: '浅い', highJa: '深い'),
   'cover.wrist_cut_mm': _ParamLabel('手首からカバーまでの長さ', '大きくするとカバーが短くなり、手首が動かしやすくなります', lowJa: '長いカバー', highJa: '短いカバー'),
   'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '丸い'),
@@ -1321,6 +1322,32 @@ class _NumberSheetState extends State<_NumberSheet> {
     final orig = (p['value'] as num).toDouble().clamp(lo, hi);
     final v = (_pending[key] ?? orig).toDouble().clamp(lo, hi);
     final changed = _pending.containsKey(key);
+    // 値を1つ決める（スライダー・−／＋ボタン共通）。元の値に戻したら、変えていない扱い
+    void put(num nv) => setState(() {
+      if ((nv - orig).abs() < 1e-9) {
+        _pending.remove(key);
+      } else {
+        _pending[key] = nv;
+      }
+    });
+    // −／＋ボタン（ToolDmmCard と同じ丸い大きなボタン）。曲がった指ではスライダーを狙った値に止められないので、
+    // 1段ずつ動かせるようにする（2026-11-22）。値を変えるとカードが水色になるので、そのときはボタンを白地にして溶けないようにする。
+    // 読み上げでは外す（カードは MergeSemantics で1つにまとまり、押せるものが重なる。読み上げではスライダーの増やす・減らすで1段ずつ動かせる）
+    Widget stepButton(int dir) => ExcludeSemantics(
+      child: IconButton.filled(
+        tooltip: dir > 0 ? '${label.title}を増やす' : '${label.title}を減らす',
+        iconSize: 28,
+        style: IconButton.styleFrom(
+          fixedSize: const Size(56, 56),
+          backgroundColor: changed ? AppColors.surfaceContainerLowest : AppColors.secondaryContainer,
+          foregroundColor: AppColors.onSecondaryContainer,
+        ),
+        onPressed: canStep(v, dir, lo: lo, hi: hi)
+            ? () => put(stepParam(v, dir, lo: lo, hi: hi, isInt: isInt))
+            : null,
+        icon: Icon(dir > 0 ? Icons.add_rounded : Icons.remove_rounded),
+      ),
+    );
     return MergeSemantics(
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -1343,21 +1370,22 @@ class _NumberSheetState extends State<_NumberSheet> {
             ),
             const SizedBox(height: 2),
             Text(label.help, style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant)),
-            Slider(
-              min: lo,
-              max: hi,
-              divisions: isInt ? (hi - lo).round().clamp(1, 100) : ((hi - lo) * 10).round().clamp(1, 200),
-              value: v,
-              label: '${_fmt(v, isInt)} ${label.unit}',
-              semanticFormatterCallback: (x) => '${label.title} ${_fmt(x, isInt)} ${label.unit}',
-              onChanged: (x) => setState(() {
-                final nv = isInt ? x.round() : double.parse(x.toStringAsFixed(1));
-                if ((nv - orig).abs() < 1e-9) {
-                  _pending.remove(key); // 元の値に戻したら、変えていない扱い
-                } else {
-                  _pending[key] = nv;
-                }
-              }),
+            Row(
+              children: [
+                stepButton(-1),
+                Expanded(
+                  child: Slider(
+                    min: lo,
+                    max: hi,
+                    divisions: isInt ? (hi - lo).round().clamp(1, 100) : ((hi - lo) * 10).round().clamp(1, 200),
+                    value: v,
+                    label: '${_fmt(v, isInt)} ${label.unit}',
+                    semanticFormatterCallback: (x) => '${label.title} ${_fmt(x, isInt)} ${label.unit}',
+                    onChanged: (x) => put(isInt ? x.round() : double.parse(x.toStringAsFixed(1))),
+                  ),
+                ),
+                stepButton(1),
+              ],
             ),
             if (label.lowJa != null || label.highJa != null)
               Row(
