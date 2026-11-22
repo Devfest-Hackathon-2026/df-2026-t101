@@ -333,23 +333,40 @@ class SuggestButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    this.selected = false,
   });
   final String label;
   final VoidCallback? onPressed;
 
+  /// 選んでいる（S7：押すと選ぶだけで、画面の下のボタンで送る）。色だけで伝えないようチェックも付ける
+  final bool selected;
+
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(48, 48),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        textStyle: AppText.labelLarge.copyWith(fontSize: 16),
-        foregroundColor: AppColors.onSurfaceVariant,
-        side: const BorderSide(color: AppColors.outlineVariant),
+    final style = OutlinedButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      textStyle: AppText.labelLarge.copyWith(fontSize: 16),
+      foregroundColor: selected
+          ? AppColors.onSecondaryContainer
+          : AppColors.onSurfaceVariant,
+      backgroundColor: selected ? AppColors.secondaryContainer : null,
+      side: BorderSide(
+        color: selected ? AppColors.secondary : AppColors.outlineVariant,
+        width: selected ? 2 : 1,
       ),
-      child: Text(label),
+    );
+    return Semantics(
+      selected: selected,
+      child: selected
+          ? OutlinedButton.icon(
+              onPressed: onPressed,
+              style: style,
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: Text(label),
+            )
+          : OutlinedButton(onPressed: onPressed, style: style, child: Text(label)),
     );
   }
 }

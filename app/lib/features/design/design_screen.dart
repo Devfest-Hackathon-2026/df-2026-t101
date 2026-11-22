@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
+import 'package:jijogu_app/core/models/refine_choice.dart';
 import 'package:jijogu_app/core/models/requirements.dart' show ToolAnswer;
 import 'package:jijogu_app/core/storage/files.dart';
 import 'package:jijogu_app/core/text_ja.dart';
@@ -50,12 +51,14 @@ class DesignScreen extends StatefulWidget {
     this.autoStart = false,
     this.recommendedAngles = const {},
     this.attachmentId,
+    this.doneNotice,
   });
   final String caseId;
   final String? designId;
   final bool autoStart;
   final Map<String, int> recommendedAngles; // 取り付け具ごとにAIが選んだ角度（版をまたいで「おすすめ」を出すため）
   final String? attachmentId; // 選んでいる取り付け具（新しい版でも同じものを見せるため）
+  final String? doneNotice; // 直してできた版を開いたときに上に出す文（何を直したか）
   @override
   State<DesignScreen> createState() => _DesignScreenState();
 }
@@ -69,7 +72,10 @@ class _DesignScreenState extends State<DesignScreen> {
   String? _progressIso; // 生成中に読めた確認用画像（S6「AIが確認している画像」）
   String? _error;
   bool _errorRetry = false;
-  String? _busy; // 微調整中の文
+  String? _busy; // 微調整中の文（画面の下のボタンの所に出す。上に出すと、下のほうで押したときに見えない）
+  // 選んだ直し方（よく使う指示・角度）。押しただけでは送らず、画面の下の「〜で直す」で送る（2026-11-22）
+  RefineChoice? _choice;
+  String? _refineError; // 直すのに失敗したときの文（画面の下に出す）
   bool _showHand = true;
   late Map<String, int> _recommended = {...widget.recommendedAngles};
   late String? _attId = widget.attachmentId; // 選んでいる取り付け具（最初は主な取り付け具）
@@ -264,7 +270,7 @@ class _DesignScreenState extends State<DesignScreen> {
   }
 
   /// 新しい版を開く（パスも新しい版にする。戻るでケース一覧へ）
-  void _openVersion(String nid) {
+  void _openVersion(String nid, {String? notice}) {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         settings: RouteSettings(name: AppRouter.design(_cid, nid)),
@@ -273,17 +279,39 @@ class _DesignScreenState extends State<DesignScreen> {
           designId: nid,
           recommendedAngles: _recommended,
           attachmentId: _attId,
+          doneNotice: notice,
         ),
       ),
     );
   }
 
-  Future<void> _refine(Map<String, dynamic> body, String busyText) async {
+  /// 選んだ直し方を送る（画面の下の「〜で直す」）
+  Future<void> _sendChoice() async {
+    final c = _choice;
+    if (c == null) return;
+    await _refine(c.body, c.busyText, doneText: c.doneText, choice: c);
+  }
+
+  /// 選ぶ・選び直す。同じものをもう一度押したら、選ぶのをやめる
+  void _toggleChoice(RefineChoice c) => setState(() {
+    _choice = _choice == c ? null : c;
+    _refineError = null;
+  });
+
+  /// [doneText] は新しい版を開いたときに上に出す文。失敗したら [choice] を選んだままに戻す（入力を残す）
+  Future<void> _refine(
+    Map<String, dynamic> body,
+    String busyText, {
+    String? doneText,
+    RefineChoice? choice,
+  }) async {
     final d = _design;
     if (d == null) return;
     setState(() {
       _busy = busyText;
       _error = null;
+      _refineError = null;
+      _choice = null;
       _clarify = null;
     });
     try {
@@ -300,7 +328,10 @@ class _DesignScreenState extends State<DesignScreen> {
         _attId = selectionAfter(before, _attachments(nd), _attId);
         _setDesign(nd);
         if (r['design']['design_id'] != d['design_id'] && mounted) {
-          _openVersion(r['design']['design_id'] as String); // 新しい版
+          _openVersion(
+            r['design']['design_id'] as String,
+            notice: doneText,
+          ); // 新しい版
         }
       }
     } on ApiError catch (e) {
@@ -308,7 +339,10 @@ class _DesignScreenState extends State<DesignScreen> {
         _followServer();
         return;
       }
-      setState(() => _error = e.message);
+      setState(() {
+        _refineError = e.message;
+        _choice = choice;
+      });
     } finally {
       if (mounted && !_detached) setState(() => _busy = null);
     }
@@ -496,43 +530,25 @@ class _DesignScreenState extends State<DesignScreen> {
       title: '形を確かめる（${d['revision'] ?? 1}版）',
       onBack: () =>
           Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
-      bottom: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (approval == 'approved')
-            FilledButton.icon(
-              onPressed: () =>
-                  Navigator.of(context)
-                      .pushNamed(AppRouter.print(_cid, d['design_id'])),
-              icon: const Icon(Icons.print_rounded),
-              label: const Text('印刷へ進む'),
-            )
-          else ...[
-            FilledButton.icon(
-              onPressed: !idle || (locked && !demo)
-                  ? null
-                  : () => _openReview(d),
-              icon: Icon(
-                locked && !demo
-                    ? Icons.hourglass_top_rounded
-                    : Icons.verified_user_rounded,
-              ),
-              label: Text(locked && !demo ? '確認を待っています' : 'OTに確認を頼む'),
-            ),
-            if (demo) ...[
-              const SizedBox(height: 8),
-              FilledButton.tonalIcon(
-                onPressed: idle ? _prepareDemo : null,
-                icon: const Icon(Icons.print_rounded),
-                label: const Text('印刷用データを作る（デモ）'),
-              ),
-            ],
-          ],
-        ],
+      bottom: _bottom(
+        d,
+        demo: demo,
+        approval: approval,
+        locked: locked,
+        idle: idle,
       ),
       children: _spaced(12, [
         if (demo) const DemoBanner(),
+        // 直してできた版：何を直したか（版の番号は見出しにある）
+        if (widget.doneNotice != null)
+          Semantics(
+            liveRegion: true,
+            child: InfoCard(
+              tone: NoticeTone.success,
+              icon: Icons.check_circle_outline_rounded,
+              child: Text(widget.doneNotice!),
+            ),
+          ),
         if (d['status'] == 'needs_attention')
           InfoCard(
             tone: NoticeTone.warning,
@@ -554,7 +570,6 @@ class _DesignScreenState extends State<DesignScreen> {
             icon: Icons.check_circle_outline_rounded,
             child: Text('カバーは前の版と同じです。刷ってあるカバーをそのまま使えます'),
           ),
-        if (_busy != null) BusyCard(text: _busy!),
         if (_error != null) ErrorCard(message: _error!),
         // 取り付け具の切り替え（2つ以上のときだけ。ADR-0014 §5）
         if (multi) _attachmentTabs(atts, attId),
@@ -621,24 +636,37 @@ class _DesignScreenState extends State<DesignScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // 道具の立て具合（机に対する傾き。ADR-0013、2026-11-08 に 0/20/40 から変えた）
+              // 押すと選ぶだけ。画面の下の「〜で描き直す」で送る。隣を押し間違えにくいよう、すき間は8（2026-11-22 に2から）
               for (final (i, a) in const [60, 70, 80].indexed) ...[
-                if (i > 0) const SizedBox(width: 2),
+                if (i > 0) const SizedBox(width: 8),
                 Expanded(
                   child: _AngleButton(
                     angle: a,
-                    selected: a == angle,
+                    selected: a == (_choice?.angle ?? angle),
+                    current: a == angle,
                     recommended: a == _recommended[attId],
                     position: i == 0
                         ? _GroupPos.first
                         : (i == 2 ? _GroupPos.last : _GroupPos.middle),
-                    onTap: () {
-                      if (a != angle && _busy == null) {
-                        _refine(
-                          withAttachment({'clip_angle_deg': a}, d, attId),
-                          '${multi ? '$labelの' : ''}クリップを$a度で描き直しています（カバーはそのままです）',
-                        );
-                      }
-                    },
+                    onTap: !idle
+                        ? null
+                        : () {
+                            if (a == angle) {
+                              // いまの角度を押したら、角度を選ぶのをやめる
+                              if (_choice?.angle != null) {
+                                setState(() => _choice = null);
+                              }
+                            } else {
+                              _toggleChoice(
+                                RefineChoice.angle(
+                                  a,
+                                  d,
+                                  attId,
+                                  toolLabel: multi ? label : null,
+                                ),
+                              );
+                            }
+                          },
                   ),
                 ),
               ],
@@ -665,6 +693,8 @@ class _DesignScreenState extends State<DesignScreen> {
           style: _noteStyle,
         ),
         const _Heading('言葉で直す'),
+        // 押すと選ぶだけ。「もう少しゆるく」と「もう少しきつく」のような反対の指示が隣にあるので、
+        // 押し間違えても作り直さないよう、画面の下の「〜で直す」で送る（2026-11-22）
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -676,14 +706,15 @@ class _DesignScreenState extends State<DesignScreen> {
               '空気穴を増やす',
               'クリップを外しやすく',
             ])
-              SuggestButton(
-                label: t,
-                onPressed: !idle
-                    ? null
-                    : () => _refine(
-                        withAttachment({'instruction': t}, d, attId),
-                        '「$t」に合わせて直しています',
-                      ),
+              Builder(
+                builder: (_) {
+                  final c = RefineChoice.instruction(t, d, attId);
+                  return SuggestButton(
+                    label: t,
+                    selected: _choice == c,
+                    onPressed: !idle ? null : () => _toggleChoice(c),
+                  );
+                },
               ),
           ],
         ),
@@ -722,6 +753,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   : () => _refine(
                       withAttachment({'instruction': _instruction.text.trim()}, d, attId),
                       '「${_instruction.text.trim()}」に合わせて直しています',
+                      doneText: '「${_instruction.text.trim()}」に合わせて直しました',
                     ),
             ),
           ],
@@ -783,6 +815,84 @@ class _DesignScreenState extends State<DesignScreen> {
           child: Text('手のひら側を開ける・手首を覆わない・角を丸める・厚みの下限は、見た目のためでも変えられません。'),
         ),
       ]),
+    );
+  }
+
+  /// S7 の画面の下（いつも見える所）。直している間はその文、直し方を選んだら「〜で直す」、それ以外はいつものボタン。
+  /// 直す操作はページの下のほうにあるので、待つ文や失敗の文を上に出すと見えない（2026-11-22）
+  Widget _bottom(
+    Map<String, dynamic> d, {
+    required bool demo,
+    required String approval,
+    required bool locked,
+    required bool idle,
+  }) {
+    if (_busy != null) {
+      // Column で包む（画面の下の欄は高さの上限が画面いっぱいなので、そのままだと札が伸びる）
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(liveRegion: true, child: BusyCard(text: _busy!)),
+        ],
+      );
+    }
+    final choice = _choice;
+    final note = choice == null ? null : reReviewNote(approval);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_refineError != null) ...[
+          Semantics(liveRegion: true, child: ErrorCard(message: _refineError!)),
+          const SizedBox(height: 8),
+        ],
+        if (choice != null) ...[
+          if (note != null) ...[
+            Text(note, style: _noteStyle),
+            const SizedBox(height: 8),
+          ],
+          FilledButton.icon(
+            onPressed: _sendChoice,
+            icon: const Icon(Icons.auto_fix_high_rounded),
+            label: Text(choice.buttonLabel),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () => setState(() {
+              _choice = null;
+              _refineError = null;
+            }),
+            child: const Text('選ぶのをやめる'),
+          ),
+        ] else if (approval == 'approved')
+          FilledButton.icon(
+            onPressed: () =>
+                Navigator.of(context)
+                    .pushNamed(AppRouter.print(_cid, d['design_id'])),
+            icon: const Icon(Icons.print_rounded),
+            label: const Text('印刷へ進む'),
+          )
+        else ...[
+          FilledButton.icon(
+            onPressed: !idle || (locked && !demo) ? null : () => _openReview(d),
+            icon: Icon(
+              locked && !demo
+                  ? Icons.hourglass_top_rounded
+                  : Icons.verified_user_rounded,
+            ),
+            label: Text(locked && !demo ? '確認を待っています' : 'OTに確認を頼む'),
+          ),
+          if (demo) ...[
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: idle ? _prepareDemo : null,
+              icon: const Icon(Icons.print_rounded),
+              label: const Text('印刷用データを作る（デモ）'),
+            ),
+          ],
+        ],
+      ],
     );
   }
 
@@ -898,6 +1008,7 @@ class _DesignScreenState extends State<DesignScreen> {
     await _refine(
       withAttachment({'param_changes': changes}, d, attId),
       '値に合わせて作り直しています',
+      doneText: '値に合わせて作り直しました',
     );
   }
 
@@ -918,7 +1029,11 @@ class _DesignScreenState extends State<DesignScreen> {
               materialTapTargetSize: MaterialTapTargetSize.padded,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               tooltip: '${attachmentLabel(a, atts)}のクリップを見る',
-              onSelected: (_) => setState(() => _attId = a['id'] as String?),
+              // 選んだ角度・指示はその取り付け具のものなので、切り替えたら選び直してもらう
+              onSelected: (_) => setState(() {
+                _attId = a['id'] as String?;
+                _choice = null;
+              }),
             ),
         ],
       ),
@@ -948,12 +1063,14 @@ class _DesignScreenState extends State<DesignScreen> {
       await _refine(
         {'add_attachment': t.toJson()},
         '${toolJa[t.toolType] ?? '道具'}のクリップを足しています（カバーはそのままです）',
+        doneText: '${toolJa[t.toolType] ?? '道具'}のクリップを足しました',
       );
     } else {
       final v = toolDOf(t);
       await _refine(
         withAttachment({'tool_d_mm': v}, d, fix['id'] as String?),
         '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しています（カバーはそのままです）',
+        doneText: '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しました',
       );
     }
   }
@@ -1523,15 +1640,17 @@ class _AngleButton extends StatelessWidget {
   const _AngleButton({
     required this.angle,
     required this.selected,
+    required this.current,
     required this.recommended,
     required this.position,
     required this.onTap,
   });
   final int angle;
-  final bool selected;
+  final bool selected; // 選んでいる（いまの角度、または描き直すために選んだ角度）
+  final bool current; // いまの版の角度
   final bool recommended;
   final _GroupPos position;
-  final VoidCallback onTap;
+  final VoidCallback? onTap; // null なら押せない（直している間）
 
   BorderRadius get _radius {
     const big = Radius.circular(28), small = Radius.circular(8);
@@ -1546,56 +1665,72 @@ class _AngleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = selected ? AppColors.onSecondaryContainer : AppColors.onSurface;
+    // 別の角度を選んでいる間は、いまの版の角度に「いまの角度」と添える
+    final showCurrent = current && !selected;
     return Semantics(
       button: true,
+      enabled: onTap != null,
       inMutuallyExclusiveGroup: true,
       checked: selected,
-      label: 'クリップの角度 $angle度${recommended ? '（おすすめ）' : ''}',
+      label:
+          'クリップの角度 $angle度${recommended ? '（おすすめ）' : ''}${showCurrent ? '（いまの角度）' : ''}',
       excludeSemantics: true,
       onTap: onTap,
-      child: Material(
-        color: selected
-            ? AppColors.secondaryContainer
-            : AppColors.surfaceContainerHigh,
-        borderRadius: _radius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CustomPaint(
-                  size: const Size(48, 36),
-                  painter: _AnglePainter(
-                    angle: angle,
-                    color: selected
-                        ? AppColors.onSecondaryContainer
-                        : AppColors.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (selected) ...[
-                      Icon(
-                        Icons.check_circle_outline_rounded,
-                        size: 18,
-                        color: fg,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      '$angle度',
-                      style: AppText.titleMedium.copyWith(color: fg),
+      // 直している間は薄くして、押せないことを見せる
+      child: Opacity(
+        opacity: onTap == null ? 0.38 : 1,
+        child: Material(
+          color: selected
+              ? AppColors.secondaryContainer
+              : AppColors.surfaceContainerHigh,
+          borderRadius: _radius,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CustomPaint(
+                    size: const Size(48, 36),
+                    painter: _AnglePainter(
+                      angle: angle,
+                      color: selected
+                          ? AppColors.onSecondaryContainer
+                          : AppColors.onSurfaceVariant,
                     ),
-                  ],
-                ),
-                if (recommended)
-                  Text('おすすめ', style: AppText.labelMedium.copyWith(color: fg)),
-              ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (selected) ...[
+                        Icon(
+                          Icons.check_circle_outline_rounded,
+                          size: 18,
+                          color: fg,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        '$angle度',
+                        style: AppText.titleMedium.copyWith(color: fg),
+                      ),
+                    ],
+                  ),
+                  if (recommended)
+                    Text(
+                      'おすすめ',
+                      style: AppText.labelMedium.copyWith(color: fg),
+                    ),
+                  if (showCurrent)
+                    Text(
+                      'いまの角度',
+                      style: AppText.labelMedium.copyWith(color: fg),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
