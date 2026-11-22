@@ -436,8 +436,10 @@ class _DesignScreenState extends State<DesignScreen> {
     return AppPage(
       title: '形を作っています',
       bottom: OutlinedButton(
+        // ホームへ戻るだけで、形を作る処理はサーバーで続く（中止の API はない）。
+        // 前は「中止して戻る」で、止まると思われやすかった（2026-11-22）
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('中止して戻る（作業は続きます）'),
+        child: const Text('ホームに戻る（作業は続きます）'),
       ),
       children: _spaced(16, [
         if (iso != null) _CheckImage(path: iso),
