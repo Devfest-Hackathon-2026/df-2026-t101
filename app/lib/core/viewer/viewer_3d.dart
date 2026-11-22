@@ -28,6 +28,12 @@ extension type _Viewer._(JSObject _) implements JSObject {
   external void setHandVisible(web.HTMLElement el, bool visible);
   external void reframe(web.HTMLElement el);
   external void dispose(web.HTMLElement el);
+  external JSPromise<JSString> renderThumb(
+    String url,
+    String headersJson,
+    String color,
+    int size,
+  );
 }
 
 @JS('jijoguViewer')
@@ -40,6 +46,15 @@ Future<_Viewer> _waitViewer() async {
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
   throw StateError('3D表示の準備ができませんでした');
+}
+
+/// 部品の小さな画像（S10 のダウンロードの行）。ダウンロードする STL を、刷る向きのまま、足もとに薄い影を付けて描き、
+/// PNG の data URL を返す（web/js/viewer.js の renderThumb）
+Future<String> renderPartThumbnail(String path, String color, int size) async {
+  final v = await _waitViewer();
+  final r = await Files.resolve(path);
+  final data = await v.renderThumb(r.url, jsonEncode(r.headers), color, size).toDart;
+  return data.toDart;
 }
 
 /// 表示する部品（Storage のパスと色）

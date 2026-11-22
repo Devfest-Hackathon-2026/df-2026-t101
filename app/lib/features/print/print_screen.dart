@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -8,6 +10,7 @@ import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
+import 'package:jijogu_app/core/viewer/viewer_3d.dart';
 import 'package:jijogu_app/features/order/order_logic.dart';
 import 'package:jijogu_app/features/order/order_status_card.dart';
 import 'package:jijogu_app/features/order/order_widgets.dart';
@@ -317,6 +320,8 @@ class _PrintScreenState extends State<PrintScreen> {
           for (final r in rows)
             _PartCard(
               partId: r.partId,
+              path: r.path,
+              color: colorHex.isEmpty ? '#2A9D8F' : colorHex,
               name: r.name,
               fileName: r.path.split('/').last,
               howTo: _partHowTo[r.partId],
@@ -602,6 +607,8 @@ class _ApprovedCard extends StatelessWidget {
 class _PartCard extends StatelessWidget {
   const _PartCard({
     required this.partId,
+    required this.path,
+    required this.color,
     required this.name,
     required this.fileName,
     required this.howTo,
@@ -609,6 +616,8 @@ class _PartCard extends StatelessWidget {
     required this.downloadLabel,
   });
   final String partId;
+  final String path; // ダウンロードする STL（絵もこれから描く）
+  final String color; // 刷る色
   final String name;
   final String fileName;
   final String? howTo;
@@ -624,20 +633,17 @@ class _PartCard extends StatelessWidget {
       child: Row(
         children: [
           ExcludeSemantics(
-            child: img != null
-                ? SvgPicture.asset(img, width: 56, height: 56)
-                : Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: const Icon(
+            child: _PartThumb(
+              path: path,
+              color: color,
+              // 描けるまで（描けなかったとき）は、今までの絵
+              placeholder: img != null
+                  ? SvgPicture.asset(img, width: 56, height: 56)
+                  : const Icon(
                       Icons.view_in_ar_rounded,
                       color: AppColors.onSurfaceVariant,
                     ),
-                  ),
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -665,6 +671,61 @@ class _PartCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 部品の絵：ダウンロードする STL そのものを、刷る向きのまま、足もとに薄い影を付けて描く（2026-11-22。
+/// 前は部品の種類ごとの決まった絵で、実際の形が分からなかった）。一度描いたものは覚えておく
+class _PartThumb extends StatefulWidget {
+  const _PartThumb({required this.path, required this.color, required this.placeholder});
+  final String path;
+  final String color;
+  final Widget placeholder;
+
+  static const size = 88.0;
+  static final _cache = <String, Uint8List>{};
+
+  @override
+  State<_PartThumb> createState() => _PartThumbState();
+}
+
+class _PartThumbState extends State<_PartThumb> {
+  Uint8List? _png;
+
+  String get _key => '${widget.path}|${widget.color}';
+
+  @override
+  void initState() {
+    super.initState();
+    _png = _PartThumb._cache[_key];
+    if (_png == null) unawaited(_draw());
+  }
+
+  Future<void> _draw() async {
+    try {
+      final px = (_PartThumb.size * MediaQuery.devicePixelRatioOf(context)).round().clamp(88, 264);
+      final data = await renderPartThumbnail(widget.path, widget.color, px);
+      final png = base64Decode(data.substring(data.indexOf(',') + 1));
+      _PartThumb._cache[_key] = png;
+      if (mounted) setState(() => _png = png);
+    } catch (_) {
+      // 描けなければ今までの絵のまま
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: _PartThumb.size,
+    height: _PartThumb.size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: AppColors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: _png == null
+        ? widget.placeholder
+        : Image.memory(_png!, width: _PartThumb.size, height: _PartThumb.size, fit: BoxFit.cover, gaplessPlayback: true),
+  );
 }
 
 /// 刷る色の行（色の丸＋色の値）

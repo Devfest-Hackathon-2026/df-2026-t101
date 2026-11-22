@@ -240,6 +240,75 @@ function setLandmarks(state, lm) {
   state.group.add(g);
 }
 
+// 部品の小さな画像（S10 のダウンロードの行）。刷る向きのファイル（*.print.stl）を、足もとに薄い影を付けて、
+// 手前の斜め上から1回だけ描き、PNG の data URL で返す。描画器は1つだけ作って使い回す
+// （iOS Safari は WebGL のコンテキストの数に上限があるため。2026-11-22）
+let thumb = null;
+let shadowTex = null;
+// まん中が少し暗く、外へ向かって消える丸（影の絵）。1回だけ作る
+function shadowTexture() {
+  if (shadowTex) return shadowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(0,0,0,0.22)');
+  grad.addColorStop(0.6, 'rgba(0,0,0,0.10)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  shadowTex = new THREE.CanvasTexture(c);
+  return shadowTex;
+}
+async function renderThumb(url, headers, color, size) {
+  const geo = await loadStl(url, headers);
+  if (!thumb) {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(1);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.5));
+    const d1 = new THREE.DirectionalLight(0xffffff, 1.4);
+    d1.position.set(-1, -1.5, 2);
+    scene.add(d1);
+    const d2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    d2.position.set(1.5, 1, 0.5);
+    scene.add(d2);
+    thumb = { renderer, scene, camera: new THREE.PerspectiveCamera(30, 1, 0.1, 10000) };
+  }
+  const { renderer, scene, camera } = thumb;
+  renderer.setSize(size, size, false);
+  geo.computeBoundingBox();
+  const box = geo.boundingBox;
+  const center = box.getCenter(new THREE.Vector3());
+  const sz = box.getSize(new THREE.Vector3());
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05 }));
+  // 足もとの薄い影：ファイルの向きのまま、z の一番下（刷る台に付く面）に、底の広さに合わせたぼかした楕円を置く
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }),
+  );
+  shadow.scale.set(sz.x * 1.25, sz.y * 1.25, 1);
+  shadow.position.set(center.x, center.y, box.min.z - 0.05);
+  scene.add(mesh, shadow);
+  const r = Math.hypot(sz.x / 2, sz.y / 2, sz.z / 2) * 1.02;
+  const dist = r / Math.sin((camera.fov * Math.PI) / 360);
+  const dir = new THREE.Vector3(0.75, -1.2, 1.0).normalize();
+  camera.up.set(0, 0, 1);
+  camera.position.copy(center).add(dir.multiplyScalar(dist));
+  camera.lookAt(center);
+  camera.near = dist / 100;
+  camera.far = dist * 10;
+  camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  const data = renderer.domElement.toDataURL('image/png');
+  scene.remove(mesh, shadow);
+  geo.dispose();
+  mesh.material.dispose();
+  shadow.geometry.dispose();
+  shadow.material.dispose();
+  return data;
+}
+
 const H = (json) => { try { const h = JSON.parse(json || '{}'); return Object.keys(h).length ? h : null; } catch { return null; } };
 
 window.jijoguViewer = {
@@ -291,5 +360,7 @@ window.jijoguViewer = {
   },
   reframe(el) { const state = views.get(el); if (state) frame(state); },
   dispose(el) { disposeView(el); },
+  // 部品の小さな画像（S10）。data URL を返す
+  renderThumb(url, headersJson, color, size) { return renderThumb(url, H(headersJson), color, size); },
 };
 window.dispatchEvent(new Event('jijogu-viewer-ready'));
