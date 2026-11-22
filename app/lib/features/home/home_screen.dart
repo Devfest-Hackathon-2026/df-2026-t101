@@ -153,11 +153,14 @@ class _HomeScreenState extends State<HomeScreen> {
         _AccountMenu(name: Session.instance.displayName),
         const SizedBox(width: 4),
       ],
-      floatingActionButton: empty
+      // 「新しく作る」は画面の下に幅いっぱいで置く（主なボタンの決まり）。右下の浮いたボタンだと
+      // 右手の親指でしか届きにくく、左手や片手で使う人に遠かった（2026-11-22）。
+      // 空の状態は、本文のまん中に同じボタンがあるので出さない
+      bottom: empty
           ? null
-          : FloatingActionButton.extended(
+          : FilledButton.icon(
               onPressed: _busy ? null : _create,
-              icon: const Icon(Icons.add_rounded, size: 24),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('新しく作る'),
             ),
       children: [
