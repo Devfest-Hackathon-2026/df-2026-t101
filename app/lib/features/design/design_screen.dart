@@ -625,7 +625,10 @@ class _DesignScreenState extends State<DesignScreen> {
               '手を重ねる',
               style: AppText.titleMedium.copyWith(color: AppColors.onSurface),
             ),
-            subtitle: const Text('カバーが手の甲と関節に沿っているか、手のひら側と手首が開いているかを見ます'),
+            subtitle: Text(
+              'カバーが手の甲と関節に沿っているか、手のひら側と手首が開いているかを見ます',
+              style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+            ),
             value: _showHand,
             onChanged: (v) => setState(() => _showHand = v),
           ),
@@ -709,7 +712,7 @@ class _DesignScreenState extends State<DesignScreen> {
               'もう少しきつく',
               'カバーを薄く',
               '空気穴を増やす',
-              'クリップを外しやすく',
+              // 「クリップを外しやすく」は 2026-11-22 にやめた
             ])
               Builder(
                 builder: (_) {
@@ -786,7 +789,7 @@ class _DesignScreenState extends State<DesignScreen> {
           children: [
             for (final e in _vibes.entries)
               FilterChip(
-                label: Text(e.key),
+                label: Text(e.key, style: AppText.bodyLarge),
                 selected: e.value.toUpperCase() == color.toUpperCase(),
                 onSelected: !idle
                     ? null
@@ -974,7 +977,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   header: true,
                   child: Text(
                     'AIが決めた理由',
-                    style: AppText.titleSmall.copyWith(color: fg),
+                    style: AppText.titleMedium.copyWith(color: fg),
                   ),
                 ),
               ),
@@ -1135,7 +1138,7 @@ class _ToolSheetState extends State<_ToolSheet> {
                   widget.fix
                       ? 'このクリップだけを描き直します。カバーはそのままです。新しい版になります'
                       : 'カバーはそのままで、別の道具のクリップを足します。新しい版になります',
-                  style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant),
+                  style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 if (!widget.fix) ...[
                   const SectionLabel('道具'),
@@ -1227,7 +1230,7 @@ const Map<String, _ParamLabel> _paramLabels = {
   'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '薄い', highJa: '厚い'),
   'cover.palm_cut_offset_mm': _ParamLabel('手のひら側をどこまで覆うか', 'プラスにするとカバーが手のひら側へ深くなり、マイナスにすると浅く小さくなります。手のひらは覆いません', lowJa: '浅い', highJa: '深い'),
   'cover.wrist_cut_mm': _ParamLabel('手首からカバーまでの長さ', '大きくするとカバーが短くなり、手首が動かしやすくなります', lowJa: '長いカバー', highJa: '短いカバー'),
-  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '丸い'),
+  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '大きい'),
   'air_holes.count': _ParamLabel('空気穴の数', '多いほど蒸れにくくなります', unit: '個', lowJa: '少ない', highJa: '多い'),
   'air_holes.diameter_mm': _ParamLabel('空気穴の大きさ', '大きいほど蒸れにくく、小さいほどカバーが丈夫です', lowJa: '小さい', highJa: '大きい'),
   'strap_slits.strap_thickness_mm': _ParamLabel('ベルトの厚み', '使うベルト（面ファスナー）の厚みに合わせます。穴の大きさが変わります', lowJa: '薄い', highJa: '厚い'),
@@ -1267,7 +1270,7 @@ class _NumberSheetState extends State<_NumberSheet> {
                 const SizedBox(height: 4),
                 Text(
                   '動かしたあと「この値で作り直す」を押すと、新しい版を作ります。クリップの角度は前の画面のボタンで変えられます',
-                  style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant),
+                  style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 for (final p in widget.params) ...[
@@ -1372,7 +1375,7 @@ class _NumberSheetState extends State<_NumberSheet> {
               ],
             ),
             const SizedBox(height: 2),
-            Text(label.help, style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant)),
+            Text(label.help, style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
             Row(
               children: [
                 stepButton(-1),
@@ -1393,14 +1396,14 @@ class _NumberSheetState extends State<_NumberSheet> {
             if (label.lowJa != null || label.highJa != null)
               Row(
                 children: [
-                  Text(label.lowJa ?? '', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                  Text(label.lowJa ?? '', style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                   const Spacer(),
-                  Text(label.highJa ?? '', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                  Text(label.highJa ?? '', style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                 ],
               ),
             Row(
               children: [
-                Text('元の値：${_fmt(orig, isInt)} ${label.unit}', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                Text('元の値：${_fmt(orig, isInt)} ${label.unit}', style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                 const Spacer(),
                 if (changed)
                   TextButton(
@@ -1448,7 +1451,7 @@ class _SubLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     text,
-    style: AppText.titleSmall.copyWith(color: AppColors.onSurfaceVariant),
+    style: AppText.titleMedium.copyWith(color: AppColors.onSurfaceVariant),
   );
 }
 
@@ -1568,7 +1571,7 @@ class _CheckImage extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       'AIが確認している画像',
-                      style: AppText.labelLarge.copyWith(
+                      style: AppText.titleMedium.copyWith(
                         color: AppColors.onSurfaceVariant,
                       ),
                     ),
@@ -1650,7 +1653,7 @@ class _DimTile extends StatelessWidget {
         children: [
           Text(
             label,
-            style: AppText.bodySmall.copyWith(
+            style: AppText.bodyLarge.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
           ),
@@ -1754,12 +1757,12 @@ class _AngleButton extends StatelessWidget {
                   if (recommended)
                     Text(
                       'おすすめ',
-                      style: AppText.labelMedium.copyWith(color: fg),
+                      style: AppText.titleMedium.copyWith(color: fg),
                     ),
                   if (showCurrent)
                     Text(
                       'いまの角度',
-                      style: AppText.labelMedium.copyWith(color: fg),
+                      style: AppText.titleMedium.copyWith(color: fg),
                     ),
                 ],
               ),
@@ -1972,7 +1975,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
                       color: AppColors.onSurface,
                     ),
                   ),
-                  if (sub.isNotEmpty) Text(sub, style: AppText.supporting),
+                  if (sub.isNotEmpty) Text(sub, style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                 ],
               ),
             ),

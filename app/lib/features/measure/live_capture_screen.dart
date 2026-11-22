@@ -340,7 +340,7 @@ class _RecBadge extends StatelessWidget {
             decoration: BoxDecoration(color: onError, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
-          Text('録画中', style: AppText.labelLarge.copyWith(color: onError)),
+          Text('録画中', style: AppText.titleMedium.copyWith(color: onError)),
         ],
       ),
     );

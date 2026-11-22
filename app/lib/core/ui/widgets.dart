@@ -288,7 +288,7 @@ class ChoiceButton extends StatelessWidget {
                                   : AppColors.onSurface,
                             ),
                           ),
-                          if (sub != null) Text(sub!, style: AppText.supporting),
+                          if (sub != null) Text(sub!, style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                         ],
                       ),
                     ),

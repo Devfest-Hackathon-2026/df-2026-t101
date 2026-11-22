@@ -227,7 +227,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
           const SizedBox(height: 8),
           Text(
             '同意の文の版：$consentVersion',
-            style: AppText.bodySmall.copyWith(
+            style: AppText.bodyLarge.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
           ),
@@ -242,8 +242,8 @@ class _CaptureScreenState extends State<CaptureScreen> {
     final smallOutline = OutlinedButton.styleFrom(
       minimumSize: const Size(48, 48),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      textStyle: AppText.labelLarge,
-      iconSize: 18,
+      textStyle: AppText.titleMedium,
+      iconSize: 20,
     );
     return AppPage(
       title: '手を撮る',
@@ -364,7 +364,7 @@ class _ConsentRow extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: AppText.bodySmall.copyWith(
+                  style: AppText.titleMedium.copyWith(
                     color: AppColors.onSurfaceVariant,
                   ),
                 ),
@@ -400,7 +400,7 @@ class _StepRow extends StatelessWidget {
             ),
             child: Text(
               '$number',
-              style: AppText.titleSmall.copyWith(
+              style: AppText.titleMedium.copyWith(
                 color: AppColors.onPrimaryContainer,
               ),
             ),

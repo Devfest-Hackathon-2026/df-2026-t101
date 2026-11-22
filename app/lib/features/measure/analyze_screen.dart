@@ -145,7 +145,7 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> with KeepRecording {
   // Figma S3「解析中」（22:1217）
   @override
   Widget build(BuildContext context) {
-    final sub = AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant);
+    final sub = AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant);
     return keepRecording(
       AppPage(
         title: '手を調べています',
