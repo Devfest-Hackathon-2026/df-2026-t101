@@ -130,6 +130,7 @@ class _DesignScreenState extends State<DesignScreen> {
   Future<void> _loadDesign(String id) async {
     final r = await Api.instance.get('/v1/cases/$_cid/designs/$id');
     final d = Map<String, dynamic>.from(r['design'] ?? r);
+    if (!mounted) return;
     _setDesign(d);
   }
 
@@ -371,8 +372,10 @@ class _DesignScreenState extends State<DesignScreen> {
   }
 
   /// S8 を下から出す（Figma：モーダルのボトムシート）
-  void _openReview(Map<String, dynamic> d) {
-    showModalBottomSheet<void>(
+  /// 閉じたら版を読み直す。頼んだあとは approval が requested になり、「確認を待っています」と直す操作の
+  /// 鍵がかかる（読み直さないと、もう一度頼めたり、直して版が変わり OT の承認が STALE_DESIGN で失敗したりした）
+  Future<void> _openReview(Map<String, dynamic> d) async {
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -380,6 +383,12 @@ class _DesignScreenState extends State<DesignScreen> {
       backgroundColor: AppColors.surfaceContainerLow,
       builder: (_) => ReviewRequestDialog(caseId: _cid, design: d),
     );
+    if (!mounted) return;
+    try {
+      await _loadDesign('${d['design_id']}');
+    } catch (_) {
+      // 読み直せなくても、画面はそのまま使える（次に開いたときに直る）
+    }
   }
 
   @override
@@ -1919,8 +1928,10 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
           'message_ja': _msg.text.trim(),
         },
       );
+      if (!mounted) return;
       setState(() => _url = '${r['review_url']}');
     } on ApiError catch (e) {
+      if (!mounted) return;
       setState(
         () => _error = switch (e.code) {
           'REVIEWER_NOT_ALLOWED' => 'このアドレスはOTとして登録されていません。',

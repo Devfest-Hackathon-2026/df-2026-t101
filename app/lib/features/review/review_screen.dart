@@ -135,8 +135,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
       );
       if (!mounted) return;
       if (r['case_status'] == 'approved') {
-        Navigator.of(context)
+        // 戻ってきたら読み直す（承認済みになったので、承認のボタンを押せなくする）
+        await Navigator.of(context)
             .pushNamed(AppRouter.print(widget.caseId, d['design_id']));
+        if (mounted) _load();
       } else {
         showError(context, '差し戻しました。');
         _load();
@@ -197,7 +199,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     return '${t.month}/${t.day} ${two(t.hour)}:${two(t.minute)}';
   }
 
-  bool get _canApprove => !_busy && !_checked.values.any((v) => !v);
+  bool get _canApprove => !_busy && !_approved && !_checked.values.any((v) => !v);
 
   // ---- 部品（枠） ----
 

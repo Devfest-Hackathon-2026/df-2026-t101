@@ -52,6 +52,9 @@ class _PrintScreenState extends State<PrintScreen> {
   Map<String, dynamic>? _fabs;
   List<Map<String, dynamic>> _orders = const []; // ケースのすべての版の注文（新しい順）
   String? _fabsError;
+
+  /// ケースの持ち主でない（承認したあとに開いた OT など）。注文は持ち主しか見られず・頼めない
+  bool _notOwner = false;
   bool _selfPrint = false;
   bool _orderBusy = false;
   Timer? _poll;
@@ -93,8 +96,9 @@ class _PrintScreenState extends State<PrintScreen> {
         _poll?.cancel();
         _poll = null;
       }
-    } catch (_) {
-      // 注文が読めなくても、ダウンロードと刷り方は出す
+    } catch (e) {
+      // 注文が読めなくても、ダウンロードと刷り方は出す。持ち主でなければ 403 なので、頼めない理由をはっきり出す
+      if (e is ApiError && e.code == 'FORBIDDEN' && mounted) setState(() => _notOwner = true);
     }
   }
 
@@ -147,8 +151,8 @@ class _PrintScreenState extends State<PrintScreen> {
     final active = live.isEmpty ? null : live.first;
     final days = (_fabs?['delivery_days_after_ship'] as num?)?.toInt() ?? 2;
     final choice = PrintChoice(
-      onOrder: _fabs == null ? null : _openOrder,
-      unavailableReason: _fabsError,
+      onOrder: _fabs == null || _notOwner ? null : _openOrder,
+      unavailableReason: _notOwner ? '注文は、ケースを作った人（本人・家族）が頼みます' : _fabsError,
       onSelfPrint: () => setState(() => _selfPrint = !_selfPrint),
       selfPrintOpen: _selfPrint,
       fabricators: _fabs,

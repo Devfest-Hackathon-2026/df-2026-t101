@@ -169,6 +169,21 @@ function pickFile(accept: string): Promise<File[]> {
   });
 }
 
+// iOS の Safari はキャンバスのメモリを GC まで返さず、合わせて約384MBを超えると getContext が null になる。
+// 1280px のフレームは1枚約3.7MB・1回の撮影で最大60枚あるので、撮り直しを2〜3回続けると超える。
+// 使い終わったキャンバスは大きさを0にして、すぐ返す
+function releaseCanvas(c?: HTMLCanvasElement) {
+  if (!c) return;
+  c.width = 0; c.height = 0;
+}
+
+/** 前の撮影のフレームを捨てる（新しい動画を読む前・reset のとき） */
+function releaseFrames() {
+  for (const f of st.frames) releaseCanvas(f.canvas);
+  st.frames = [];
+  st.result = undefined;  // 解析の結果は捨てたフレームを指しているので、一緒に捨てる
+}
+
 function canvasOf(src: CanvasImageSource, w: number, h: number): HTMLCanvasElement {
   const scale = Math.min(1, ANALYSIS_LONG_SIDE / Math.max(w, h));
   const c = document.createElement('canvas');
@@ -188,6 +203,7 @@ function sharpnessOf(c: HTMLCanvasElement): number {
   const d = ctx.getImageData(0, 0, w, h).data;
   const g = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+  releaseCanvas(t);
   return G.sharpness(g, w, h);
 }
 
@@ -196,14 +212,17 @@ const toJpeg = (c: HTMLCanvasElement, longSide = 900, q = 0.82) => {
   const t = document.createElement('canvas');
   t.width = Math.round(c.width * scale); t.height = Math.round(c.height * scale);
   t.getContext('2d')!.drawImage(c, 0, 0, t.width, t.height);
-  return t.toDataURL('image/jpeg', q);
+  const url = t.toDataURL('image/jpeg', q);
+  releaseCanvas(t);
+  return url;
 };
 
 /** §3：動画から1秒に6枚の候補を取り出し、ぼけの少ない上位3枚/秒を残す */
 async function loadVideoFile(file: File, progress?: (stage: string, i: number, n: number) => void) {
   const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  const cands: Frame[] = [];
   try {
-    const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
     v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
     v.src = url;
@@ -238,7 +257,6 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
     const times: number[] = [];
     const fps = Math.min(SAMPLE_FPS, MAX_CANDIDATES / Math.max(1, dur));
     for (let t = 0.05; t < dur; t += 1 / fps) times.push(t);
-    const cands: Frame[] = [];
     for (const [i, t] of times.entries()) {
       progress?.('フレームを選んでいます', i + 1, times.length);
       // seeked が来ないフレームは5秒でとばす（そのまま待ち続けないため）
@@ -252,7 +270,14 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
       cands.push({ t, canvas: c, sharp: sharpnessOf(c) });
     }
     useCandidates(cands, dur);
+  } catch (e) {
+    for (const f of cands) releaseCanvas(f.canvas);  // 途中で失敗したら、取り出した分を返す
+    throw e;
   } finally {
+    // 動画の読み込み（デコーダー）も手放す
+    v.onloadeddata = v.oncanplay = v.onerror = v.onloadedmetadata = v.onseeked = null;
+    v.removeAttribute('src');
+    v.load();
     URL.revokeObjectURL(url);
   }
 }
@@ -266,6 +291,8 @@ function useCandidates(cands: Frame[], duration: number) {
   // 1秒あたりに残す枚数：取り出した枚数の半分（最大 KEEP_PER_SEC）。1秒に6枚なら3枚、3枚なら2枚
   const keep = Math.min(KEEP_PER_SEC, Math.max(1, Math.ceil(cands.length / Math.max(1, duration) / 2)));
   st.frames = [...bySec.values()].flatMap((fs) => fs.sort((a, b) => b.sharp - a.sharp).slice(0, keep)).sort((a, b) => a.t - b.t);
+  const kept = new Set(st.frames);
+  for (const f of cands) if (!kept.has(f)) releaseCanvas(f.canvas);  // 残さなかった候補（約半分）はすぐ返す
   st.coinSeed = undefined;
 }
 
@@ -380,7 +407,9 @@ function drawOverlay(f: Frame, opts: { coin?: Ellipse | null; landmarks?: boolea
     ctx.fillStyle = '#ffffff';
     for (const q of p) { ctx.beginPath(); ctx.arc(q.x, q.y, lw * 1.6, 0, Math.PI * 2); ctx.fill(); }
   }
-  return toJpeg(c, 720, 0.8);
+  const url = toJpeg(c, 720, 0.8);
+  releaseCanvas(c);
+  return url;
 }
 
 function cropHand(f: Frame): Promise<Blob> {
@@ -393,7 +422,10 @@ function cropHand(f: Frame): Promise<Blob> {
   const c = document.createElement('canvas');
   c.width = Math.round(w * scale); c.height = Math.round(h * scale);
   c.getContext('2d')!.drawImage(f.canvas, x0, y0, w, h, 0, 0, c.width, c.height);
-  return new Promise((res) => c.toBlob((b) => res(b!), 'image/jpeg', 0.85));
+  return new Promise((res, rej) => c.toBlob((b) => {
+    releaseCanvas(c);
+    if (b) res(b); else rej(new Error('手の画像を作れませんでした'));
+  }, 'image/jpeg', 0.85));
 }
 
 /** §6：フレームごとの値 */
@@ -651,7 +683,14 @@ async function callHandMesh(url: string, caseId: string, authName: string, authV
   const frames = r.meshFrames as Frame[];
   fd.append('meta', JSON.stringify({ case_id: caseId, hand_side: handSide, frames: frames.map((f, i) => ({ name: `frame_${i}`, view: f.side ?? 'top' })) }));
   for (const [i, f] of frames.entries()) fd.append(`frame_${i}`, await cropHand(f), `frame_${i}.jpg`);
-  const res = await fetch(url.replace(/\/$/, '') + '/v1/hand', { method: 'POST', body: fd, headers: { [authName]: authValue } });
+  // 通信そのものの失敗（電波・CORSの付かない500/503・起動待ちの打ち切りなど）は fetch が例外になる。
+  // 撮り直さなくても直ることが多いので、やり直せるエラーにして、アプリ側の自動のやり直し（最大3回）に乗せる
+  let res: Response;
+  try {
+    res = await fetch(url.replace(/\/$/, '') + '/v1/hand', { method: 'POST', body: fd, headers: { [authName]: authValue } });
+  } catch (e: any) {
+    throw Object.assign(new Error(`手の3Dのサーバーにつながりませんでした（${e?.message ?? e}）`), { code: 'MESH_UNAVAILABLE', retryable: true });
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = body?.error ?? body?.detail?.error ?? {};
@@ -706,6 +745,7 @@ const api = {
     // capture を付けると iPhone ではカメラが開く。撮った動画をライブラリから選べるように付けない（2026-11-09）
     const files = await pickFile('video/*');
     if (!files.length) return JSON.stringify({ cancelled: true });
+    releaseFrames();  // 新しいフレームを作る前に、前の撮影の分を返す
     await loadVideoFile(files[0], progress);
     st.source = 'file';
     if (!st.frames.length) throw new Error('フレームを取り出せませんでした');
@@ -721,10 +761,14 @@ const api = {
   async switchCamera() { return JSON.stringify(await Cam.switchCamera()); },
   /** 録画する。maxSec 秒か stopRecording で終わる。終わったら最初のフレームを返す */
   async record(maxSec: number, onTick?: (sec: number, hand: boolean) => void) {
+    releaseFrames();  // 録画でためる前に、前の撮影の分を返す
     const raw = await Cam.startRecording(maxSec, onTick);
+    if (raw.length < 6) {
+      for (const f of raw) releaseCanvas(f.canvas);
+      throw new Error('撮れたフレームが少なすぎます。もう一度撮ってください');
+    }
     const cands: Frame[] = raw.map((f) => ({ t: f.t, canvas: f.canvas, sharp: sharpnessOf(f.canvas) }));
-    const dur = raw.length ? raw[raw.length - 1].t : 0;
-    if (raw.length < 6) throw new Error('撮れたフレームが少なすぎます。もう一度撮ってください');
+    const dur = raw[raw.length - 1].t;
     useCandidates(cands, dur);
     st.source = 'live_camera';
     Cam.stopCamera();
@@ -768,7 +812,7 @@ const api = {
     return JSON.stringify(applyManualPoints(JSON.parse(json)));
   },
   /** 動画とフレームを捨てる */
-  reset() { Cam.stopCamera(); st.frames = []; st.result = undefined; st.coinSeed = undefined; st.coinRef = undefined; st.coinTapped = false; st.coinManual = false; },
+  reset() { Cam.stopCamera(); releaseFrames(); st.coinSeed = undefined; st.coinRef = undefined; st.coinTapped = false; st.coinManual = false; },
 };
 
 /** Dart から扱いやすいよう、失敗も JSON（{"error": {...}}）で返す */

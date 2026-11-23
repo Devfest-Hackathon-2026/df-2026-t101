@@ -39,7 +39,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
   List<Map<String, dynamic>>? _cases;
   String? _error;
   bool _busy = false;
@@ -57,6 +57,26 @@ class _HomeScreenState extends State<HomeScreen> {
     _checkFabricator();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) AppRouter.observer.subscribe(this, route);
+  }
+
+  @override
+  void dispose() {
+    AppRouter.observer.unsubscribe(this);
+    super.dispose();
+  }
+
+  /// 上の画面が閉じてホームに戻ってきたら、ケースと依頼を読み直す。
+  /// 開いた画面の push を待って読み直すのでは足りない：問診は撮影の画面に置き換わって移るので、その時点で
+  /// 待ちが終わってしまい、生成の画面から「ホームに戻る」で戻っても読み直さなかった（カードが「撮影を待っています」の
+  /// まま残り、押すとカメラが開いた）
+  @override
+  void didPopNext() => _load();
+
   Future<void> _loadReviews() async {
     try {
       final r = await Api.instance.get('/v1/reviews');
@@ -71,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _openReview(Map<String, dynamic> r) async {
     await Navigator.of(context).pushNamed(AppRouter.review('${r['case_id']}'));
-    _load();
+    // 読み直しは didPopNext
   }
 
   /// OTのホームの欄：確認待ちを上に、確認済み・差し戻しは畳んでおく
@@ -114,15 +134,17 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 自分のケースと、OTなら確認の依頼も読み直す（ほかの画面から戻ったときも、依頼の状態が変わっているので）
   Future<void> _load() async {
     _loadReviews();
+    if (!mounted) return;
     setState(() => _error = null);
     try {
       final r = await Api.instance.get('/v1/cases');
       final list = (r is Map ? r['cases'] : r) as List? ?? [];
+      if (!mounted) return;
       setState(
         () => _cases = [for (final c in list) Map<String, dynamic>.from(c)],
       );
     } catch (e) {
-      setState(() => _error = '$e');
+      if (mounted) setState(() => _error = '$e');
     }
   }
 
@@ -132,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final r = await Api.instance.post('/v1/cases', {'title': '筆のカバー'});
       if (!mounted) return;
       await Navigator.of(context).pushNamed(AppRouter.interview(r['case_id']));
-      _load();
+      // 読み直しは didPopNext（問診は撮影の画面に置き換わるので、ここで待っても戻ってきた時ではない）
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -237,10 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _CaseCard(
               key: ValueKey(c['case_id']),
               data: c,
-              onTap: () async {
-                await Navigator.of(context).pushNamed(continueRoute(c));
-                _load();
-              },
+              onTap: () => Navigator.of(context).pushNamed(continueRoute(c)),  // 読み直しは didPopNext
               onDelete: () => _delete(c),
             ),
           const SizedBox(height: 8),

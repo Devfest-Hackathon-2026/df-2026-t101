@@ -19,6 +19,9 @@ import 'package:jijogu_app/features/review/review_screen.dart';
 class AppRouter {
   AppRouter._();
 
+  /// 上の画面が閉じて戻ってきたことを知るため（ホームが読み直す）。ダイアログ・ボトムシートは数えない
+  static final observer = RouteObserver<PageRoute<dynamic>>();
+
   static String interview(String c) => Paths.interview(c);
   static String capture(String c) => Paths.capture(c);
   static String design(String c, String? d) => Paths.design(c, d);
