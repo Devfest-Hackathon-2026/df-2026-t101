@@ -51,9 +51,19 @@ def current_user(request: Request) -> User:
             raise ApiError("UNAUTHENTICATED")
         user = User(uid=claims["uid"], email=(claims.get("email") or "").lower() or None,
                     email_verified=bool(claims.get("email_verified")), name=claims.get("name"))
-    if db.get(f"users/{user.uid}") is None:  # 初めて呼んだときに作る（data-model.md §2.1）
-        db.set(f"users/{user.uid}", {"display_name": user.name, "email": user.email, "created_at": now()})
+    if user.uid not in _known_users:
+        if db.get(f"users/{user.uid}") is None:  # 初めて呼んだときに作る（data-model.md §2.1）
+            db.set(f"users/{user.uid}", {"display_name": user.name, "email": user.email, "created_at": now()})
+        if len(_known_users) >= _KNOWN_USERS_MAX:
+            _known_users.clear()
+        _known_users.add(user.uid)
     return user
+
+
+# このプロセスで users/{uid} があると分かった人。前はリクエストのたびに読んでいた（生成中は2秒ごとに読み直すので、
+# 見ている人1人で1秒に約1回の無駄な読み込み）。users の文書を消す処理はないので、一度あれば読み直さなくてよい（2026-11-24）
+_known_users: set[str] = set()
+_KNOWN_USERS_MAX = 10000
 
 
 def is_therapist(user: User) -> bool:

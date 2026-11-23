@@ -105,11 +105,31 @@ function init(): Promise<void> {
   return initP;
 }
 
+// MediaPipe の本体（WASM の場所）。検出器を作る前に1回だけ
+let visionP: Promise<void> | undefined;
+function vision(): Promise<void> {
+  visionP ??= FilesetResolver.forVisionTasks(base() + 'mediapipe/wasm')
+    .then((v) => { st.vision = v; })
+    .catch((e) => { visionP = undefined; throw e; });
+  return visionP;
+}
+
+// 手のモデル（約7.8MB）は1回だけ取ってきて、2つの検出器で使い回す。前は検出器を作るたびに取りに行っていた（2026-11-24）
+let modelP: Promise<Uint8Array> | undefined;
+function handModel(): Promise<Uint8Array> {
+  modelP ??= fetch(base() + 'mediapipe/models/hand_landmarker.task')
+    .then((r) => { if (!r.ok) throw new Error(`手のモデルを読み込めませんでした（${r.status}）`); return r.arrayBuffer(); })
+    .then((b) => new Uint8Array(b))
+    .catch((e) => { modelP = undefined; throw e; });
+  return modelP;
+}
+
 async function initOnce(): Promise<void> {
-  st.vision = await FilesetResolver.forVisionTasks(base() + 'mediapipe/wasm');
+  await vision();
+  const model = await handModel();
   const make = async (delegate: 'GPU' | 'CPU') =>
     HandLandmarker.createFromOptions(st.vision!, {
-      baseOptions: { modelAssetPath: base() + 'mediapipe/models/hand_landmarker.task', delegate },
+      baseOptions: { modelAssetBuffer: model, delegate },
       runningMode: 'IMAGE',
       numHands: 2,
     });
@@ -119,11 +139,15 @@ async function initOnce(): Promise<void> {
 
 // 手を追いかける検出器（VIDEO モード）。一度見つけた手を次の画像で追いかけるので、手のひらが見えない「真上からの握りこぶし」
 // でも途切れにくい。手が1つ見つかったら手のひらを探し直さないよう numHands は1、しきい値は0.3（2026-11-10）。
-// 撮影中の表示と、解析の手の点の両方に使う（それぞれ別の検出器。時刻と追いかける手を混ぜないため）
-function makeTrackingHand(): Promise<HandLandmarker> {
+// 撮影中の表示と、解析の手の点の両方に使う。前は解析のたびに新しく作っていた（WASM と GPU の準備をやり直し、メモリも
+// 1つ分増えた）が、表示と同じ設定なので1つを使い回す。前の動画の手を追いかけないよう、解析の始めに黒い画像を見せて
+// 追いかけを切る（resetTracking。2026-11-24）。時刻は表示と解析で共通に増やす（Cam.videoTs）
+async function makeTrackingHand(): Promise<HandLandmarker> {
+  await vision();
+  const model = await handModel();
   const make = (delegate: 'GPU' | 'CPU') =>
     HandLandmarker.createFromOptions(st.vision!, {
-      baseOptions: { modelAssetPath: base() + 'mediapipe/models/hand_landmarker.task', delegate },
+      baseOptions: { modelAssetBuffer: model, delegate },
       runningMode: 'VIDEO',
       numHands: 1,
       minHandDetectionConfidence: 0.3,
@@ -139,6 +163,14 @@ let previewHandP: Promise<HandLandmarker> | undefined;
 function previewHand(): Promise<HandLandmarker> {
   previewHandP ??= makeTrackingHand().catch((e) => { previewHandP = undefined; throw e; });
   return previewHandP;
+}
+
+// 追いかけている手を忘れさせる（手のない黒い画像を1枚見せる。次の画像では手を探し直す）
+function resetTracking(h: HandLandmarker) {
+  const t = document.createElement('canvas');
+  t.width = 256; t.height = 256;
+  t.getContext('2d')!.fillRect(0, 0, t.width, t.height);
+  try { h.detectForVideo(t, Cam.videoTs(performance.now())); } finally { t.width = 0; t.height = 0; }
 }
 
 function pickFile(accept: string): Promise<File[]> {
@@ -452,13 +484,18 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   // 手のひらが見えない握りこぶしを見落としやすく、IMG_0150・0152・0153 で使えるフレームが 5・2・7 枚しかなく、
   // 手首→中指の付け根が 57〜74mm とばらついた（追いかけると 17・5・13 枚、75〜79mm）。解析のたびに作り直す
   // （前の動画の手を追いかけないため）。作れなければ今までの検出器を使う。手は1つだけ追う（2つ目の手は見ない）
-  const tracker = await makeTrackingHand().catch(() => undefined);
-  let ts = 0;
+  await init();  // 1枚ずつ探す検出器（st.hand）も使う。ふつうは1円玉の画面ですでにできている
+  let tracker = await previewHand().catch(() => undefined);
+  if (tracker) { try { resetTracking(tracker); } catch { tracker = undefined; } }
+  const t0 = Cam.videoTs(performance.now());  // 表示で使った時刻より後から始める（時刻は増やすだけ）
+  let painted = 0;
   for (const [i, f] of st.frames.entries()) {
     progress?.('手の形を調べています', i + 1, n);
-    await paint();
+    // 進み具合を画面に出すのは 0.15 秒に1回で足りる。前はフレームごとに描かせて待ち（1回約46ms）、最大75枚で
+    // 2〜3.5秒、何もせずに待っていた（2026-11-24）。1円玉を探す間（Worker）も画面は描かれる
+    if (performance.now() - painted > 150) { await paint(); painted = performance.now(); }
     if (tracker) {
-      ts = Math.max(ts + 1, Math.round(f.t * 1000));  // st.frames は時間の順
+      const ts = Cam.videoTs(t0 + f.t * 1000);  // st.frames は時間の順
       try { f.det = tracker.detectForVideo(f.canvas, ts); } catch { /* だめなら下で今までの検出器を使う */ }
     }
     const r = detectHand(f);
@@ -486,7 +523,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     if (w.length === 21) f.side = w[5].z < w[17].z ? 'thumb_side' : 'pinky_side';
     perFrame(f);
   }
-  tracker?.close();
+  // tracker は撮影中の表示と使い回すので閉じない
   progress?.('まとめています', n, n);
   const ok = st.frames.filter((f) => f.s);
   if (!ok.length) {
@@ -756,10 +793,15 @@ const api = {
     // 検出器の読み込み（初回は MediaPipe 約18MB）とカメラの起動を並べて進める。前は読み込みが終わってから
     // カメラを開いていたので、タブを開いて最初の1回はカメラが出るまで遅かった（2026-11-24）
     const ready = (async (): Promise<Cam.PreviewHand> => {
-      await init();
-      // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
+      // 表示に要るのは追いかける検出器だけなので、1枚ずつ探す検出器（init。解析と1円玉で使う）を待たずに作る。
+      // 前は init が終わってから作っていたので、初回は骨組みが出て「撮り始める」を押せるまでが長かった（2026-11-24）。
+      // init は撮影の画面（同意）から裏で始まっているので、並べて進む
+      void init().catch(() => { /* ここでは待たない。失敗は解析・1円玉の画面で出る */ });
       const ph = await previewHand().catch(() => undefined);
-      return { hand: ph ?? st.hand!, tracking: !!ph };
+      if (ph) return { hand: ph, tracking: true };
+      // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
+      await init();
+      return { hand: st.hand!, tracking: false };
     })();
     ready.catch(() => { /* カメラの側が先に失敗したときに、未処理の失敗にしない */ });
     return JSON.stringify(await Cam.startCamera(el, ready));

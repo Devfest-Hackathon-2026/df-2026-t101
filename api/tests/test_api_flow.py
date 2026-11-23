@@ -847,6 +847,51 @@ def test_single_attachment_print_names_unchanged(client):
     assert set(pr) == {"cover", "c_clip"} and pr["c_clip"].endswith("c_clip_70.stl")
 
 
+def _count_print_renders(monkeypatch) -> list:
+    """印刷用（quality="print"）の make_design が呼ばれた回数を数える"""
+    calls, good = [], GEOM.make_design
+
+    def counting(*a, **k):
+        if k.get("quality") == "print":
+            calls.append(1)
+        return good(*a, **k)
+    monkeypatch.setattr(GEOM, "make_design", counting)
+    return calls
+
+
+def test_prepare_print_twice_reuses_files(client, monkeypatch):
+    """形が同じなら、2回目の「印刷用のデータを準備」は作り直さず、前のファイルを返す（2026-11-24。
+    本番では同じ版を8回作り直していた（1回7〜13秒）。作り直すと前の注文のSTLが変わることもあった）"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    url = f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print"
+    calls = _count_print_renders(monkeypatch)
+    r1 = client.post(url, headers=H)
+    assert r1.status_code == 200, r1.text
+    prepared_at = db.get(f"cases/{cid}/designs/{d['design_id']}")["print_prepared_at"]
+    r2 = client.post(url, headers=H)
+    assert r2.status_code == 200, r2.text
+    assert len(calls) == 1
+    assert r2.json() == r1.json()
+    assert db.get(f"cases/{cid}/designs/{d['design_id']}")["print_prepared_at"] == prepared_at
+
+
+def test_prepare_print_rerenders_when_shape_or_files_changed(client, monkeypatch):
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    url = f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print"
+    calls = _count_print_renders(monkeypatch)
+    pr = client.post(url, headers=H).json()["files"]["print"]
+    # 刷るファイルが変わっていた（消えた・中身が違う）なら作り直す
+    files.put(pr["cover"], b"changed", "model/stl")
+    assert client.post(url, headers=H).status_code == 200
+    assert len(calls) == 2
+    # 形（geometry_hash）が変わっていたら作り直す
+    path = f"cases/{cid}/designs/{d['design_id']}"
+    db.update(path, {"geometry_hash": "sha256:old"})
+    assert client.post(url, headers=H).status_code == 200
+    assert len(calls) == 3
+    assert db.get(path)["geometry_hash"] != "sha256:old"
+
+
 def test_print_violation_on_extra_clip_is_render_failed(client, monkeypatch):
     cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round"), ("eat", "spoon", 12.0, "round")])
     good = GEOM.make_design

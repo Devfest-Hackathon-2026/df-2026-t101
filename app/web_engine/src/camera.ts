@@ -78,6 +78,11 @@ function drawOverlay(c: Cam, landmarks?: { x: number; y: number }[]) {
 
 // video：hand が VIDEO モードなら true（detectForVideo で前の画像の手を追いかける。時刻は前より大きくする）
 let lastVideoTs = 0;
+/** VIDEO モードの検出器に渡す時刻（ms）。前より必ず大きくする。表示と解析で同じ検出器を使うので、ここで共通に増やす */
+export function videoTs(want: number): number {
+  lastVideoTs = Math.max(lastVideoTs + 1, Math.round(want));
+  return lastVideoTs;
+}
 function startPreview(c: Cam, hand: HandLandmarker, video: boolean) {
   const tick = () => {
     if (!cam || cam !== c) return;
@@ -86,7 +91,7 @@ function startPreview(c: Cam, hand: HandLandmarker, video: boolean) {
         const small = makeCanvas(c.video, 480);
         let r;
         try {
-          if (video) { lastVideoTs = Math.max(lastVideoTs + 1, Math.round(performance.now())); r = hand.detectForVideo(small, lastVideoTs); }
+          if (video) { r = hand.detectForVideo(small, videoTs(performance.now())); }
           else r = hand.detect(small);
         } finally {
           // 0.18秒ごとに作るので、iOS の Safari のキャンバスのメモリの上限に効く。検出が終わったらすぐ返す（engine.ts の releaseCanvas と同じ）
@@ -151,7 +156,7 @@ function warmUp(hand: HandLandmarker, video: boolean) {
   t.width = 256; t.height = 256;
   t.getContext('2d')!.fillRect(0, 0, t.width, t.height);
   try {
-    if (video) { lastVideoTs = Math.max(lastVideoTs + 1, Math.round(performance.now())); hand.detectForVideo(t, lastVideoTs); }
+    if (video) { hand.detectForVideo(t, videoTs(performance.now())); }
     else hand.detect(t);
   } catch { /* 準備だけなので、失敗しても表示の検出で同じことが起きるだけ */ }
   finally { t.width = 0; t.height = 0; }

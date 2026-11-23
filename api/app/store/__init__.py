@@ -70,12 +70,12 @@ class LocalDB:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=_json_default), encoding="utf-8")
             tmp.replace(p)
 
-    def update(self, path: str, patch: dict) -> dict:
+    def update(self, path: str, patch: dict) -> None:
+        # 何も返さない（FirestoreDB と同じ。呼ぶ側は戻り値を使っていない）
         with self.lock:
             cur = self.get(path) or {}
             new = _deep_merge(cur, json.loads(json.dumps(patch, default=_json_default)))
             self.set(path, new)
-            return new
 
     def delete(self, path: str) -> None:
         with self.lock:
@@ -112,8 +112,12 @@ class FirestoreDB:
     def set(self, path: str, data: dict) -> None:
         self._ref(path).set(data)
 
-    def update(self, path: str, patch: dict) -> dict:
-        # "__replace__" の印が付いた入れ子の値は、まるごと置き換える（merge だと古いキーが残るため）
+    def update(self, path: str, patch: dict) -> None:
+        # "__replace__" の印が付いた入れ子の値は、まるごと置き換える（merge だと古いキーが残るため）。
+        # 書いたあとに読み直さない。前は毎回読み直して返していたが、呼ぶ側は戻り値を使っておらず、1回の生成で
+        # 10〜15回の無駄な読み込みになっていた。置き換えの前の「文書があるか」の読み込みもやめ、無いときだけ作る（2026-11-24）
+        from google.api_core.exceptions import NotFound
+
         merge = {k: v for k, v in patch.items() if not (isinstance(v, dict) and v.get("__replace__"))}
         repl = {k: {kk: vv for kk, vv in v.items() if kk != "__replace__"} for k, v in patch.items()
                 if isinstance(v, dict) and v.get("__replace__")}
@@ -121,10 +125,10 @@ class FirestoreDB:
         if merge:
             ref.set(merge, merge=True)
         if repl:
-            if not ref.get().exists:
-                ref.set({})
-            ref.update(repl)
-        return self.get(path) or {}
+            try:
+                ref.update(repl)
+            except NotFound:   # 文書がまだ無い（merge も無かった）。置き換える値で作る
+                ref.set(repl, merge=True)
 
     def delete(self, path: str) -> None:
         self._ref(path).delete()
@@ -207,8 +211,14 @@ class GcsFiles:
         self.bucket.blob(key).upload_from_string(data, content_type=content_type)
 
     def get(self, key: str) -> bytes | None:
-        b = self.bucket.blob(key)
-        return b.download_as_bytes() if b.exists() else None
+        # 読んでみて、無ければ None。前は「あるか確かめてから読む」の2往復で、生成のたびに手のメッシュや
+        # 距離場（約17MB）などを何度も読むので効いていた（2026-11-24）
+        from google.api_core.exceptions import NotFound
+
+        try:
+            return self.bucket.blob(key).download_as_bytes()
+        except NotFound:
+            return None
 
     def exists(self, key: str) -> bool:
         return self.bucket.blob(key).exists()
