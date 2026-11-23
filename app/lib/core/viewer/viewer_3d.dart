@@ -104,9 +104,14 @@ class Viewer3D extends StatefulWidget {
   State<Viewer3D> createState() => _Viewer3DState();
 }
 
-class _Viewer3DState extends State<Viewer3D> {
+class _Viewer3DState extends State<Viewer3D> with AutomaticKeepAliveClientMixin {
   web.HTMLElement? _el;
   String? _error;
+
+  // スマホの縦長の画面（AppPage の ListView）で、スクロールして画面の外に出ても壊さない。前は外に出るたびに
+  // WebGL を捨て、戻ると手とカバー（約4.4MB）を読み直し、回した向きも戻っていた（S7・S5。2026-11-24）
+  @override
+  bool get wantKeepAlive => true;
 
   Future<Map<String, dynamic>> _ref(String path) async {
     final r = await Files.resolve(path);
@@ -200,6 +205,7 @@ class _Viewer3DState extends State<Viewer3D> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin
     return Semantics(
       label: widget.label,
       // Figma の 3D表示の面：surfaceContainerHigh・角丸28（three.js は背景を透かして描く）

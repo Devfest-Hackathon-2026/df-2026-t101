@@ -431,9 +431,21 @@ class StatusLabel extends StatelessWidget {
   }
 }
 
-/// data:image/jpeg;base64,... をバイト列にする
-Uint8List dataUrlBytes(String dataUrl) =>
-    base64Decode(dataUrl.substring(dataUrl.indexOf(',') + 1));
+/// data:image/jpeg;base64,... をバイト列にする。
+/// 同じ文字列には同じバイト列を返す。Image.memory（MemoryImage）はバイト列が同じオブジェクトかで画像のキャッシュを引くので、
+/// 毎回デコードし直すと、描き直すたびに画像もデコードし直していた（S5 の点を動かすと1秒に約60回、1280px の JPEG。2026-11-24）
+Uint8List dataUrlBytes(String dataUrl) {
+  for (final e in _dataUrlCache) {
+    if (identical(e.key, dataUrl) || e.key == dataUrl) return e.value;
+  }
+  final bytes = base64Decode(dataUrl.substring(dataUrl.indexOf(',') + 1));
+  _dataUrlCache.insert(0, MapEntry(dataUrl, bytes));
+  if (_dataUrlCache.length > _dataUrlCacheMax) _dataUrlCache.removeLast();
+  return bytes;
+}
+
+const _dataUrlCacheMax = 12; // 確認の画面の代表フレーム（数枚）と、1円玉・点の画面の1枚が入る数
+final _dataUrlCache = <MapEntry<String, Uint8List>>[];
 
 /// 1秒を超える処理の「いま何をしているか」（docs/screens.md §2：くるくる回るだけの表示は使わない）。
 /// Figma の M3/Notice（Progress）＋進み具合の棒

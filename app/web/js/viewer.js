@@ -117,21 +117,28 @@ function loadGlb(url, headers) {
   return l.loadAsync(url);
 }
 
-async function setHand(state, url, headers, opacity) {
+// alive：この読み込みを頼んだ表示の呼び出しが、まだ一番新しいか。読み終えた時に新しい呼び出しが始まっていたら、
+// 読んだものは捨てて場面に足さない（前は、取り付け具のタブを素早く切り替えると、両方の読み込みが部品を足し、
+// クリップや手が二重に残った。2026-11-24）
+const ALWAYS = () => true;
+
+async function setHand(state, url, headers, opacity, alive = ALWAYS) {
   if (state.hand) { state.group.remove(state.hand); dispose(state.hand); state.hand = null; }
   if (!url) return;
   const gltf = await loadGlb(url, headers);
+  if (!alive()) { dispose(gltf.scene); return; }
   const mat = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.75, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
   gltf.scene.traverse((o) => { if (o.isMesh) { o.material = mat; o.geometry.computeVertexNormals(); } });
   state.hand = gltf.scene;
   state.group.add(state.hand);
 }
 
-async function setPart(state, id, url, headers, color) {
+async function setPart(state, id, url, headers, color, alive = ALWAYS) {
   const old = state.parts.get(id);
   if (old) { state.group.remove(old); dispose(old); state.parts.delete(id); }
   if (!url) return;
   const geo = await loadStl(url, headers);
+  if (!alive()) { geo.dispose(); return; }
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05 }));
   mesh.userData.partId = id;
   state.parts.set(id, mesh);
@@ -315,10 +322,12 @@ window.jijoguViewer = {
   // S5：手の3Dメッシュ（GLB）だけ。landmarksJson は { palm_cut_z, wrist_cut_y }（任意）
   async showHand(el, url, headersJson, landmarksJson) {
     const state = setup(el);
+    const gen = (state.gen = (state.gen || 0) + 1), alive = () => state.gen === gen;
     const lmAll = JSON.parse(landmarksJson || 'null');
     state.dorsal = lmAll?.hand_side === 'left' ? -1 : 1;
     for (const id of [...state.parts.keys()]) await setPart(state, id, null);
-    await setHand(state, url, H(headersJson), 1.0);
+    await setHand(state, url, H(headersJson), 1.0, alive);
+    if (!alive()) return;
     setLandmarks(state, JSON.parse(landmarksJson || 'null'));
     frame(state);
     state.dirty = true;
@@ -327,18 +336,23 @@ window.jijoguViewer = {
   //   tool: {center, axis, tip_mm, rear_mm}（任意。生成APIが版に書いた道具の軸）, tool_type: 'brush'|'pen'|'spoon'（任意。なければ筆の形） }
   async showAssembly(el, sceneJson) {
     const state = setup(el);
+    const gen = (state.gen = (state.gen || 0) + 1), alive = () => state.gen === gen;
     const s = JSON.parse(sceneJson);
     state.toolD = s.tool_d_mm || 0;
     state.toolSpec = s.tool || null;
     state.toolType = s.tool_type || null;
     state.dorsal = s.hand_side === 'left' ? -1 : 1;
     if (s.hand?.url) {
-      await setHand(state, s.hand.url, s.hand.headers, s.hand.opacity ?? 0.35);
+      await setHand(state, s.hand.url, s.hand.headers, s.hand.opacity ?? 0.35, alive);
+      if (!alive()) return;
       state.hand.visible = s.hand.visible !== false;
     }
     const want = new Set((s.parts || []).map((p) => p.id));
     for (const id of [...state.parts.keys()]) if (!want.has(id)) await setPart(state, id, null);
-    for (const p of s.parts || []) await setPart(state, p.id, p.url, p.headers, p.color);
+    for (const p of s.parts || []) {
+      await setPart(state, p.id, p.url, p.headers, p.color, alive);
+      if (!alive()) return;
+    }
     if (!state.framed) frame(state);
     state.dirty = true;
   },

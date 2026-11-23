@@ -103,6 +103,22 @@ def put_requirements(case_id: str, body: dict = Body(...), user: User = Depends(
     return {"requirements": req, "case_status": status}
 
 
+def interview_history(msgs: list[tuple[str, dict]]) -> list[dict]:
+    """Gemini に渡す会話。回の順に、同じ回は利用者 → AI の順にする（ID の並びでは m01a が m01u より先に来る）。
+    渡すのは role・text・choices だけ（created_at は要らず、日時の型はそのままでは JSON にできない）"""
+    def key(item: tuple[str, dict]):
+        mid, _ = item
+        return (mid[:-1], 0 if mid.endswith("u") else 1)
+
+    out = []
+    for _, m in sorted(msgs, key=key):
+        x = {"role": m.get("role"), "text": m.get("text", "")}
+        if m.get("choices"):
+            x["choices"] = m["choices"]
+        out.append(x)
+    return out
+
+
 @router.post("/v1/cases/{case_id}/interview")
 def interview(case_id: str, body: dict = Body(...), user: User = Depends(current_user)):
     case = owned_case(case_id, user)
@@ -115,7 +131,7 @@ def interview(case_id: str, body: dict = Body(...), user: User = Depends(current
         raise ApiError("INVALID_ARGUMENT", "チャットは3回までです")
     ops.require_generation_enabled()
     ops.count_usage(user.uid, "interviews")
-    history = [m for _, m in db.list(f"cases/{case_id}/messages")]
+    history = interview_history(db.list(f"cases/{case_id}/messages"))
     usage = gemini.Usage()
     out = gemini.interview(case.get("requirements") or {}, history, msg, turn, usage)
     t = now()

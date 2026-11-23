@@ -38,7 +38,9 @@ def _prompt(name: str) -> str:
 
 
 def _j(v) -> str:
-    return json.dumps(v, ensure_ascii=False, indent=1)
+    # 日時（Firestore から読んだ created_at など）は文字列にする。前は TypeError になり、チャットの2回目以降が
+    # 本番で必ず 500 だった（2026-11-10 のログ。手元の保存は文字列なので、テストでは起きなかった）
+    return json.dumps(v, ensure_ascii=False, indent=1, default=str)
 
 
 @lru_cache(maxsize=1)
