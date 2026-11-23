@@ -16,7 +16,8 @@ type Cam = {
   mirror: boolean;
   previewTimer?: number;
   status: { hand: boolean; lastSeen: number };
-  recording?: { start: number; frames: Candidate[]; timer: number; resolve: (f: Candidate[]) => void; maxSec: number; onTick?: (sec: number, hand: boolean) => void };
+  dbg?: Dbg;
+  recording?:{ start: number; frames: Candidate[]; timer: number; resolve: (f: Candidate[]) => void; maxSec: number; onTick?: (sec: number, hand: boolean) => void };
 };
 
 let cam: Cam | undefined;
@@ -102,7 +103,78 @@ function startPreview(c: Cam, hand: HandLandmarker, video: boolean) {
   tick();
 }
 
-export async function startCamera(el: HTMLElement, hand: HandLandmarker, tracking = false) {
+// ---- カメラの起動を調べる表示（?camdebug=1 で開いたときだけ。2026-11-24） ----
+// 映像・トラック・枠の大きさと、起動の各段階の時刻、メインスレッドが止まった時間を、映像の左上に出す
+const DEBUG = /[?&#]camdebug=1/.test(location.href);
+type Dbg = { t0: number; ev: string[]; box: HTMLDivElement; timer: number; last: number; dims: string };
+
+function startDebug(c: Cam) {
+  if (!DEBUG) return;
+  const box = document.createElement('div');
+  Object.assign(box.style, {
+    position: 'absolute', left: '4px', top: '4px', zIndex: '2', font: '11px/1.35 monospace', color: '#3f3',
+    background: 'rgba(0,0,0,.65)', padding: '4px 6px', whiteSpace: 'pre', pointerEvents: 'none',
+  });
+  c.el.append(box);
+  const d: Dbg = { t0: performance.now(), ev: [], box, timer: 0, last: performance.now(), dims: '' };
+  c.dbg = d;
+  const update = () => {
+    const now = performance.now(), v = c.video, r = c.el.getBoundingClientRect();
+    if (now - d.last > 300) mark(c, `止まった ${Math.round(now - d.last)}ms`);
+    d.last = now;
+    const dims = `${v.videoWidth}x${v.videoHeight}`;
+    if (dims !== d.dims) { d.dims = dims; mark(c, `映像 ${dims}`); }
+    const tr = c.stream?.getVideoTracks()[0]?.getSettings();
+    box.textContent = [
+      `t=${Math.round(now - d.t0)}ms rs=${v.readyState} 表示=${v.style.opacity || '1'}`,
+      `映像 ${dims} トラック ${tr?.width ?? '-'}x${tr?.height ?? '-'}`,
+      `枠 ${Math.round(r.width)}x${Math.round(r.height)} dpr=${devicePixelRatio} ${screen.orientation?.type ?? ''}`,
+      ...d.ev.slice(-10),
+    ].join('\n');
+  };
+  d.timer = window.setInterval(update, 100);
+  update();
+}
+
+function mark(c: Cam, s: string) {
+  if (c.dbg) c.dbg.ev.push(`${Math.round(performance.now() - c.dbg.t0)}ms ${s}`);
+}
+
+// 検出器ごとに1回だけ、見えない小さな画像で検出しておく。初回の検出は GPU の準備で長く止まる（PC で約0.2秒、
+// iPhone ではその数倍）。前は映像を出した直後にこれが起き、iPhone で映像の向き・大きさが切り替わる時と重なって、
+// 初回だけ映像の大きさがおかしく見えた（待つと直った）。映像を見せる前に済ませる
+const warmed = new WeakSet<HandLandmarker>();
+function warmUp(hand: HandLandmarker, video: boolean) {
+  if (warmed.has(hand)) return;
+  warmed.add(hand);
+  const t = document.createElement('canvas');
+  t.width = 256; t.height = 256;
+  t.getContext('2d')!.fillRect(0, 0, t.width, t.height);
+  try {
+    if (video) { lastVideoTs = Math.max(lastVideoTs + 1, Math.round(performance.now())); hand.detectForVideo(t, lastVideoTs); }
+    else hand.detect(t);
+  } catch { /* 準備だけなので、失敗しても表示の検出で同じことが起きるだけ */ }
+  finally { t.width = 0; t.height = 0; }
+}
+
+// iPhone は映像が出た直後に、向きと大きさ（videoWidth・videoHeight）が切り替わることがある。
+// 同じ大きさが 0.3 秒続くまで待つ（最大 2 秒。待ちきれなくても先へ進む）
+async function settle(c: Cam) {
+  const t0 = performance.now();
+  let last = '', since = t0;
+  while (cam === c && performance.now() - t0 < 2000) {
+    const v = c.video, now = performance.now();
+    const k = v.readyState >= 2 ? `${v.videoWidth}x${v.videoHeight}` : '';
+    if (k !== last) { last = k; since = now; }
+    else if (k && now - since >= 300) return;
+    await new Promise((res) => window.setTimeout(res, 50));
+  }
+}
+
+export type PreviewHand = { hand: HandLandmarker; tracking: boolean };
+
+/** カメラを開く。ready（表示用の手の検出器）の読み込みとカメラの起動を並べて進め、両方そろって映像が落ち着いてから見せる */
+export async function startCamera(el: HTMLElement, ready: Promise<PreviewHand>) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('このブラウザではカメラを使えません（HTTPSで開いているか確かめてください）');
   stopCamera();
   el.innerHTML = '';
@@ -111,23 +183,45 @@ export async function startCamera(el: HTMLElement, hand: HandLandmarker, trackin
   const video = document.createElement('video');
   video.muted = true; video.playsInline = true; video.autoplay = true;
   video.setAttribute('playsinline', '');
-  // 枠いっぱいに広げる（cover）。はみ出た端は見えないが撮れているので、画面にこぶし全体が入っていれば、撮ったフレームにも必ず入る
-  Object.assign(video.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' });
+  // 枠いっぱいに広げる（cover）。はみ出た端は見えないが撮れているので、画面にこぶし全体が入っていれば、撮ったフレームにも必ず入る。
+  // 準備ができるまでは透明にしておく（display: none だと iPhone で再生が進まないことがあるので、透明にする）
+  Object.assign(video.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover', opacity: '0' });
   const overlay = document.createElement('canvas');
   Object.assign(overlay.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none' });
   el.append(video, overlay);
   const c: Cam = { el, video, overlay, devices: [], deviceIndex: 0, mirror: false, status: { hand: false, lastSeen: 0 } };
   cam = c;
+  startDebug(c);
+  const closed = () => new Error('カメラを閉じました');
+  mark(c, 'カメラを開く');
   try {
     await openStream(c);
   } catch (e: any) {
-    cam = undefined;
+    if (cam === c) stopCamera();
     const name = e?.name ?? '';
     if (name === 'NotAllowedError') throw new Error('カメラの使用が許可されませんでした。ブラウザの設定でカメラを許可してください');
     if (name === 'NotFoundError') throw new Error('カメラが見つかりませんでした');
     throw new Error(`カメラを開けませんでした（${e?.message ?? name}）`);
   }
-  startPreview(c, hand, tracking);
+  // 待っている間に画面を閉じた（stopCamera が呼ばれた）なら、あとから開いたカメラも止める
+  if (cam !== c) { c.stream?.getTracks().forEach((t) => t.stop()); throw closed(); }
+  mark(c, 'カメラが開いた');
+  let r: PreviewHand;
+  try {
+    r = await ready;
+  } catch (e) {
+    if (cam === c) stopCamera();
+    throw e;
+  }
+  if (cam !== c) throw closed();
+  mark(c, '検出器ができた');
+  warmUp(r.hand, r.tracking);
+  mark(c, '検出の準備が済んだ');
+  await settle(c);
+  if (cam !== c) throw closed();
+  video.style.opacity = '1';
+  mark(c, '映像を見せた');
+  startPreview(c, r.hand, r.tracking);
   return { cameras: c.devices.length, label: c.devices[c.deviceIndex]?.label ?? '', width: video.videoWidth, height: video.videoHeight };
 }
 
@@ -176,6 +270,7 @@ export function stopRecording() {
 export function stopCamera() {
   if (!cam) return;
   window.clearTimeout(cam.previewTimer);
+  if (cam.dbg) window.clearInterval(cam.dbg.timer);
   if (cam.recording) window.clearTimeout(cam.recording.timer);
   cam.stream?.getTracks().forEach((t) => t.stop());
   cam.video.srcObject = null;

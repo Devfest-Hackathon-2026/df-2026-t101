@@ -753,10 +753,16 @@ const api = {
   },
   /** アプリの中でカメラを開く（スマホは背面、PCはWebカメラ）。el は映像を出す要素 */
   async startCamera(el: HTMLElement) {
-    await init();
-    // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
-    const ph = await previewHand().catch(() => undefined);
-    return JSON.stringify(await Cam.startCamera(el, ph ?? st.hand!, !!ph));
+    // 検出器の読み込み（初回は MediaPipe 約18MB）とカメラの起動を並べて進める。前は読み込みが終わってから
+    // カメラを開いていたので、タブを開いて最初の1回はカメラが出るまで遅かった（2026-11-24）
+    const ready = (async (): Promise<Cam.PreviewHand> => {
+      await init();
+      // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
+      const ph = await previewHand().catch(() => undefined);
+      return { hand: ph ?? st.hand!, tracking: !!ph };
+    })();
+    ready.catch(() => { /* カメラの側が先に失敗したときに、未処理の失敗にしない */ });
+    return JSON.stringify(await Cam.startCamera(el, ready));
   },
   async switchCamera() { return JSON.stringify(await Cam.switchCamera()); },
   /** 録画する。maxSec 秒か stopRecording で終わる。終わったら最初のフレームを返す */
