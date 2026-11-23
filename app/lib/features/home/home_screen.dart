@@ -47,11 +47,59 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 受託者アカウントなら「受けた注文」の入口を出す（設計 §6.4）
   bool _isFabricator = false;
 
+  /// OTのアカウントなら、自分宛ての確認の依頼（GET /v1/reviews）。OTでなければ null で、欄を出さない
+  List<Map<String, dynamic>>? _reviews;
+
   @override
   void initState() {
     super.initState();
     _load();
     _checkFabricator();
+  }
+
+  Future<void> _loadReviews() async {
+    try {
+      final r = await Api.instance.get('/v1/reviews');
+      final list = (r is Map ? r['reviews'] : r) as List? ?? [];
+      if (mounted) {
+        setState(() => _reviews = [for (final x in list) Map<String, dynamic>.from(x)]);
+      }
+    } catch (_) {
+      // OTでなければ 403。欄を出さない
+    }
+  }
+
+  Future<void> _openReview(Map<String, dynamic> r) async {
+    await Navigator.of(context).pushNamed(AppRouter.review('${r['case_id']}'));
+    _load();
+  }
+
+  /// OTのホームの欄：確認待ちを上に、確認済み・差し戻しは畳んでおく
+  List<Widget> _reviewSection() {
+    final all = _reviews ?? const <Map<String, dynamic>>[];
+    if (all.isEmpty) return const [];
+    final pending = [for (final r in all) if (r['approval_status'] == 'requested') r];
+    final done = [for (final r in all) if (r['approval_status'] != 'requested') r];
+    return [
+      SectionLabel('確認を頼まれているケース（${pending.length}件）'),
+      if (pending.isEmpty)
+        const InfoCard(child: Text('いま確認を待っているケースはありません。')),
+      for (final r in pending)
+        _ReviewCard(key: ValueKey('review-${r['case_id']}'), data: r, onTap: () => _openReview(r)),
+      if (done.isNotEmpty)
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text('確認済み・差し戻し（${done.length}件）', style: AppText.titleMedium),
+            children: [
+              for (final r in done)
+                _ReviewCard(key: ValueKey('review-${r['case_id']}'), data: r, onTap: () => _openReview(r)),
+            ],
+          ),
+        ),
+      const SizedBox(height: 8),
+    ];
   }
 
   Future<void> _checkFabricator() async {
@@ -63,7 +111,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// 自分のケースと、OTなら確認の依頼も読み直す（ほかの画面から戻ったときも、依頼の状態が変わっているので）
   Future<void> _load() async {
+    _loadReviews();
     setState(() => _error = null);
     try {
       final r = await Api.instance.get('/v1/cases');
@@ -133,7 +183,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final empty = _error == null && _cases != null && _cases!.isEmpty;
+    final noCases = _error == null && _cases != null && _cases!.isEmpty;
+    final hasReviews = _reviews?.isNotEmpty ?? false;
+    // 大きな空の状態は、OTの欄がないときだけ（OTのホームは、確認の依頼が主役）
+    final empty = noCases && !hasReviews;
     return AppPage(
       title: 'Hand-Some-Fit',
       titleWidget: Image.asset(
@@ -164,6 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
               label: const Text('新しく作る'),
             ),
       children: [
+        ..._reviewSection(),
         if (_error != null)
           ErrorCard(message: '読み込めませんでした（$_error）', onRetry: _load)
         else if (_cases == null) ...[
@@ -171,7 +225,13 @@ class _HomeScreenState extends State<HomeScreen> {
           for (var i = 0; i < 3; i++) const _CardSkeleton(),
         ] else if (empty)
           _EmptyState(onCreate: _busy ? null : _create)
-        else ...[
+        else if (noCases) ...[
+          const SectionLabel('作りかけ・作った道具'),
+          Text(
+            'まだありません。',
+            style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+          ),
+        ] else ...[
           const SectionLabel('作りかけ・作った道具'),
           for (final c in _cases!)
             _CaseCard(
@@ -433,6 +493,128 @@ class _CaseCardState extends State<_CaseCard> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// OTの確認の状態の札（approval.status）
+(String, StatusTone, IconData) _reviewLook(String? s) => switch (s) {
+  'requested' => ('確認待ち', StatusTone.warning, Icons.hourglass_top_rounded),
+  'approved' => ('確認済み', StatusTone.success, Icons.check_circle_outline_rounded),
+  'rejected' => ('差し戻し済み', StatusTone.error, Icons.undo_rounded),
+  // 差し戻しのあと、依頼した人が形を直していて、新しい版はまだ頼まれていない
+  _ => ('依頼した人が直しています', StatusTone.neutral, Icons.edit_outlined),
+};
+
+/// 確認の依頼のカード（OTのホーム）。押すと S9 OT確認へ
+class _ReviewCard extends StatefulWidget {
+  const _ReviewCard({super.key, required this.data, required this.onTap});
+  final Map<String, dynamic> data;
+  final VoidCallback onTap;
+  @override
+  State<_ReviewCard> createState() => _ReviewCardState();
+}
+
+class _ReviewCardState extends State<_ReviewCard> {
+  Uint8List? _thumb;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumb();
+  }
+
+  Future<void> _loadThumb() async {
+    final iso = widget.data['iso'] as String?;
+    if (iso == null) return;
+    try {
+      final ref = await Files.resolve(iso);
+      final res = await http.get(Uri.parse(ref.url), headers: ref.headers);
+      if (res.statusCode >= 400 || res.bodyBytes.isEmpty) return;
+      if (mounted) setState(() => _thumb = res.bodyBytes);
+    } catch (_) {
+      // 画像がなくてもカードは使える
+    }
+  }
+
+  static String _date(Object? v) {
+    final t = DateTime.tryParse('${v ?? ''}')?.toLocal();
+    if (t == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.month}/${t.day} ${two(t.hour)}:${two(t.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.data;
+    final (label, tone, icon) = _reviewLook(r['approval_status'] as String?);
+    final rev = r['revision'];
+    final title = '${r['title'] ?? '道具'}${rev == null ? '' : '・版$rev'}';
+    final who = '${r['requester_name'] ?? ''}'.trim();
+    final requested = _date(r['requested_at']);
+    final decided = _date(r['decided_at']);
+    final when = [
+      if (requested.isNotEmpty) '依頼 $requested',
+      if (decided.isNotEmpty) '確認 $decided',
+    ].join('　');
+    final msg = '${r['message_ja'] ?? ''}'.trim();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Material(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Semantics(
+          button: true,
+          label: [
+            title,
+            label,
+            if (who.isNotEmpty) '$whoさんから',
+            if (when.isNotEmpty) when,
+            if (msg.isNotEmpty) 'ひとこと：$msg',
+          ].join('、'),
+          excludeSemantics: true,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              child: Row(
+                children: [
+                  _Thumb(bytes: _thumb, statusIcon: icon),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: AppText.titleMedium),
+                        const SizedBox(height: 4),
+                        StatusLabel(label: label, tone: tone, icon: icon),
+                        if (who.isNotEmpty || when.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            [if (who.isNotEmpty) '$whoさんから', if (when.isNotEmpty) when].join('　'),
+                            style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant),
+                          ),
+                        ],
+                        if (msg.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '「$msg」',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.bodyLarge.copyWith(color: AppColors.onSurface),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppColors.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

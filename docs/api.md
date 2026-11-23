@@ -476,6 +476,24 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 `therapists` の許可リストから、表示名とメールアドレスの一覧を返す。S8でOTを選ぶのに使う。
 
+### 3.10a `GET /v1/reviews`（OTのホームの「確認を頼まれているケース」）
+
+ログイン中のOT宛て（ケースの `reviewer_email` がログイン中のメールアドレス）の依頼を返す。呼べるのは `therapists` にある、メールが確認済みの人だけで、それ以外は `403 FORBIDDEN`（S1はこれを見て、欄を出さない）。確認用URLを受け取っていなくても、OTがログインするだけで依頼にたどり着けるようにするため（2026-11-23）。
+
+```json
+{ "reviews": [ {
+  "case_id": "c_…", "title": "筆のカバー", "case_status": "in_review",
+  "design_id": "d_…", "revision": 2,
+  "approval_status": "requested",
+  "requested_at": "…", "decided_at": null,
+  "message_ja": "依頼のときのひとこと", "requester_name": "依頼した人の表示名",
+  "iso": "cases/c_…/designs/d_…/views/iso.png", "updated_at": "…"
+} ] }
+```
+
+- `approval_status` は今の版の `approval.status`（`requested`・`approved`・`rejected`）。差し戻しのあと依頼した人が形を直して新しい版ができ、まだ頼んでいなければ `none`
+- 並びは `requested` を先に、その中とそれ以外は依頼の新しい順
+
 ### 3.11 `POST /v1/cases/{case_id}/designs/{design_id}/prepare-print`（デモのケースだけ）
 
 デモの印（`cases/{case_id}.demo = true`）が付いたケースで、OTの確認なしに印刷用STLを作る。審査員やデモ動画で、最後のダウンロードまで見せるため。

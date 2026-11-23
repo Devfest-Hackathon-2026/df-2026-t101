@@ -2007,7 +2007,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
             if (_url != null) ...[
               const InfoCard(
                 tone: NoticeTone.success,
-                child: Text('頼みました。確認用のURLをOTに伝えてください。'),
+                child: Text('頼みました。OTがログインすると、ホームに表示されます。下のURLを送って知らせることもできます。'),
               ),
               Container(
                 padding: const EdgeInsets.all(16),

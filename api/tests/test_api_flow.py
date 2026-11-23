@@ -860,3 +860,41 @@ def test_print_violation_on_extra_clip_is_render_failed(client, monkeypatch):
     monkeypatch.setattr(GEOM, "make_design", bad)
     r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/prepare-print", headers=H)
     assert r.status_code == 500 and r.json()["error"]["code"] == "RENDER_FAILED"
+
+
+def test_reviews_inbox_lists_only_my_requests(client):
+    """GET /v1/reviews：OTのホームに出す「確認を頼まれているケース」（自分宛てだけ。OTでなければ 403）"""
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    db.set("therapists/ot@example.com", {"name": "OT役"})
+    db.set("therapists/other@example.com", {"name": "別のOT"})
+    db.update(f"cases/{cid}", {"demo": False})
+    r = client.post(f"/v1/cases/{cid}/review-request", headers=H,
+                    json={"reviewer_email": "ot@example.com", "design_id": d["design_id"], "message_ja": "見てください"})
+    assert r.status_code == 200, r.text
+    ot = {"X-User": "ot1", "X-User-Email": "ot@example.com"}
+
+    # OTでない人は 403（ホームは欄を出さない）
+    assert client.get("/v1/reviews", headers=H).status_code == 403
+    # 別のOTには出ない
+    r = client.get("/v1/reviews", headers={"X-User": "ot2", "X-User-Email": "other@example.com"})
+    assert r.status_code == 200 and all(x["case_id"] != cid for x in r.json()["reviews"])
+
+    def mine():  # ほかのテストも同じOTに頼むので、このケースの分だけを見る
+        r = client.get("/v1/reviews", headers=ot)
+        assert r.status_code == 200, r.text
+        return [x for x in r.json()["reviews"] if x["case_id"] == cid]
+
+    [item] = mine()
+    assert item["case_id"] == cid and item["design_id"] == d["design_id"]
+    assert item["approval_status"] == "requested" and item["case_status"] == "in_review"
+    assert item["message_ja"] == "見てください" and item["requested_at"]
+    assert item["title"] == "筆のカバー" and item["revision"] == d.get("revision", 1)
+    assert item["requester_name"] == "u1"
+
+    # 差し戻すと、履歴として残る（状態が変わる）
+    ghash = client.get(f"/v1/cases/{cid}/designs/{d['design_id']}", headers=ot).json()["design"]["geometry_hash"]
+    r = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/approval", headers=ot,
+                    json={"decision": "reject", "geometry_hash": ghash, "comment_ja": "角を丸く"})
+    assert r.status_code == 200, r.text
+    [item] = mine()
+    assert item["approval_status"] == "rejected" and item["decided_at"]

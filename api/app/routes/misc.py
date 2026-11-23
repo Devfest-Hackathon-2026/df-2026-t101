@@ -38,6 +38,36 @@ def therapists(user: User = Depends(current_user)):
                            for email, t in db.list("therapists")]}
 
 
+@router.get("/v1/reviews")
+def reviews(user: User = Depends(current_user)):
+    """OTのホームに出す「確認を頼まれているケース」（docs/api.md §3.10）。OTでなければ 403。
+    確認待ち（requested）を先に、あとは依頼の新しい順。差し戻し・確認済みも履歴として返す"""
+    if not is_therapist(user):
+        raise ApiError("FORBIDDEN")
+    out = []
+    for cid, c in db.list("cases"):
+        if c.get("reviewer_email") != user.email:
+            continue
+        did = c.get("current_design_id")
+        d = (db.get(f"cases/{cid}/designs/{did}") if did else None) or {}
+        ap = d.get("approval") or {}
+        owner = db.get(f"users/{c.get('owner_uid')}") or {}
+        out.append({
+            "case_id": cid, "title": c.get("title"), "case_status": c.get("status"),
+            "design_id": did, "revision": d.get("revision"),
+            # 差し戻しのあと依頼者が直して新しい版ができると、その版にはまだ依頼がない（none）
+            "approval_status": ap.get("status") or "none",
+            "requested_at": ap.get("requested_at"), "decided_at": ap.get("decided_at"),
+            "message_ja": ap.get("message_ja") or "",
+            "requester_name": owner.get("display_name") or "",
+            "iso": ((d.get("files") or {}).get("views") or {}).get("iso"),
+            "updated_at": c.get("updated_at"),
+        })
+    out.sort(key=lambda r: str(r.get("requested_at") or r.get("updated_at") or ""), reverse=True)
+    out.sort(key=lambda r: r["approval_status"] != "requested")  # 安定ソートなので、確認待ちが先で、中は新しい順
+    return {"reviews": out}
+
+
 def _can_read(path: str, user: User) -> bool:
     """data-model.md §4.2 と同じ判定（開発用。本番は Storage のルールが判定する）"""
     parts = path.split("/")

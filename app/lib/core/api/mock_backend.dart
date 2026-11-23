@@ -69,6 +69,19 @@ class MockBackend {
         ],
       };
     }
+    if (method == 'GET' && path == '/v1/reviews') {
+      // モックでは誰でもOT役。OTに頼んだケースを、OTのホームの欄に出す（ブラウザ1つで試せるように）
+      final all = [
+        for (final c in _cases.values.toList().reversed)
+          if (c['reviewer_email'] != null) _reviewItem(c),
+      ];
+      return {
+        'reviews': [
+          ...all.where((r) => r['approval_status'] == 'requested'),
+          ...all.where((r) => r['approval_status'] != 'requested'),
+        ],
+      };
+    }
     if (method == 'GET' && path == '/v1/parts') return _parts;
     if (seg.length >= 2 && (seg[1] == 'fabricator' || seg[1] == 'orders')) {
       return _orderRoutes(method, seg, Uri.parse(path).queryParameters, b);
@@ -238,7 +251,13 @@ class MockBackend {
         c['status'] = 'in_review';
         c['reviewer_email'] = b['reviewer_email'];
         final d = _designs[b['design_id']];
-        if (d != null) d['approval'] = {'status': 'requested'};
+        if (d != null) {
+          d['approval'] = {
+            'status': 'requested',
+            'requested_at': DateTime.now().toIso8601String(),
+            'message_ja': '${b['message_ja'] ?? ''}',
+          };
+        }
         return {
           'case_status': 'in_review',
           'review_url': 'http://localhost:5173/#/review/${c['case_id']}',
@@ -264,8 +283,10 @@ class MockBackend {
       }
       if (method == 'POST' && act == 'approval') {
         d['approval'] = {
+          ...?(d['approval'] as Map?)?.cast<String, dynamic>(),
           'status': b['decision'] == 'approve' ? 'approved' : 'rejected',
           'comment_ja': b['comment_ja'],
+          'decided_at': DateTime.now().toIso8601String(),
         };
         c['status'] = b['decision'] == 'approve' ? 'approved' : 'previewing';
         d['files']['print'] = _printFiles(d);
@@ -295,6 +316,26 @@ class MockBackend {
   static const _colorNames = {
     '#2A9D8F': 'ティール', '#E76F51': 'コーラル', '#264653': '紺', '#E9C46A': '黄色', '#F4F1EA': '白', '#5A666B': '灰色',
   };
+
+  /// GET /v1/reviews の1件（api/app/routes/misc.py の reviews と同じ形）
+  Map<String, dynamic> _reviewItem(Map<String, dynamic> c) {
+    final d = _designs[c['current_design_id']] ?? const <String, dynamic>{};
+    final ap = (d['approval'] as Map?) ?? const {};
+    return {
+      'case_id': c['case_id'],
+      'title': c['title'],
+      'case_status': c['status'],
+      'design_id': c['current_design_id'],
+      'revision': d['revision'],
+      'approval_status': ap['status'] ?? 'none',
+      'requested_at': ap['requested_at'],
+      'decided_at': ap['decided_at'],
+      'message_ja': ap['message_ja'] ?? '',
+      'requester_name': '見本の利用者',
+      'iso': (d['files'] as Map?)?['views']?['iso'],
+      'updated_at': c['updated_at'],
+    };
+  }
 
   num _gramsOf(String key) => key == 'cover' ? 18 : (key.startsWith('tpu_sleeve') ? 3 : 4);
   String _materialOf(String key) => key == 'cover' ? 'PLA' : (key.startsWith('tpu_sleeve') ? 'TPU' : 'PETG');

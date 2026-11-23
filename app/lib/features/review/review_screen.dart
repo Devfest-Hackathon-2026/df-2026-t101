@@ -519,6 +519,19 @@ class _ReviewScreenState extends State<ReviewScreen> {
       const InfoCard(child: Text('確認を頼まれている版はありません。')),
   ];
 
+  /// 依頼した人からのひとこと（タイトルの下に出す）
+  Widget? _messageCard() => _requestMessage.isEmpty
+      ? null
+      : InfoCard(
+          tone: NoticeTone.info,
+          icon: Icons.chat_outlined,
+          child: Text('依頼した人からのひとこと：$_requestMessage'),
+        );
+
+  /// 依頼のときの「ひとこと」（review-request の message_ja）
+  String get _requestMessage =>
+      '${_design?['approval']?['message_ja'] ?? ''}'.trim();
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -592,6 +605,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     ),
                     const SizedBox(height: 16),
                     ..._notices(d),
+                    if (d != null) ?_messageCard(),
                     if (d != null)
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -742,6 +756,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   if (meta.isNotEmpty) Text(meta, style: AppText.supporting),
                 ],
               ),
+              ?_messageCard(),
               _viewerPanel(d),
               if (_warnings.isNotEmpty) _warningsPanel(),
               if (angles.isNotEmpty) _anglesPanel(angles),
