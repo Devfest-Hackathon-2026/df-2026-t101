@@ -142,7 +142,7 @@ function mark(c: Cam, s: string) {
 
 // 検出器ごとに1回だけ、見えない小さな画像で検出しておく。初回の検出は GPU の準備で長く止まる（PC で約0.2秒、
 // iPhone ではその数倍）。前は映像を出した直後にこれが起き、iPhone で映像の向き・大きさが切り替わる時と重なって、
-// 初回だけ映像の大きさがおかしく見えた（待つと直った）。映像を見せる前に済ませる
+// 初回だけ映像の大きさがおかしく見えた（待つと直った）。映像の大きさが落ち着いてから行う
 const warmed = new WeakSet<HandLandmarker>();
 function warmUp(hand: HandLandmarker, video: boolean) {
   if (warmed.has(hand)) return;
@@ -173,7 +173,8 @@ async function settle(c: Cam) {
 
 export type PreviewHand = { hand: HandLandmarker; tracking: boolean };
 
-/** カメラを開く。ready（表示用の手の検出器）の読み込みとカメラの起動を並べて進め、両方そろって映像が落ち着いてから見せる */
+/** カメラを開く。ready（表示用の手の検出器）の読み込みとカメラの起動を並べて進める。映像は大きさが落ち着いたら見せ、
+ *  検出器がそろって準備が済んだら手の検出を始めて終わる（終わるまでアプリは「撮り始める」を押せない） */
 export async function startCamera(el: HTMLElement, ready: Promise<PreviewHand>) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('このブラウザではカメラを使えません（HTTPSで開いているか確かめてください）');
   stopCamera();
@@ -206,6 +207,13 @@ export async function startCamera(el: HTMLElement, ready: Promise<PreviewHand>) 
   // 待っている間に画面を閉じた（stopCamera が呼ばれた）なら、あとから開いたカメラも止める
   if (cam !== c) { c.stream?.getTracks().forEach((t) => t.stop()); throw closed(); }
   mark(c, 'カメラが開いた');
+  // 映像の大きさが落ち着いたら、検出器を待たずに見せる（初回は検出器の読み込みに数秒かかるので、その間も映像を出す）。
+  // 初回の重い検出（warmUp）はこのあとで、映像は止まって見えるが、大きさはもう切り替わらないので乱れない
+  // （2026-11-24 iPhone：重い検出を映像を見せる前に済ませたら、初回の乱れが消えた。順番をこの形にして早く出す）
+  await settle(c);
+  if (cam !== c) throw closed();
+  video.style.opacity = '1';
+  mark(c, '映像を見せた');
   let r: PreviewHand;
   try {
     r = await ready;
@@ -217,10 +225,6 @@ export async function startCamera(el: HTMLElement, ready: Promise<PreviewHand>) 
   mark(c, '検出器ができた');
   warmUp(r.hand, r.tracking);
   mark(c, '検出の準備が済んだ');
-  await settle(c);
-  if (cam !== c) throw closed();
-  video.style.opacity = '1';
-  mark(c, '映像を見せた');
   startPreview(c, r.hand, r.tracking);
   return { cameras: c.devices.length, label: c.devices[c.deviceIndex]?.label ?? '', width: video.videoWidth, height: video.videoHeight };
 }
