@@ -30,3 +30,8 @@
   STORAGE_BUCKET: jijogu-hackathon-2026-data
   HAND_MESH_CHECKPOINT_DIR: /weights/sam-3d-body-vith
   HAND_MESH_CORS_ORIGINS: https://jijogu-hackathon-2026.web.app,https://jijogu-hackathon-2026.firebaseapp.com
+  # 回数と費用の上限（決勝・DevFest のブース用に上げた。2026-11-23）。ブースは1つのアカウントで回すので、1人あたりも上げる。
+  # 費用の上限は生成API（jijogu-api）と同じ値にする（共通の usage を見るので、低い方で止まる）
+  MESH_PER_USER_DAILY: "150"
+  MESH_GLOBAL_DAILY: "300"
+  DAILY_COST_LIMIT_USD: "60"

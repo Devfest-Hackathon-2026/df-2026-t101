@@ -84,8 +84,13 @@ function startPreview(c: Cam, hand: HandLandmarker, video: boolean) {
       try {
         const small = makeCanvas(c.video, 480);
         let r;
-        if (video) { lastVideoTs = Math.max(lastVideoTs + 1, Math.round(performance.now())); r = hand.detectForVideo(small, lastVideoTs); }
-        else r = hand.detect(small);
+        try {
+          if (video) { lastVideoTs = Math.max(lastVideoTs + 1, Math.round(performance.now())); r = hand.detectForVideo(small, lastVideoTs); }
+          else r = hand.detect(small);
+        } finally {
+          // 0.18秒ごとに作るので、iOS の Safari のキャンバスのメモリの上限に効く。検出が終わったらすぐ返す（engine.ts の releaseCanvas と同じ）
+          small.width = 0; small.height = 0;
+        }
         const lm = r.landmarks.length === 1 ? r.landmarks[0] : undefined;
         c.status.hand = !!lm;
         if (lm) c.status.lastSeen = performance.now();

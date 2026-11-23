@@ -379,31 +379,47 @@ class _CaseCardState extends State<_CaseCard> {
   Uint8List? _thumb;
   bool _rejected = false;
 
+  int _loadSeq = 0; // 古い読み込みの結果で上書きしないため
+
   @override
   void initState() {
     super.initState();
     _loadDesign();
   }
 
+  /// ホームが読み直してケースが変わっていたら、版も読み直す。カードは case_id をキーに使い回されるので、
+  /// initState だけでは、生成のあとの画像や、もう一度頼んだあとの「差し戻し」の取り消しが反映されなかった
+  @override
+  void didUpdateWidget(_CaseCard old) {
+    super.didUpdateWidget(old);
+    const keys = ['current_design_id', 'status', 'updated_at'];
+    if (keys.any((k) => '${old.data[k]}' != '${widget.data[k]}')) _loadDesign();
+  }
+
   /// 最新の版を読み、画像と「差し戻し」かどうかを取る。失敗してもカードはそのまま出す
   Future<void> _loadDesign() async {
+    final seq = ++_loadSeq;
     final c = widget.data;
     final d = c['current_design_id'] as String?;
-    if (d == null) return;
+    if (d == null) {
+      _rejected = false; // initState・didUpdateWidget から同期で来るので、このあと build される
+      return;
+    }
     try {
       final r = await Api.instance.get('/v1/cases/${c['case_id']}/designs/$d');
+      if (!mounted || seq != _loadSeq) return;
       final design = Map<String, dynamic>.from(
         (r is Map && r['design'] != null) ? r['design'] : r,
       );
       final rejected = (design['approval'] as Map?)?['status'] == 'rejected';
       final iso =
           ((design['files'] as Map?)?['views'] as Map?)?['iso'] as String?;
-      if (mounted && rejected) setState(() => _rejected = true);
+      if (rejected != _rejected) setState(() => _rejected = rejected);
       if (iso == null) return;
       final ref = await Files.resolve(iso);
       final res = await http.get(Uri.parse(ref.url), headers: ref.headers);
       if (res.statusCode >= 400 || res.bodyBytes.isEmpty) return;
-      if (mounted) setState(() => _thumb = res.bodyBytes);
+      if (mounted && seq == _loadSeq) setState(() => _thumb = res.bodyBytes);
     } catch (_) {
       // 画像がなくても一覧は使える
     }
