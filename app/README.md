@@ -24,7 +24,9 @@ Flutter Web の画面と、ブラウザの中で動く採寸エンジン（TypeS
 | `lib/features/design/` | S6〜S8 形を作る・直す、OT に確認を頼む |
 | `lib/features/review/` | S9 OT の確認 |
 | `lib/features/print/` | S10 ダウンロード（`print_screen`）、Storage のファイルを保存する（`download`） |
-| `assets/images/` | アプリ名のロゴ（`logo.png`。S0・S1）、Google の G（`google_g.svg`）、S10 の部品の絵（`part_cover.svg`・`part_c_clip.svg`） |
+| `lib/features/order/` | S10 の「刷ってもらう／自分で刷る」（`print_choice`）と注文の状態（`order_status_card`）、S12 受託者を選ぶ（`fabricator_list_screen`）、S13 注文の内容（`order_form_screen`）、金額・重さ・時間の目安の計算（`order_logic`） |
+| `lib/features/fabricator/` | 受託する側の S14 受けた注文（`fabricator_orders_screen`）・S15 注文の詳細（`fabricator_order_screen`）、生成APIから STL を受け取って保存する（`api_download`） |
+| `assets/images/` | アプリ名のロゴ（`logo.png`。S0・S1）、Google の G（`google_g.svg`）、S10 の部品の絵が描けるまでの代わり（`part_cover.svg`・`part_c_clip.svg`） |
 | `web_engine/src/` | 採寸エンジン：アプリの中のカメラ、MediaPipe、1円玉の自動検出（OpenCV.js、Web Worker）、集計、hand-mesh の呼び出し |
 | `web/js/` | `measure_engine.js`・`coin_worker.js`（web_engine をまとめたもの）、`viewer.js`（three.js） |
 | `web/demo/` | モックで使う3Dの見本。形を変えたら `scripts/make_demo_assets.py` で作り直す |
@@ -78,3 +80,8 @@ cd app && flutter test
 - `test/attachments_preview_test.dart`：S7 の取り付け具の切り替え・足す・太さを直す（ADR-0014）
 - `test/attachments_print_test.dart`：S10 のダウンロードの行と、S9 の取り付け具の一覧
 - `test/text_ja_test.dart`：AI の文から項目名を取り除く（`text_ja.dart`）
+- `test/order_logic_test.dart`：発注の金額・重さ・時間の目安、注文の状態の名前、届く目安
+- `test/reviews_mock_test.dart`：OT のホームの「確認を頼まれているケース」（モック）
+- `test/refine_choice_test.dart`・`test/param_step_test.dart`：S7 の直し方の選択と、数値の −／＋ボタン
+- `test/stop_recording_dialog_test.dart`：S3 の録画中に閉じるときの確かめる画面
+- `test/data_url_bytes_test.dart`：同じ画像をデコードし直さないこと
