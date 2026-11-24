@@ -35,3 +35,6 @@
   MESH_PER_USER_DAILY: "150"
   MESH_GLOBAL_DAILY: "300"
   DAILY_COST_LIMIT_USD: "60"
+  # 切り抜いた画像1枚の上限。既定の 200KB では、暗い所の映像や模様の多い背景で iPhone の JPEG が超え、400 で
+  # 手の3Dが作れなかった（2026-11-24）。アプリ側でも 180KB 以下に縮めて送る（app/web_engine/src/engine.ts の jpegUnder）
+  MESH_MAX_FRAME_BYTES: "600000"

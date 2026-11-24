@@ -80,7 +80,7 @@ def test_create_order_snapshot(client):
     assert [i["print_key"] for i in o["items"]] == ["cover", "c_clip"]
     assert all(i["sha256"] == d["print_sha256"][i["print_key"]] for i in o["items"])
     assert o["items"][0]["material"] == "PLA" and o["items"][1]["material"] == "PETG"
-    assert o["items"][0]["name_ja"] == "カバー" and o["items"][1]["name_ja"].startswith("C字クリップ")
+    assert o["items"][0]["name_ja"] == "カバー" and o["items"][1]["name_ja"].startswith("留め具")
     assert o["color"]["hex"] == d["style"]["color"]
     assert o["approval"] == {"kind": "demo"}
     assert o["fabricator_snapshot"]["name"] == "うみかぜ3D工房"

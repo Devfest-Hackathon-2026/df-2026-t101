@@ -124,9 +124,31 @@ def _upload_preview(case_id: str, design_id: str, result: dict, atts: list[dict]
 COVER_PARTS = ("cover", "air_holes", "strap_slits", "rail")   # カバーのSTLの形を決める部品
 
 
+def tool_hits(value: dict) -> bool:
+    """R6h の値で、道具が手かカバーに当たるか（そうでなければ、先が机に届かないほうの不合格）。
+    すき間の基準は app/geometry/checks.py の TOOL_HAND_GAP_MM（2.0）・TOOL_COVER_GAP_MM（1.0）と同じ。
+    ここでは形の重い処理を読み込まないよう、値だけで判断する"""
+    if "hits" in value:   # 検査が丸める前の値で決めたもの（2026-11-24 から）
+        return bool(value["hits"])
+    gh, gc = value.get("gap_hand_mm"), value.get("gap_cover_mm")
+    return (gh is not None and gh < 2.0) or (gc is not None and gc < 1.0)
+UNUSED_PARTS = ("tpu_sleeve",)   # AI が選んでも作らない部品（TPUの筒は C字クリップ用。万力式に置き換えた 2026-11-24）
+
+
+def rail_placement(result: dict) -> dict | None:
+    """レールの台の位置（版に残す）。Firestore は配列の中の配列を持てないので、向きは行ごとの map にする"""
+    pl = result.get("placement") or {}
+    if not pl.get("rail_origin") or not pl.get("rail_frame"):
+        return None
+    fr = pl["rail_frame"]
+    return {"origin": list(pl["rail_origin"]), "frame": {"x": list(fr[0]), "y": list(fr[1]), "z": list(fr[2])}}
+
+
 def _reuse_parent_cover(case: dict, parent: dict | None, params: list[Param], result: dict, file_refs: dict) -> None:
     """カバーの入力が前の版と同じなら、カバーのプレビュー用STLを前の版の中身にする
-    （OpenSCAD は同じ入力でも毎回少し違うSTLを出すため。ADR-0014 §4 カバーは前の版と同じ）。検査は描き直したもののまま"""
+    （OpenSCAD は同じ入力でも毎回少し違うSTLを出すため。ADR-0014 §4 カバーは前の版と同じ）。検査は描き直したもののまま。
+    レールの台の位置も同じときだけ（台は主な留め具の角度で、道具が手に当たらない所までずれる。万力式は道具が外にあるので
+    角度ごとに位置が変わりやすく、前の版のカバーを使うと、留め具がレールから浮いて見えた。2026-11-24）"""
     old_key = ((parent or {}).get("files") or {}).get("parts", {}).get("cover", {}).get("preview_stl")
     new_ref = (file_refs.get("parts") or {}).get("cover")
     if not old_key or not new_ref or not result.get("cover_shell_sha256"):
@@ -137,6 +159,8 @@ def _reuse_parent_cover(case: dict, parent: dict | None, params: list[Param], re
     def cover_values(ps: list[Param]) -> dict:
         return {p.key(): p.value for p in ps if p.part_id in COVER_PARTS}
     if cover_values(params) != cover_values(validator.params_from_records(parent.get("params") or [])):
+        return
+    if rail_placement(result) != parent.get("rail_placement"):
         return
     data = files.get(old_key)
     if data:
@@ -155,7 +179,8 @@ def _make(case: dict, params: list[Param], selected: list[str], workdir: str, qu
         return _geometry().make_design(glb, hm["joints_mm"], hand_side,
                                        validator.to_dict(params), workdir,
                                        Cache(f"internal/cases/{case['_id']}/cover/{case.get('measurement_id')}"), quality=quality,
-                                       parts=tuple(p for p in ("cover", "c_clip", "tpu_sleeve") if p in selected),
+                                       # TPUの筒（C字クリップ用）は、前の版の部品に残っていても作らない（2026-11-24）
+                                       parts=tuple(p for p in ("cover", "c_clip") if p in selected),
                                        extra_clips=extra_clips or None)
     except ApiError:
         raise
@@ -353,7 +378,8 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                        "tool_d_mm": a["tool_d_mm"]} for a in atts if not a["primary"]]
             _progress(case_id, design_id, "selecting", "部品を選んでいます")
             sel = gemini.select(req, hand, _catalog_summary(), usage)
-            parts = sel["parts"]
+            # TPUの筒は C字クリップの輪の内側に入れる部品なので、万力式の留め具（2026-11-24）では作らない
+            parts = [p for p in sel["parts"] if p.get("part_id") not in UNUSED_PARTS]
             selected = [p["part_id"] for p in parts]
             for need in validator.REQUIRED_PARTS:  # 必須の部品が抜けていたら足す（R1）
                 if need not in selected:
@@ -384,7 +410,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             atts = _attachments_of(parent, req)
             target = next((a for a in atts if a["id"] == attachment_id), atts[0])
             on_extra = not target["primary"]   # 主でない取り付け具を直す（c_clip の値はその取り付け具にだけ効かせる）
-            parts = parent["parts"]
+            parts = [p for p in parent["parts"] if p.get("part_id") not in UNUSED_PARTS]   # 前の版の TPUの筒は引き継がない
             selected = [p["part_id"] for p in parts]
             params = validator.params_from_records(parent["params"])
             tools = [dict(t) for t in stored_tools(req)]
@@ -445,7 +471,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         if res.fatal:
             raise ApiError(res.fatal, details=res.violations)
         if not atts:
-            raise ApiError("DESIGN_INFEASIBLE", details=[{"rule": "R4", "message": "平たい柄は、いまのC字クリップでは挟めません"}])
+            raise ApiError("DESIGN_INFEASIBLE", details=[{"rule": "R4", "message": "平たい柄は、いまの留め具では挟めません"}])
         params = res.params
         _sync_primary(atts[0], params)
         labels = {a["id"]: attachment_label(a, atts) for a in atts}   # 外す前の一覧で名前をつける（同じ道具なら太さも）
@@ -454,9 +480,9 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             """この取り付け具だけ版から外して知らせる（ADR-0014 §3 取り付け具だけが落ちたとき）。
             足す取り付け具は外さずにエラーにする（details に検査の名前。ADR-0014 §4）"""
             if a["id"] in strict:
-                raise ApiError(code, f"{labels[a['id']]}のクリップは作れませんでした（{why}）", details=details or [])
+                raise ApiError(code, f"{labels[a['id']]}の留め具は作れませんでした（{why}）", details=details or [])
             atts.remove(a)
-            notes.append({"severity": "medium", "description_ja": f"{labels[a['id']]}のクリップは作れませんでした（{why}）"})
+            notes.append({"severity": "medium", "description_ja": f"{labels[a['id']]}の留め具は作れませんでした（{why}）"})
 
         att_params, bad, cl = _check_attachments(params, atts, selected, hand, req, overrides)
         clamped += cl
@@ -519,14 +545,17 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                                + "、".join(v.get("message_ja") or v.get("rule") for v in other) + "）。印刷用のデータは作れません"})
         r6h = [(atts[0], result.get("checks", []))] + [(a, result["extra_clips"][a["id"]].get("checks", [])) for a in atts[1:]]
         for a, checks in r6h:
-            if [c for c in checks if c.get("rule") == "R6h" and not c.get("ok")]:
-                # 道具が手やカバーに当たる、または机に届かない（11/8 の設計変更の核心なので、黙って ready にしない）
+            bad = [c for c in checks if c.get("rule") == "R6h" and not c.get("ok")]
+            if bad:
+                # 道具が手やカバーに当たる、または机に届かない（11/8 の設計変更の核心なので、黙って ready にしない）。
+                # 文は本当の理由に分ける（2026-11-24。手から 13mm 離れていても「当たるか、届きません」と出て、当たると読めた）
                 status = "needs_attention"
                 tool_name = labels[a["id"]]
-                if multi:   # どの道具のクリップかを書く
-                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。{tool_name}のクリップの角度を立ててみてください"
+                clip = f"{tool_name}の留め具" if multi else "留め具"   # 取り付け具が複数なら、どの道具の留め具かを書く
+                if tool_hits(bad[0].get("value") or {}):
+                    msg = f"{tool_name}が手やカバーに当たります。{clip}の角度を立ててみてください"
                 else:
-                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。クリップの角度を立ててみてください"
+                    msg = f"{tool_name}の先が机に届きにくい角度です。{tool_name}を{clip}から長めに出すか、{clip}の角度を立ててみてください"
                 unresolved.append({"severity": "medium", "description_ja": msg})
         if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_open") and not c.get("ok")]:
             # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）
@@ -594,7 +623,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                                  for a in atts[1:]):
                 # 取り付け具が複数のとき：直した形でどれかのクリップを描けない・検査に通らないなら、前の形にとどめる
                 status = "needs_attention"
-                unresolved.append({"severity": "medium", "description_ja": "直した形では、道具ごとのクリップが描けないか検査に通らなかったので、前の形のままにしました"})
+                unresolved.append({"severity": "medium", "description_ja": "直した形では、道具ごとの留め具が描けないか検査に通らなかったので、前の形のままにしました"})
                 break
             result, params = r2, p2
             clamped += res2.clamped + cl2
@@ -628,10 +657,10 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "hand_measurement_id": case.get("measurement_id"),
             "scale_factor": case["hand_model"].get("scale_factor"),
             "hand_clearance_mm": validator.fixed("HAND_CLEARANCE_MM", 1.5),
-            "cover_shell_sha256": result.get("cover_shell_sha256"),
+            "cover_shell_sha256": result.get("cover_shell_sha256"), "rail_placement": rail_placement(result),
             "clip_angle_deg": angle, "clip": result.get("clip"), "tool": result.get("tool"), "checks": result.get("checks", []),
             "attachments": atts,
-            "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
+            "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせた、ねじで締める留め具にしました。手のひら側と手首は開けてあります。",
             "input_snapshot": {"requirements": new_req or req, "measurement_id": case.get("measurement_id"),
                                "hand_model": case.get("hand_model")},
             "usage": {**usage.as_dict(), "openscad_ms": (result.get("timings_ms") or {}).get("openscad", 0)},

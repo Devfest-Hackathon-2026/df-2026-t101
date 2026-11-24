@@ -21,9 +21,9 @@ from .field import Field, compute_field
 from .glb import read_glb, write_glb
 from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirror_z, palm_length, parse_joints,
                         rail_direction, to_canonical_joints, to_canonical_mesh, wrist_cut_default, palm_cut_base)
-from . import clipgeom, cliplib
+from . import clipgeom
 from .placement import outer_surface, place_holes, place_rail_clear_of_slits, place_slits, slit_rail_clearance, tool_rod
-from .scad import posix, render_views, run
+from .scad import posix, render_views, repair_if_open, run
 from .scale import check_mcp_order, compute_scale
 from .shell import build_keepout, build_shell, shell_cut_values
 
@@ -183,11 +183,18 @@ def _print_matrix(bounds_actual: np.ndarray, hand_side: str) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# 1つのクリップ（主なクリップと、同じレールに付けるほかのクリップの両方で使う）
+# 1つの留め具（主な留め具と、同じレールに付けるほかの留め具の両方で使う）
+# 2026-11-24 に C字クリップから万力式に置き換えた。部品の ID・引数は今まで通り c_clip（tool_d_mm・angle_deg）。
+# 万力式は scad/vise_main.scad で描く（ねじの BOSL2 をカバーの入口で読み込まないため）。1つ 0.5 秒ほどで描けるので、
+# C字クリップのときの「先に作っておいた固定STL（cliplib）」は使わない。左手は鏡に映さず hand="left" で描く
+# （鏡に映すと、めねじが左ねじになりねじが入らない）
 # ---------------------------------------------------------------------------
 
+CLIP_ENTRY = "vise_main.scad"
+
+
 def _clip_defs(cp: dict) -> dict:
-    """OpenSCAD に渡すクリップの引数"""
+    """OpenSCAD に渡す留め具の引数（main.scad にも同じ名前で宣言がある）"""
     return {
         "c_clip_tool_d_mm": float(cp["tool_d_mm"]), "c_clip_wall_mm": float(cp["wall_mm"]),
         "c_clip_opening_ratio": float(cp["opening_ratio"]), "c_clip_height_mm": float(cp["height_mm"]),
@@ -196,33 +203,26 @@ def _clip_defs(cp: dict) -> dict:
     }
 
 
+def _vise_defs(defs: dict, cp: dict) -> dict:
+    """vise_main.scad に渡す引数だけ（カバーの引数は渡さない）"""
+    return {"quality": defs["quality"], "hand": defs["hand"], "rail_origin": defs["rail_origin"],
+            "rail_frame": defs["rail_frame"], "c_clip_tool_d_mm": float(cp["tool_d_mm"]),
+            "c_clip_angle_deg": int(cp["angle_deg"])}
+
+
 def _clip_plan(cp: dict, defs: dict, wd: Path, quality: str, names: dict, want_file: bool = True):
-    """ライブラリ（cliplib）にあれば持ってくる。なければ OpenSCAD の仕事を作る。
-    names：{"print", "preview", "check"} のファイル名。返り値は (引数, ライブラリ|None, 仕事 {"file"?, "check"})"""
-    lib = cliplib.lookup(cp) if want_file else None
-    if lib:
-        return {**cp, "tool_d_mm": lib["tool_d_snapped"]}, lib, {}
-    d = {**defs, **_clip_defs(cp)}
+    """留め具の OpenSCAD の仕事を作る。names：{"print", "preview", "check"} のファイル名。
+    返り値は (引数, None, 仕事 {"file"?, "check"})。仕事は (引数, 出力, 入口のファイル)"""
+    d = _vise_defs(defs, cp)
     jobs = {}
     if want_file:
         if quality == "print":
-            jobs["file"] = ({**d, "mode": "clip"}, wd / names["print"])
+            jobs["file"] = ({**d, "mode": "clip"}, wd / names["print"], CLIP_ENTRY)
         else:
-            jobs["file"] = ({**d, "mode": "assembled", "part": "c_clip"}, wd / names["preview"])
-    # 検査用：刷る向きのクリップ（速い）
-    jobs["check"] = ({**d, "mode": "clip", "quality": "preview"}, wd / names["check"])
+            jobs["file"] = ({**d, "mode": "assembled", "part": "c_clip"}, wd / names["preview"], CLIP_ENTRY)
+    # 検査用：刷る並び（受け具とねじ。速い）
+    jobs["check"] = ({**d, "mode": "clip", "quality": "preview"}, wd / names["check"], CLIP_ENTRY)
     return cp, None, jobs
-
-
-def _clip_from_lib(lib: dict, quality: str, defs: dict, wd: Path, names: dict, hand_side: str) -> str:
-    mirror = hand_side == "left"   # ライブラリは右手の形
-    if quality == "print":
-        dst = wd / names["print"]
-        cliplib.copy_print(lib["print"], dst, mirror=mirror)
-    else:
-        dst = wd / names["preview"]
-        cliplib.place_in_rail(lib["rail"], defs["rail_origin"], defs["rail_frame"], dst, mirror=mirror)
-    return posix(dst)
 
 
 def _clip_checks(clip_check: str, cp: dict, href, cover_c, rail: dict, Jc: dict) -> tuple[list, list]:
@@ -239,9 +239,11 @@ def _clip_tool(cp: dict, rail: dict, hand_side: str) -> dict:
             "tip_mm": CK.TOOL_TIP_MM, "rear_mm": CK.TOOL_REAR_MM, "diameter_mm": float(cp["tool_d_mm"])}
 
 
-def _clip_info(cp: dict, lib: dict | None) -> dict:
-    return {"source": "library" if lib else "generated", "variant": lib["variant"] if lib else None,
-            "tool_d_mm": float(cp["tool_d_mm"]), "angle_deg": int(cp["angle_deg"])}
+def _clip_info(cp: dict, lib: dict | None = None) -> dict:
+    lo, hi = clipgeom.grip_range_mm(cp)
+    return {"source": "generated", "variant": None, "kind": "vise",
+            "tool_d_mm": float(cp["tool_d_mm"]), "angle_deg": int(cp["angle_deg"]),
+            "grip_min_mm": round(lo, 2), "grip_max_mm": round(hi, 2)}
 
 
 def _violations(results: list) -> list:
@@ -370,7 +372,7 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     angle = int(clip_p["angle_deg"])
     pm = _print_matrix(shell_a.bounds, hand_side)
 
-    # クリップ：先に作っておいた固定STL（cliplib）に合うものがあれば、OpenSCAD で描かずにそれを持ってくる（2026-11-08）
+    # 留め具（万力式）：vise_main.scad で描く
     names = {"print": f"print_clip_{angle}.stl", "preview": "clip_preview.stl", "check": "_clip_check.stl"}
     clip_p, lib, cjobs = _clip_plan(clip_p, defs, wd, quality, names, want_file="c_clip" in parts)
     # ほかのクリップ（同じレール。カバーは作り直さない）。引数の足りない所は主なクリップの引数で埋める
@@ -407,21 +409,18 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
             jobs[("_extra", aid, k)] = j
     ts = time.time()
     with ThreadPoolExecutor(max_workers=4) as ex:
-        futs = {k: ex.submit(run, d, p) for k, (d, p) in jobs.items()}
+        futs = {k: ex.submit(run, *j) for k, j in jobs.items()}
         files = {k: f.result() for k, f in futs.items()}
     timings["openscad_ms"] = int((time.time() - ts) * 1000)
     for aid, x in extras.items():
         out = {k: files.pop(("_extra", aid, k)) for k in list(x["jobs"])}
-        if x["lib"]:
-            x["file"] = _clip_from_lib(x["lib"], quality, defs, wd, x["names"], hand_side)
-            x["check"] = x["lib"]["print"]
-        else:
-            x["file"], x["check"] = out["file"], out["check"]
-    if lib:
-        files["c_clip"] = _clip_from_lib(lib, quality, defs, wd, names, hand_side)
-        clip_check = lib["print"]
-    else:
-        clip_check = files.pop("_clip_print_check")
+        x["file"], x["check"] = out["file"], out["check"]
+        for f in (x["file"], x["check"]):
+            repair_if_open(f)
+    clip_check = files.pop("_clip_print_check")
+    for f in (files.get("c_clip"), clip_check):   # 留め具のねじ山の面が閉じていなければ直す
+        if f:
+            repair_if_open(f)
 
     # 検査（正準形で）
     ts = time.time()

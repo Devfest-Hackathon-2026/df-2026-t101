@@ -4,7 +4,7 @@
     "model": "Bambu Lab A1",
     "layer_mm": 0.2,
     "infill_pct": 15,
-    "supports_ja": "カバーの内側、クリップの輪の下",
+    "supports_ja": "カバーの内側、留め具のレールに入る舌の下",
     "orientation_ja": "ファイルの向きのまま"
   },
   "materials": {

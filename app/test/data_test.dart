@@ -128,9 +128,9 @@ void main() {
     });
     test('今までの項目は主な道具を読む', () {
       final a = Answers()
-        ..tools = [ToolAnswer()..activity = 'eat'..shaftShape = 'flat', ToolAnswer()..activity = 'write'..shaftShape = 'round'];
-      expect(a.activity, 'write');
-      a.shaftShape = 'flat'; // 主な道具（ペン）を平たいにすると、丸い柄がなくなり最初が主になる
+        ..tools = [ToolAnswer()..activity = 'eat'..shaftShape = 'flat', ToolAnswer()..activity = 'other'..shaftShape = 'round'];
+      expect(a.activity, 'other');
+      a.shaftShape = 'flat'; // 主な道具（その他）を平たいにすると、丸い柄がなくなり最初が主になる（ペン・筆はいつも丸い）
       expect(a.tools[1].shaftShape, 'flat');
       expect(a.activity, 'eat');
     });
@@ -156,15 +156,47 @@ void main() {
   });
 
   group('質問の並びと進み具合（S2a）', () {
-    test('道具が0・1つなら7問、2つなら9問', () {
-      expect(interviewTotal(0), 7);
-      expect(interviewTotal(1), 7);
-      expect(interviewTotal(2), 9);
+    ToolAnswer tool(String act) => ToolAnswer()
+      ..activity = act
+      ..toolType = activityTool[act];
+    test('柄の形はスプーンとその他だけ聞く（着け外し・指の形は聞かない）', () {
+      expect(interviewTotal([]), 4);
+      expect(interviewTotal([tool('draw')]), 4);
+      expect(interviewTotal([tool('eat')]), 5);
+      expect(interviewTotal([tool('write'), tool('eat')]), 6);
+      expect(interviewTotal([tool('other')]), 5);
     });
-    test('道具がないときは質問3・4の段を作らない（番号がはみ出さない）', () {
-      expect(interviewSteps(0), [(0, 0), (1, 0), (4, 0), (5, 0), (6, 0)]);
-      expect(interviewSteps(2),
-          [(0, 0), (1, 0), (2, 0), (3, 0), (2, 1), (3, 1), (4, 0), (5, 0), (6, 0)]);
+    test('道具がないときは質問3・4の段を作らない。ペン・筆は質問4（柄の形）を飛ばす', () {
+      expect(interviewSteps([]), [(0, 0), (1, 0), (6, 0)]);
+      expect(interviewSteps([tool('draw'), tool('eat')]),
+          [(0, 0), (1, 0), (2, 0), (2, 1), (3, 1), (6, 0)]);
+    });
+    test('指の形は聞かずに「握った形で固まっている」で送る。前に答えた値は残す', () {
+      final a = Answers();
+      expect(a.fingerState, 'fist');
+      expect(a.toJson()['finger_state'], 'fist');
+      a.loadFrom({'finger_state': 'bent'});
+      expect(a.fingerState, 'bent');
+      a.loadFrom({});
+      expect(a.fingerState, 'fist');
+    });
+    test('柄の形を聞かないペン・筆は「丸い」で送り、答えたことにする', () {
+      final a = Answers()..tools = [tool('write')];
+      expect(a.isAnswered(3), isTrue);
+      expect(a.toJson()['tool_shaft_shape'], 'round');
+      expect(a.toJson()['tools'][0]['tool_shaft_shape'], 'round');
+      final s = Answers()..tools = [tool('eat')];
+      expect(s.isAnswered(3), isFalse);
+      expect(s.toJson()['tool_shaft_shape'], isNull);
+    });
+    test('着け外しは聞かずに「家族や支援者がする」で送る。前に答えた値は残す', () {
+      final a = Answers();
+      expect(a.donningBy, 'helper');
+      expect(a.toJson()['donning_by'], 'helper');
+      a.loadFrom({'donning_by': 'self'});
+      expect(a.donningBy, 'self');
+      a.loadFrom({});
+      expect(a.donningBy, 'helper');
     });
   });
 

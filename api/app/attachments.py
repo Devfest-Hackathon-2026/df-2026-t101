@@ -1,4 +1,4 @@
-"""取り付け具（道具ごとのクリップ）の元になる、道具の一覧の正規化（docs/adr/0014-multiple-attachments.md）。
+"""取り付け具（道具ごとの留め具）の元になる、道具の一覧の正規化（docs/adr/0014-multiple-attachments.md）。
 app.geometry は import しない（テストが差し替えるため）"""
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ _TOOL_KEYS = ("activity", "tool_type", "tool_d_mm", "tool_shaft_size", "tool_sha
 def flat_reason(tool_type: str | None) -> str:
     """平たい柄の道具につける知らせ"""
     name = TOOL_JA.get(tool_type, "道具")
-    return f"{name}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。"
+    return f"{name}：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください。"
 
 
 ESTIMATED_D = "道具の太さは推定です。刷る前に太さを確かめてください"

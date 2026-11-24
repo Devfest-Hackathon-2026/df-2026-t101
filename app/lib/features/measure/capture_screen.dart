@@ -29,7 +29,6 @@ class _CaptureScreenState extends State<CaptureScreen> {
   bool _waitingPick = false;
   int _pickGen = 0;
   String _hand = 'right';
-  String _fingerState = 'fist';
 
   @override
   void initState() {
@@ -42,7 +41,6 @@ class _CaptureScreenState extends State<CaptureScreen> {
       final c = await Api.instance.get('/v1/cases/${widget.caseId}');
       setState(() {
         _hand = c['requirements']?['hand_side'] ?? 'right';
-        _fingerState = c['requirements']?['finger_state'] ?? 'fist';
         _consented =
             c['mesh_consent_at'] != null &&
             c['consent_text_version'] == consentVersion;
@@ -298,21 +296,17 @@ class _CaptureScreenState extends State<CaptureScreen> {
         ),
         const SizedBox(height: 16),
         for (final (i, s) in const [
-          'いつもの握った形のまま、手の甲を上に向けて、手を机に置きます。',
+          '手を軽く握って、手の甲を上に向けます。',
           '1円玉を、手の甲の真ん中（手首と指の付け根の間）に平らにのせます。指の付け根の出っ張りの上は避けてください。',
-          '撮っているあいだ、手は動かしません。指先から手首までがいつも画面に入る距離で、スマホを構えます。家族や支援者に撮ってもらってもかまいません。',
+          '撮っている間は、手を動かさないでください（机の上に手を置いてもかまいません）。指先から手首までが画面に入る距離で撮ってください。',
           '15〜20秒かけて、スマホを親指側から手の甲の上を通って小指側へ、手のまわりを半周するように動かします。途中で、指の背と関節の出っ張りも写るようにしてください。',
-          'PCで撮るときは、ノートPCを持って同じように動かします。動かしにくいときは、スマホで撮るのがおすすめです。',
         ].indexed)
           _StepRow(number: i + 1, text: s),
         const SizedBox(height: 4),
         InfoCard(
           tone: NoticeTone.warning,
-          child: Text(
-            _fingerState == 'straight'
-                ? '軽く握った形で撮ってください。指を無理に動かさないでください。'
-                : '指を無理に開かないでください。いつもの握った形のまま撮ります。',
-          ),
+          // 指の形は聞き取りで聞かなくなったので、注意は1つの文にした（2026-11-24）
+          child: const Text('指が固まっているときは、いつもの形のままでかまいません。指を無理に曲げたり開いたりしないでください。'),
         ),
         const SizedBox(height: 8),
         const InfoCard(

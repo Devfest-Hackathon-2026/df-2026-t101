@@ -25,9 +25,9 @@ def select(requirements: dict) -> dict:
         {"part_id": "cover", "variant": "standard", "reason_ja": "握った形のまま、手の甲側からかぶせられる形にしました"},
         {"part_id": "air_holes", "variant": "standard", "reason_ja": "蒸れにくいよう、手の甲に空気穴を開けます"},
         {"part_id": "strap_slits", "variant": "standard", "reason_ja": "ベルトで手のひら側を通して留めます"},
-        {"part_id": "rail", "variant": "standard", "reason_ja": "人差し指の横にクリップを差し込みます"},
+        {"part_id": "rail", "variant": "standard", "reason_ja": "人差し指の横に留め具を差し込みます"},
         {"part_id": "c_clip", "variant": "standard",
-         "reason_ja": f"道具（{ {'brush': '筆', 'pen': 'ペン', 'spoon': 'スプーン'}.get(tool, '道具') }）の太さに合わせたクリップにします"},
+         "reason_ja": f"道具（{ {'brush': '筆', 'pen': 'ペン', 'spoon': 'スプーン'}.get(tool, '道具') }）の太さに合わせた、ねじで締める留め具にします"},
     ]
     return {"parts": parts}
 
@@ -57,7 +57,7 @@ def dimension(requirements: dict, param_defs: list, attachments: list | None = N
         if d["part_id"] == "c_clip" and d["name"] == "opening_ratio" and requirements.get("donning_by") == "helper":
             src, why = "ai", "家族や支援者が着け外しするので、押し込みやすさを優先しました"
         out.append({"part_id": d["part_id"], "name": d["name"], "value": v, "source": src, "reason_ja": why})
-    res = {"params": out, "summary_ja": "手の甲に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。"}
+    res = {"params": out, "summary_ja": "手の甲に沿うカバーと、道具の太さに合わせた、ねじで締める留め具にしました。手のひら側と手首は開けてあります。"}
     if attachments:
         res["attachments"] = [{"attachment_id": a["attachment_id"], **attachment_angle(a)} for a in attachments]
     return res

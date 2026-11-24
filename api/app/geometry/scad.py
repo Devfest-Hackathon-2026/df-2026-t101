@@ -79,6 +79,23 @@ def drop_slivers(path: str) -> int:
     return len(parts) - len(keep)
 
 
+def repair_if_open(path: str) -> bool:
+    """OpenSCAD（Manifold）の出力が閉じていなければ、小さな穴を埋めて書き直す。直したら True。
+    留め具（万力式）のねじ山の面に使う（C字クリップのときは cliplib が同じことをしていた。2026-11-24 に移した）"""
+    import trimesh
+    m = trimesh.load(path, force="mesh")
+    if m.is_watertight:
+        return False
+    trimesh.repair.fill_holes(m)
+    if not m.is_watertight:
+        m.merge_vertices(digits_vertex=3)
+        trimesh.repair.fill_holes(m)
+    if m.is_watertight:
+        m.export(path)
+        return True
+    return False
+
+
 def render_views(files: dict, hand_file: str, rod: tuple, rod_d: float, color: str,
                  cams: dict, outdir: Path, size: int = 768) -> list[str]:
     """確認用画像（view.scad）。cams は {名前: (eye[3], center[3])}。並行して描く。"""
