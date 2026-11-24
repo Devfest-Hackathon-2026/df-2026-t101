@@ -155,7 +155,8 @@ def check_slits_open(cover: trimesh.Trimesh | None, sl: dict, wall_t: float) -> 
                   fix_hint="strap_width_mm を狭くする", severity="warning")]
 
 
-TOOL_TIP_MM = 100.0    # 留め具から道具の先まで（ペン・筆の目安）
+TOOL_TIP_MM = 120.0    # 留め具から道具の先まで出せる長さ。万力式は道具を差し込む深さを変えられるので、長さ約140mmのペンを
+                       # 120mm まで出せる（2026-11-24 に 100 から。100 では 101mm で「届かない」と出た）
 TOOL_REAR_MM = 50.0    # 留め具から道具の後ろの端まで
 TOOL_HAND_GAP_MM = 2.0   # 道具の面と手の間にほしいすき間
 TOOL_COVER_GAP_MM = 1.0
@@ -189,5 +190,5 @@ def check_tool_path(hand_ref: HandRef, cover: trimesh.Trimesh | None, rail: dict
              "tip_from_index_mcp_mm": None if tip is None else [round(float(v), 0) for v in (tip - mcp)[:2]]}
     msg = "道具は手・カバーに当たらず、先が机に届く" if ok else \
         ("道具が手かカバーに当たります" if (gap_hand < TOOL_HAND_GAP_MM or (gap_cover is not None and gap_cover < TOOL_COVER_GAP_MM))
-         else "道具の先が机に届きません（寝すぎ）")
+         else "道具の先が机に届きにくい角度です（道具を留め具から長めに出すか、角度を立てる）")
     return [_item("R6h", ok, value, msg, fix_hint="c_clip.angle_deg を立てる", severity="warning")]

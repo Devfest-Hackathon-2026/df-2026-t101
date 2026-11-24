@@ -8,7 +8,7 @@ import 'package:jijogu_app/core/text_ja.dart';
 import 'package:jijogu_app/core/ui/tool_fields.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 
-/// S2 やりたいこと（選択式の6問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
+/// S2 やりたいこと（選択式の3〜4問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
 class InterviewScreen extends StatefulWidget {
   const InterviewScreen({super.key, required this.caseId});
   final String caseId;
@@ -84,7 +84,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     super.dispose();
   }
 
-  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら6問（着け外しは 2026-11-24 に聞くのをやめた）
+  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら3問（スプーンは柄の形を足して4問。着け外し・指の形は 2026-11-24 に聞くのをやめた）
   List<(int, int)> get _steps => interviewSteps(a.tools);
 
   int get _pos => _steps.indexOf((_q, _t)).clamp(0, _steps.length - 1);
@@ -270,7 +270,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                   )
                 : null),
       children: [
-        // 進み具合（Figma：「質問 1 / 6」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
+        // 進み具合（Figma：「質問 1 / 3」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
         Text(
           '質問 ${pos + 1} / $total',
           style: AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant),
@@ -523,7 +523,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
             for (final t
                 in (_choices.isNotEmpty
                     ? _choices
-                    : const ['痛い所がある', '長い時間使いたい', '目立たない見た目がいい']))
+                    // 例は形に効くものにする（見た目の好みは S7 の色で選べ、ここで伝えても色が変わるだけだった。2026-11-24）
+                    : const ['痛い所がある', '長い時間使いたい', '汗をかきやすい']))
               SuggestButton(
                 label: t,
                 onPressed: _busy || _turns >= 3 ? null : () => _send(t),
@@ -599,16 +600,6 @@ class _InterviewScreenState extends State<InterviewScreen> {
       ] else
         for (final (i, t) in a.tools.indexed)
           (_toolName(i), '柄の太さ ${thick(t)}・${shape(t)}', 2, i),
-      (
-        '指の形',
-        switch (a.fingerState) {
-          'fist' => '握った形で固まっている',
-          'bent' => '少し曲がっている',
-          _ => 'ほぼ伸ばせる',
-        },
-        5,
-        0,
-      ),
       ('撮影', a.captureBy == 'self' ? '自分（片手）' : '家族や支援者', 6, 0),
     ];
     final guessed = [

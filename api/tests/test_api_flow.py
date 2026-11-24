@@ -976,3 +976,22 @@ def test_cover_preview_is_redrawn_when_the_rail_moves(client, monkeypatch):
     assert _cover_bytes(n) != _cover_bytes(d)              # 台がずれた
     m = client.post(f"/v1/cases/{cid}/designs/{n['design_id']}/refine", headers=H, json={"clip_angle_deg": 80}).json()["design"]
     assert _cover_bytes(m) == _cover_bytes(n)              # 60度と80度は台が同じ所
+
+
+@pytest.mark.parametrize("value,expect", [
+    ({"gap_hand_mm": 13.4, "gap_cover_mm": 10.1, "reach_mm": 125.0}, "筆の先が机に届きにくい角度です。筆を留め具から長めに出すか"),
+    ({"gap_hand_mm": 0.7, "gap_cover_mm": 10.1, "reach_mm": 80.0}, "筆が手やカバーに当たります。留め具の角度を立ててみてください"),
+])
+def test_tool_path_warning_says_the_real_reason(client, monkeypatch, value, expect):
+    """道具の通り道（R6h）の知らせは、当たるのか・机に届かないのかを分けて書く（2026-11-24。手から 13mm 離れていても
+    「当たるか、届きません」と出て、当たると読めた）"""
+    orig = GEOM.make_design
+
+    def with_r6h(*a, **k):
+        r = orig(*a, **k)
+        r["checks"] = r["checks"] + [{"rule": "R6h", "ok": False, "value": value, "message_ja": "x", "severity": "warning"}]
+        return r
+    monkeypatch.setattr(GEOM, "make_design", with_r6h)
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    issues = [i["description_ja"] for i in d["review"]["unresolved_issues"]]
+    assert any(i.startswith(expect) for i in issues), issues

@@ -47,25 +47,26 @@ const activityTool = {'draw': 'brush', 'write': 'pen', 'eat': 'spoon', 'other': 
 /// S2a の選択式の並び（質問3・4は道具ごと。質問4の柄の形は、聞く道具＝ToolAnswer.asksShape だけ）。
 /// (質問, 道具の番号)。道具がなければ質問3・4の段は作らない。
 /// 質問5（カバーと留め具を誰が着け外しするか）は 2026-11-24 に聞くのをやめた：形にも部品にも効かず、留め具を
-/// 万力式にしてからは、ねじを支援者が回す前提で答えが決まるため。答えは「家族や支援者がする」（helper）で送る
+/// 万力式にしてからは、ねじを支援者が回す前提で答えが決まるため。答えは「家族や支援者がする」（helper）で送る。
+/// 質問6（指の形）も同じ日にやめた：カバーは撮った手の3Dから作るので形に効かず、撮影の注意の文が変わるだけだったため。
+/// 答えは「握った形で固まっている」（fist）で送る
 List<(int, int)> interviewSteps(List<ToolAnswer> tools) => [
   (0, 0),
   (1, 0),
   for (var i = 0; i < tools.length; i++) ...[(2, i), if (tools[i].asksShape) (3, i)],
-  (5, 0),
   (6, 0),
 ];
 
-/// 進み具合に出す全体の数。まだ道具を選んでいなくても、道具1つ（柄の形を聞かない）として数える（「1 / 5」）
+/// 進み具合に出す全体の数。まだ道具を選んでいなくても、道具1つ（柄の形を聞かない）として数える（「1 / 4」）
 int interviewTotal(List<ToolAnswer> tools) =>
-    4 + (tools.isEmpty ? 1 : tools.fold(0, (n, t) => n + (t.asksShape ? 2 : 1)));
+    3 + (tools.isEmpty ? 1 : tools.fold(0, (n, t) => n + (t.asksShape ? 2 : 1)));
 
 /// 選択式の答え（requirements の名前は api.md §3.2）
 class Answers {
   List<ToolAnswer> tools = []; // 選んだ順
   String? handSide;
   String? donningBy = 'helper'; // self / helper。画面では聞かない（interviewSteps）
-  String? fingerState; // fist / bent / straight
+  String? fingerState = 'fist'; // fist / bent / straight。画面では聞かない（interviewSteps）
   String? captureBy; // self / helper
 
   /// 主な道具（最初の丸い柄、なければ最初）。空のときは空の答えを返す（tools は増やさない）。
@@ -109,7 +110,7 @@ class Answers {
   void loadFrom(Map<String, dynamic> r) {
     handSide = r['hand_side'] as String?;
     donningBy = r['donning_by'] as String? ?? 'helper';
-    fingerState = r['finger_state'] as String?;
+    fingerState = r['finger_state'] as String? ?? 'fist';
     captureBy = r['capture_by'] as String?;
     final ts = r['tools'];
     if (ts is List && ts.isNotEmpty) {

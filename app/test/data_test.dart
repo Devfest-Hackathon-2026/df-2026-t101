@@ -159,17 +159,26 @@ void main() {
     ToolAnswer tool(String act) => ToolAnswer()
       ..activity = act
       ..toolType = activityTool[act];
-    test('柄の形はスプーンとその他だけ聞く（着け外しは聞かない）', () {
-      expect(interviewTotal([]), 5);
-      expect(interviewTotal([tool('draw')]), 5);
-      expect(interviewTotal([tool('eat')]), 6);
-      expect(interviewTotal([tool('write'), tool('eat')]), 7);
-      expect(interviewTotal([tool('other')]), 6);
+    test('柄の形はスプーンとその他だけ聞く（着け外し・指の形は聞かない）', () {
+      expect(interviewTotal([]), 4);
+      expect(interviewTotal([tool('draw')]), 4);
+      expect(interviewTotal([tool('eat')]), 5);
+      expect(interviewTotal([tool('write'), tool('eat')]), 6);
+      expect(interviewTotal([tool('other')]), 5);
     });
     test('道具がないときは質問3・4の段を作らない。ペン・筆は質問4（柄の形）を飛ばす', () {
-      expect(interviewSteps([]), [(0, 0), (1, 0), (5, 0), (6, 0)]);
+      expect(interviewSteps([]), [(0, 0), (1, 0), (6, 0)]);
       expect(interviewSteps([tool('draw'), tool('eat')]),
-          [(0, 0), (1, 0), (2, 0), (2, 1), (3, 1), (5, 0), (6, 0)]);
+          [(0, 0), (1, 0), (2, 0), (2, 1), (3, 1), (6, 0)]);
+    });
+    test('指の形は聞かずに「握った形で固まっている」で送る。前に答えた値は残す', () {
+      final a = Answers();
+      expect(a.fingerState, 'fist');
+      expect(a.toJson()['finger_state'], 'fist');
+      a.loadFrom({'finger_state': 'bent'});
+      expect(a.fingerState, 'bent');
+      a.loadFrom({});
+      expect(a.fingerState, 'fist');
     });
     test('柄の形を聞かないペン・筆は「丸い」で送り、答えたことにする', () {
       final a = Answers()..tools = [tool('write')];

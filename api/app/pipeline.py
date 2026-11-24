@@ -122,6 +122,14 @@ def _upload_preview(case_id: str, design_id: str, result: dict, atts: list[dict]
 
 
 COVER_PARTS = ("cover", "air_holes", "strap_slits", "rail")   # カバーのSTLの形を決める部品
+
+
+def tool_hits(value: dict) -> bool:
+    """R6h の値で、道具が手かカバーに当たるか（そうでなければ、先が机に届かないほうの不合格）。
+    すき間の基準は app/geometry/checks.py の TOOL_HAND_GAP_MM（2.0）・TOOL_COVER_GAP_MM（1.0）と同じ。
+    ここでは形の重い処理を読み込まないよう、値だけで判断する"""
+    gh, gc = value.get("gap_hand_mm"), value.get("gap_cover_mm")
+    return (gh is not None and gh < 2.0) or (gc is not None and gc < 1.0)
 UNUSED_PARTS = ("tpu_sleeve",)   # AI が選んでも作らない部品（TPUの筒は C字クリップ用。万力式に置き換えた 2026-11-24）
 
 
@@ -534,14 +542,17 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                                + "、".join(v.get("message_ja") or v.get("rule") for v in other) + "）。印刷用のデータは作れません"})
         r6h = [(atts[0], result.get("checks", []))] + [(a, result["extra_clips"][a["id"]].get("checks", [])) for a in atts[1:]]
         for a, checks in r6h:
-            if [c for c in checks if c.get("rule") == "R6h" and not c.get("ok")]:
-                # 道具が手やカバーに当たる、または机に届かない（11/8 の設計変更の核心なので、黙って ready にしない）
+            bad = [c for c in checks if c.get("rule") == "R6h" and not c.get("ok")]
+            if bad:
+                # 道具が手やカバーに当たる、または机に届かない（11/8 の設計変更の核心なので、黙って ready にしない）。
+                # 文は本当の理由に分ける（2026-11-24。手から 13mm 離れていても「当たるか、届きません」と出て、当たると読めた）
                 status = "needs_attention"
                 tool_name = labels[a["id"]]
-                if multi:   # どの道具のクリップかを書く
-                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。{tool_name}の留め具の角度を立ててみてください"
+                clip = f"{tool_name}の留め具" if multi else "留め具"   # 取り付け具が複数なら、どの道具の留め具かを書く
+                if tool_hits(bad[0].get("value") or {}):
+                    msg = f"{tool_name}が手やカバーに当たります。{clip}の角度を立ててみてください"
                 else:
-                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。留め具の角度を立ててみてください"
+                    msg = f"{tool_name}の先が机に届きにくい角度です。{tool_name}を{clip}から長めに出すか、{clip}の角度を立ててみてください"
                 unresolved.append({"severity": "medium", "description_ja": msg})
         if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_open") and not c.get("ok")]:
             # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）
