@@ -42,16 +42,16 @@ void main() {
     test('取り付け具が1つなら道具の名前を付けない', () {
       final c = RefineChoice.angle(80, newDesign, 'a1');
       expect(c.angle, 80);
-      expect(c.buttonLabel, 'クリップを80度で描き直す');
+      expect(c.buttonLabel, 'クリップを80度で作り直す');
       expect(c.body, {'clip_angle_deg': 80, 'attachment_id': 'a1'});
-      expect(c.busyText, 'クリップを80度で描き直しています（カバーはそのままです）');
+      expect(c.busyText, 'クリップを80度で作り直しています（カバーはそのままです）');
       expect(c.doneText, 'クリップを80度にしました（カバーはそのままです）');
     });
 
     test('取り付け具が2つ以上なら道具の名前を付ける', () {
       final c = RefineChoice.angle(60, newDesign, 'a1', toolLabel: 'ペン');
-      expect(c.buttonLabel, 'ペンのクリップを60度で描き直す');
-      expect(c.busyText, 'ペンのクリップを60度で描き直しています（カバーはそのままです）');
+      expect(c.buttonLabel, 'ペンのクリップを60度で作り直す');
+      expect(c.busyText, 'ペンのクリップを60度で作り直しています（カバーはそのままです）');
       expect(c.doneText, 'ペンのクリップを60度にしました（カバーはそのままです）');
     });
 
@@ -63,10 +63,10 @@ void main() {
     });
   });
 
-  test('直すと新しい版になることの注意（OTに頼んだあと・確認済みのときだけ）', () {
+  test('直すと新しい形になることの注意（OTに頼んだあと・確認済みのときだけ）', () {
     expect(reReviewNote('none'), isNull);
     expect(reReviewNote('rejected'), isNull);
-    expect(reReviewNote('requested'), '直すと新しい版になり、OTの確認をもう一度頼みます。');
-    expect(reReviewNote('approved'), '直すと新しい版になり、OTの確認をもう一度頼みます。');
+    expect(reReviewNote('requested'), '直すと新しい形になるため、もう一度OTに確認を頼む必要があります。');
+    expect(reReviewNote('approved'), '直すと新しい形になるため、もう一度OTに確認を頼む必要があります。');
   });
 }

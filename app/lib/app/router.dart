@@ -90,7 +90,7 @@ class _NotFound extends StatelessWidget {
     bottom: FilledButton(
       onPressed: () =>
           Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
-      child: const Text('ホームへ'),
+      child: const Text('ホームに戻る'),
     ),
     children: const [InfoCard(child: Text('このページは見つかりませんでした。'))],
   );

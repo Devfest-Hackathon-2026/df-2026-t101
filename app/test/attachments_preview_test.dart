@@ -218,7 +218,7 @@ void main() {
       expect(canSubmitTool(t), isFalse); // 形がまだ
       t.shaftShape = 'flat';
       expect(flatNotice(t), flatReason('spoon'));
-      expect(flatReason('spoon'), 'スプーン：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください');
+      expect(flatReason('spoon'), 'スプーン：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。');
       expect(canSubmitTool(t), isFalse);
       t.shaftShape = 'round';
       expect(flatNotice(t), isNull);

@@ -128,7 +128,7 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> with KeepRecording {
           'CONSENT_REQUIRED' => '同意の記録がありません。撮影の画面からやり直してください。',
           'NO_HAND_DETECTED' => '手の3Dを作れませんでした。手と1円玉がよく写るように撮り直してください。',
           _ =>
-            'いまは手の3Dを作れません。動画は保存していないので、少し時間をおいて、もう一度撮影してください（約1分）。\n（${e.message}）',
+            'いまは手の3Dを作れません。動画は保存していないので、1分ほど時間をおいてから、もう一度撮影してください。',
         };
         _retake = !e.retryable;
       });

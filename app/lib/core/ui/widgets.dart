@@ -231,7 +231,7 @@ class DemoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const InfoCard(
     tone: NoticeTone.warning,
-    child: Text('デモ用：OTの確認を省略しています。実際に使う前には、必ず作業療法士の確認が必要です。'),
+    child: Text('デモ用：作業療法士（OT）の確認を省略しています。実際に使う前には、必ず作業療法士の確認が必要です。'),
   );
 }
 

@@ -47,7 +47,7 @@ class PrintChoice extends StatelessWidget {
           title: compact ? 'もう一度頼む' : '刷ってもらう',
           sub: onOrder == null
               ? (unavailableReason ?? 'いまは頼めません')
-              : 'プリンタがなくても大丈夫です。受託者が刷って届けます。${from == null ? '' : '${yen(from)}から（目安）'}',
+              : 'プリンタがなくても大丈夫です。3Dプリント工房が印刷して届けます。${from == null ? '' : '${yen(from)}から（目安）'}',
           onTap: onOrder,
         ),
         _Option(

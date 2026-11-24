@@ -160,8 +160,8 @@ class _Viewer3DState extends State<Viewer3D> with AutomaticKeepAliveClientMixin 
             .toDart;
       }
       if (mounted && _error != null) setState(() => _error = null);
-    } catch (e) {
-      if (mounted) setState(() => _error = '3Dを読み込めませんでした（$e）');
+    } catch (_) {
+      if (mounted) setState(() => _error = '3Dを読み込めませんでした。画面を読み込み直してください。');
     }
   }
 

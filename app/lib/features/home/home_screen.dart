@@ -14,9 +14,9 @@ import 'package:jijogu_app/features/order/order_status_card.dart';
 
 const caseStatusJa = {
   'interviewing': '聞き取り中',
-  'measuring': '撮影を待っています',
-  'designing': '形を作る前',
-  'previewing': '形を確かめています',
+  'measuring': '撮影待ち',
+  'designing': '作成待ち',
+  'previewing': '形を確認中',
   'in_review': '確認待ち',
   'approved': '確認済み',
 };
@@ -151,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   Future<void> _create() async {
     setState(() => _busy = true);
     try {
-      final r = await Api.instance.post('/v1/cases', {'title': '筆のカバー'});
+      final r = await Api.instance.post('/v1/cases', {'title': '道具のカバー'});
       if (!mounted) return;
       await Navigator.of(context).pushNamed(AppRouter.interview(r['case_id']));
       // 読み直しは didPopNext（問診は撮影の画面に置き換わるので、ここで待っても戻ってきた時ではない）
@@ -171,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
         title: const Text('この道具を消しますか？'),
         content: Text(
-          '「$title」を消します。手の3Dの形、作った形、印刷用のデータもすべて消えます。消したあとは元に戻せません。'
+          '「$title」を消します。手の3Dモデル、作った形、印刷用データもすべて消えます。消したあとは元に戻せません。'
           '${c['status'] == 'in_review' ? '\n\nOTに確認を頼んでいる途中です。消すと、OTも見られなくなります。' : ''}',
         ),
         actions: [

@@ -172,6 +172,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
           context: context,
           builder: (_) => OutOfScopeDialog(
             reason: ja(t['message_ja']),
+            outOfScopeReason: '${t['out_of_scope_reason'] ?? ''}',
             canRephrase: _turns < 3,
           ),
         );
@@ -313,7 +314,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     switch (q) {
       case 0:
         return (
-          '何をしたいですか',
+          '何をしたいですか？',
           [
             const SizedBox(height: 6),
             Text(
@@ -331,7 +332,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 1:
         return (
-          'どちらの手に着けますか',
+          'どちらの手に着けますか？',
           [
             c('右手', a.handSide == 'right', () => a.handSide = 'right'),
             c('左手', a.handSide == 'left', () => a.handSide = 'left'),
@@ -339,7 +340,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 2:
         return (
-          '$tool道具の柄の太さ（挟む所）',
+          '$tool道具の柄の太さはどれくらいですか？',
           [
             const SizedBox(height: 6),
             Text(
@@ -382,7 +383,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 3:
         return (
-          '$tool柄の形は',
+          '$tool柄の形はどれですか？',
           [
             c('丸い', _tool.shaftShape == 'round', () => _tool.shaftShape = 'round'),
             c(
@@ -395,7 +396,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 4:
         return (
-          'カバーとクリップを着け外しするのは',
+          'カバーとクリップは誰が着け外ししますか？',
           [
             c('自分でできる', a.donningBy == 'self', () => a.donningBy = 'self'),
             c(
@@ -407,7 +408,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       case 5:
         return (
-          '指の形は',
+          '指の形はどれに近いですか？',
           [
             c(
               '握った形で固まっている',
@@ -429,7 +430,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         );
       default:
         return (
-          '撮影するのは',
+          '誰が撮影しますか？',
           [
             c('自分（片手）', a.captureBy == 'self', () => a.captureBy = 'self'),
             c(
@@ -702,7 +703,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
               InfoCard(
                 tone: NoticeTone.warning,
                 child: Text(
-                  '${toolJa[t.toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください',
+                  '${toolJa[t.toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。',
                 ),
               ),
         if (guessed.isNotEmpty)
@@ -710,7 +711,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
             tone: NoticeTone.warning,
             icon: Icons.straighten_rounded,
             child: Text(
-              '${one ? '' : '${guessed.join('・')}の'}太さを推定で作ります。刷る前に、道具の太さを定規で確かめてください。',
+              '${one ? '' : '${guessed.join('・')}の'}太さは目安の値で作ります。注文や印刷の前に、道具の太さを定規で確かめてください。',
             ),
           ),
         if (_notes.isNotEmpty) ...[
@@ -852,12 +853,23 @@ class OutOfScopeDialog extends StatelessWidget {
   const OutOfScopeDialog({
     super.key,
     required this.reason,
+    this.outOfScopeReason = '',
     this.canRephrase = false,
   });
   final String reason;
+  final String outOfScopeReason;
 
   /// 「言い直す」を出すか（押すと true を返し、入力欄に戻る）
   final bool canRephrase;
+
+  String get _body {
+    final r = reason.trim();
+    if (r.isNotEmpty) return r;
+    if (outOfScopeReason == 'orthosis') {
+      return '指を伸ばしたり固定したりする装具は、体に合わせた調整が必要なため、このアプリでは作れません。作業療法士に相談してください。';
+    }
+    return 'この内容はこのアプリでは作れません。作業療法士に相談してください。';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -889,9 +901,7 @@ class OutOfScopeDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            '$reason\n\n指を伸ばしたり固定したりする装具は、体に合わせた調整が必要なため、このアプリでは作れません。作業療法士に相談してください。',
-          ),
+          Text(_body),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),
@@ -912,9 +922,13 @@ class OutOfScopeDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                alt('握った形のまま、手の甲にかぶせて道具を持つカバーなら作れます'),
+                alt('握った形のまま、手の甲にかぶせて道具を持つカバーなら作れます。'),
                 const SizedBox(height: 10),
-                alt('作業療法士に相談して、装具を作ってもらう'),
+                alt(
+                  outOfScopeReason == 'orthosis'
+                      ? '装具が必要な場合は、作業療法士に相談してください。'
+                      : 'お困りの内容に合わせて、作業療法士に相談してください。',
+                ),
               ],
             ),
           ),

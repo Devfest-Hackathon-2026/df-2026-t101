@@ -66,7 +66,7 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
           ..clear()
           ..addAll(Map<String, dynamic>.from(r['estimates'] as Map).keys);
         _felt = fab['felt_service'] == true;
-        if (_fab == null) _error = '受託者が見つかりませんでした';
+        if (_fab == null) _error = '工房が見つかりませんでした';
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -172,7 +172,7 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
               label: 'フェルトを貼って送ってもらう（+${fab['felt_fee_yen']}円）',
               sub: _hasCover
                   ? '届いたらそのまま着けられます。厚さ${d['felt']?['thickness_mm'] ?? 1}mm'
-                  : 'カバーを選ぶと選べます',
+                  : 'カバーを含めて注文するときに選べます',
               selected: _feltOn,
               multi: true,
               onTap: () {
@@ -189,7 +189,7 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
                 ...printerLines(Map<String, dynamic>.from(d['printer'] ?? {})),
                 ColorLine(color: Map<String, dynamic>.from(d['color'] ?? {})),
                 const SizedBox(height: 4),
-                Text('アプリが決めた値です。変えられません。', style: AppText.supporting),
+                Text('安全と品質を保つため、この設定は変更できません。', style: AppText.supporting),
               ],
             ),
           ),

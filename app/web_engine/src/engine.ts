@@ -267,7 +267,10 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
       const finish = (err?: string) => {
         if (done) return;
         done = true; window.clearTimeout(timer); window.clearInterval(poll);
-        if (err) rej(new Error(`動画を読み込めませんでした（${err}・rs${v.readyState}・ns${v.networkState}・meta${gotMeta ? 1 : 0}・kick${kicked ? 1 : 0}）`));
+        if (err) {
+          console.warn(`動画の読み込み失敗（${err}・rs${v.readyState}・ns${v.networkState}・meta${gotMeta ? 1 : 0}・kick${kicked ? 1 : 0}）`);
+          rej(new Error('動画を読み込めませんでした'));
+        }
         else res();
       };
       const kick = () => {

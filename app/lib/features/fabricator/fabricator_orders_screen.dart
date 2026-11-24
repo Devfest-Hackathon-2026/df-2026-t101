@@ -68,7 +68,7 @@ class _FabricatorOrdersScreenState extends State<FabricatorOrdersScreen> {
       children: [
         const InfoCard(
           tone: NoticeTone.warning,
-          child: Text('$fictionalNotice チームのアカウントが受託者の役をします。'),
+          child: Text('$fictionalNotice デモ用にチームのアカウントで工房として操作できます。'),
         ),
         if (_error != null) ErrorCard(message: '読み込めませんでした（$_error）', onRetry: _loadMe),
         if (_fabs == null && _error == null) const BusyCard(text: '読み込んでいます'),
@@ -78,7 +78,7 @@ class _FabricatorOrdersScreenState extends State<FabricatorOrdersScreen> {
             child: LayoutBuilder(
               builder: (context, c) => DropdownMenu<String>(
                 width: c.maxWidth,
-                label: const Text('受託者'),
+                label: const Text('工房'),
                 initialSelection: _fid,
                 leadingIcon: const Icon(Icons.storefront_rounded),
                 dropdownMenuEntries: [

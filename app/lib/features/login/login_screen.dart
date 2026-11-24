@@ -31,10 +31,10 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await Session.instance.signInGoogle();
       if (mounted) _go();
-    } catch (e) {
+    } catch (_) {
       setState(
         () => _error =
-            'ログインできませんでした。ポップアップがブロックされた場合は、ブラウザのアドレス欄の右の表示から、このサイトのポップアップを許可してください。（$e）',
+            'ログインできませんでした。ポップアップがブロックされている場合は、ブラウザの設定でこのサイトのポップアップを許可してから、もう一度お試しください。',
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -62,7 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           const SizedBox(height: 8),
           Text(
-            '作業療法士（OT）の確認を通してから印刷できます',
+            '作業療法士（OT）の確認を受けてから印刷できます',
             textAlign: TextAlign.center,
             style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant),
           ),
@@ -140,8 +140,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     Text('手の動画は保存しません', style: AppText.titleMedium),
                     const SizedBox(height: 4),
                     Text(
-                      '手の3Dの形を作るために、手の部分を切り抜いた画像を最大8枚だけ送ります'
-                      '（画像は保存しません。作った手の3Dの形は保存します）',
+                      '手の3Dモデルを作るために、手の部分を切り抜いた画像を最大8枚だけ送ります。'
+                      '送った画像は保存せず、できあがった3Dモデルのみ保存します。',
                       style: AppText.supporting,
                     ),
                   ],

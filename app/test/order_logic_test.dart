@@ -42,7 +42,7 @@ void main() {
       expect(orderStatusJa('received'), '受付');
       expect(orderStatusJa('printing'), '造形中');
       expect(orderStatusJa('shipped'), '発送済み');
-      expect(orderStatusJa('delivered'), '受け取った');
+      expect(orderStatusJa('delivered'), '受取済み');
       expect(orderStatusJa('cancelled'), '取り消し');
     });
     test('届く目安は発送日＋日数', () {
