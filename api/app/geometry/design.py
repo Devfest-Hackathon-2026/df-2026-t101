@@ -23,7 +23,7 @@ from .handframe import (capsules, curl_sign, finger_radii, joints_to_json, mirro
                         rail_direction, to_canonical_joints, to_canonical_mesh, wrist_cut_default, palm_cut_base)
 from . import clipgeom
 from .placement import outer_surface, place_holes, place_rail_clear_of_slits, place_slits, slit_rail_clearance, tool_rod
-from .scad import posix, render_views, run
+from .scad import posix, render_views, repair_if_open, run
 from .scale import check_mcp_order, compute_scale
 from .shell import build_keepout, build_shell, shell_cut_values
 
@@ -415,7 +415,12 @@ def make_design(scaled_glb: bytes, joints_mm: dict, hand_side: str, params: dict
     for aid, x in extras.items():
         out = {k: files.pop(("_extra", aid, k)) for k in list(x["jobs"])}
         x["file"], x["check"] = out["file"], out["check"]
+        for f in (x["file"], x["check"]):
+            repair_if_open(f)
     clip_check = files.pop("_clip_print_check")
+    for f in (files.get("c_clip"), clip_check):   # 留め具のねじ山の面が閉じていなければ直す
+        if f:
+            repair_if_open(f)
 
     # 検査（正準形で）
     ts = time.time()

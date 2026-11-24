@@ -395,7 +395,7 @@ class _PrintScreenState extends State<PrintScreen> {
                 '最初は短い時間から使ってください。',
                 'カバーと留め具は口に入れないでください。',
                 'PLAは熱に弱いので、熱いお湯につけないでください。',
-                '挟める太さは、入力した道具の太さの前後2.5mmです。違う太さの道具は、注文や印刷の前に確かめてください。',
+                '留め具で挟める太さは、形の画面の「挟める太さ」の範囲です。違う太さの道具を使うときは、注文や印刷の前に確かめてください。',
               ],
               icon: Icons.error_outline_rounded,
               iconColor: AppColors.error,

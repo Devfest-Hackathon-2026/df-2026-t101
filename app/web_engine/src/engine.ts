@@ -474,17 +474,20 @@ async function jpegUnder(c: HTMLCanvasElement, maxBytes: number): Promise<Blob> 
     b = await enc(c, q);
     if (b.size <= maxBytes) return b;
   }
-  // 画質を下げても大きいときは、384px に縮めて低い画質で
+  // 画質を下げても大きいときは、384px に縮めて、収まるまで画質を下げる（それでも大きければ、いちばん小さいものを送る）
   const s = 384 / Math.max(c.width, c.height);
   const d = document.createElement('canvas');
   d.width = Math.max(1, Math.round(c.width * s)); d.height = Math.max(1, Math.round(c.height * s));
   d.getContext('2d')!.drawImage(c, 0, 0, d.width, d.height);
   try {
-    b = await enc(d, 0.6);
+    for (const q of [0.6, 0.45, 0.3]) {
+      b = await enc(d, q);
+      if (b.size <= maxBytes) break;
+    }
   } finally {
     releaseCanvas(d);
   }
-  return b;
+  return b!;
 }
 
 /** §6：フレームごとの値 */

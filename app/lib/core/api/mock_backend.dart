@@ -869,7 +869,7 @@ Map<String, dynamic> _demoTool(num? angle, num? toolD) {
   return {
     'center': [-65.23, 59.5, 11.68],
     'axis': axes[angle?.toInt()] ?? axes[70],
-    'tip_mm': 100.0,
+    'tip_mm': 120.0, // 生成APIの TOOL_TIP_MM と同じ
     'rear_mm': 50.0,
     'diameter_mm': (toolD ?? 8.5).toDouble(),
   };

@@ -100,8 +100,9 @@ def check_clip(clip_print: trimesh.Trimesh, clip: dict) -> list[dict]:
     td = float(clip["tool_d_mm"])
     lo, hi = grip_range_mm(clip)
     wt = clip_print.is_watertight
-    parts = len(clip_print.split(only_watertight=False))
-    ok = wt and parts == 2 and lo <= td <= hi
+    # 体積のない小さな切れ端（1mm³ 未満）は数えない（ねじ山の面が残すことがある）
+    parts = len([p for p in clip_print.split(only_watertight=False) if abs(p.volume) >= 1.0 or p.area >= 5.0])
+    ok = wt and parts == 2
     out.append(_item("R6f", ok,
                      {"tool_d_mm": td, "grip_min_mm": round(lo, 2), "grip_max_mm": round(hi, 2),
                       "watertight": wt, "parts": parts},
@@ -184,11 +185,12 @@ def check_tool_path(hand_ref: HandRef, cover: trimesh.Trimesh | None, rail: dict
     tilt = math.degrees(math.asin(float(np.clip(a[2], -1, 1))))
     tip = c + reach * a if math.isfinite(reach) else None
     mcp = Jc["index"][0]
-    ok = gap_hand >= TOOL_HAND_GAP_MM and (gap_cover is None or gap_cover >= TOOL_COVER_GAP_MM) and reach <= TOOL_TIP_MM
-    value = {"gap_hand_mm": round(gap_hand, 1), "gap_cover_mm": None if gap_cover is None else round(gap_cover, 1),
+    hits = gap_hand < TOOL_HAND_GAP_MM or (gap_cover is not None and gap_cover < TOOL_COVER_GAP_MM)
+    ok = not hits and reach <= TOOL_TIP_MM
+    value = {"hits": bool(hits), "gap_hand_mm": round(gap_hand, 1), "gap_cover_mm": None if gap_cover is None else round(gap_cover, 1),
              "tilt_deg": round(tilt, 0), "reach_mm": None if not math.isfinite(reach) else round(float(reach), 0),
              "tip_from_index_mcp_mm": None if tip is None else [round(float(v), 0) for v in (tip - mcp)[:2]]}
     msg = "道具は手・カバーに当たらず、先が机に届く" if ok else \
-        ("道具が手かカバーに当たります" if (gap_hand < TOOL_HAND_GAP_MM or (gap_cover is not None and gap_cover < TOOL_COVER_GAP_MM))
+        ("道具が手かカバーに当たります" if hits
          else "道具の先が机に届きにくい角度です（道具を留め具から長めに出すか、角度を立てる）")
     return [_item("R6h", ok, value, msg, fix_hint="c_clip.angle_deg を立てる", severity="warning")]

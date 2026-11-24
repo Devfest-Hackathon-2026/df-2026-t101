@@ -128,6 +128,8 @@ def tool_hits(value: dict) -> bool:
     """R6h の値で、道具が手かカバーに当たるか（そうでなければ、先が机に届かないほうの不合格）。
     すき間の基準は app/geometry/checks.py の TOOL_HAND_GAP_MM（2.0）・TOOL_COVER_GAP_MM（1.0）と同じ。
     ここでは形の重い処理を読み込まないよう、値だけで判断する"""
+    if "hits" in value:   # 検査が丸める前の値で決めたもの（2026-11-24 から）
+        return bool(value["hits"])
     gh, gc = value.get("gap_hand_mm"), value.get("gap_cover_mm")
     return (gh is not None and gh < 2.0) or (gc is not None and gc < 1.0)
 UNUSED_PARTS = ("tpu_sleeve",)   # AI が選んでも作らない部品（TPUの筒は C字クリップ用。万力式に置き換えた 2026-11-24）
@@ -177,7 +179,8 @@ def _make(case: dict, params: list[Param], selected: list[str], workdir: str, qu
         return _geometry().make_design(glb, hm["joints_mm"], hand_side,
                                        validator.to_dict(params), workdir,
                                        Cache(f"internal/cases/{case['_id']}/cover/{case.get('measurement_id')}"), quality=quality,
-                                       parts=tuple(p for p in ("cover", "c_clip", "tpu_sleeve") if p in selected),
+                                       # TPUの筒（C字クリップ用）は、前の版の部品に残っていても作らない（2026-11-24）
+                                       parts=tuple(p for p in ("cover", "c_clip") if p in selected),
                                        extra_clips=extra_clips or None)
     except ApiError:
         raise
@@ -407,7 +410,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             atts = _attachments_of(parent, req)
             target = next((a for a in atts if a["id"] == attachment_id), atts[0])
             on_extra = not target["primary"]   # 主でない取り付け具を直す（c_clip の値はその取り付け具にだけ効かせる）
-            parts = parent["parts"]
+            parts = [p for p in parent["parts"] if p.get("part_id") not in UNUSED_PARTS]   # 前の版の TPUの筒は引き継がない
             selected = [p["part_id"] for p in parts]
             params = validator.params_from_records(parent["params"])
             tools = [dict(t) for t in stored_tools(req)]
