@@ -38,21 +38,21 @@ void main() {
     });
   });
 
-  group('クリップの角度', () {
+  group('留め具の角度', () {
     test('取り付け具が1つなら道具の名前を付けない', () {
       final c = RefineChoice.angle(80, newDesign, 'a1');
       expect(c.angle, 80);
-      expect(c.buttonLabel, 'クリップを80度で作り直す');
+      expect(c.buttonLabel, '留め具を80度で作り直す');
       expect(c.body, {'clip_angle_deg': 80, 'attachment_id': 'a1'});
-      expect(c.busyText, 'クリップを80度で作り直しています（カバーはそのままです）');
-      expect(c.doneText, 'クリップを80度にしました（カバーはそのままです）');
+      expect(c.busyText, '留め具を80度で作り直しています（カバーはそのままです）');
+      expect(c.doneText, '留め具を80度にしました（カバーはそのままです）');
     });
 
     test('取り付け具が2つ以上なら道具の名前を付ける', () {
       final c = RefineChoice.angle(60, newDesign, 'a1', toolLabel: 'ペン');
-      expect(c.buttonLabel, 'ペンのクリップを60度で作り直す');
-      expect(c.busyText, 'ペンのクリップを60度で作り直しています（カバーはそのままです）');
-      expect(c.doneText, 'ペンのクリップを60度にしました（カバーはそのままです）');
+      expect(c.buttonLabel, 'ペンの留め具を60度で作り直す');
+      expect(c.busyText, 'ペンの留め具を60度で作り直しています（カバーはそのままです）');
+      expect(c.doneText, 'ペンの留め具を60度にしました（カバーはそのままです）');
     });
 
     test('指示の選択には角度がない', () {

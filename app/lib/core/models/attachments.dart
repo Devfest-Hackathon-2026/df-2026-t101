@@ -16,7 +16,7 @@ const toolActivity = {'brush': 'draw', 'pen': 'write', 'spoon': 'eat'};
 
 /// 平たい柄の道具の知らせ（生成APIの flat_reason と同じ）
 String flatReason(String? toolType) =>
-    '${toolJa[toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。';
+    '${toolJa[toolType] ?? '道具'}：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください。';
 
 num? _param(Map<String, dynamic> design, String name) {
   for (final p in (design['params'] as List? ?? const [])) {
@@ -144,14 +144,14 @@ bool coverKept(Map<String, dynamic> design) =>
     const {'refine_add_attachment', 'refine_tool_d'}.contains(design['origin']);
 
 /// S10 に「取り付け具を足す（形の画面へ）」を出すか。刷れる版で、まだ足せるとき
-/// （カバーを刷ったあとでクリップを足す。ADR-0014 §4）
+/// （カバーを刷ったあとで留め具を足す。ADR-0014 §4）
 bool canAddFromPrint(Map<String, dynamic> design, Map<String, dynamic>? requirements, {required bool ready}) =>
     ready && addBlockedReason(design, requirements) == null;
 
 // ───────── S10・S9 の一覧（画面から切り出して、テストで確かめる） ─────────
 
 /// 印刷する部品の名前
-const printPartJa = {'cover': 'カバー', 'c_clip': 'C字クリップ', 'tpu_sleeve': 'TPUの筒'};
+const printPartJa = {'cover': 'カバー', 'c_clip': '留め具', 'tpu_sleeve': 'TPUの筒'};
 
 /// S10 のダウンロードの1行
 class PrintRow {
@@ -162,7 +162,7 @@ class PrintRow {
   final String path;
 }
 
-/// S10 の行：カバー、取り付け具ごと、残り（TPUの筒など）。取り付け具が1つなら今までの「C字クリップ（70度）」
+/// S10 の行：カバー、取り付け具ごと、残り（TPUの筒など）。取り付け具が1つなら今までの「留め具（70度）」
 List<PrintRow> printRows(Map<String, dynamic> design, Map<String, dynamic>? requirements) {
   final print = Map<String, dynamic>.from(((design['files'] as Map?)?['print'] as Map?) ?? const {});
   final atts = viewAttachments(design, requirements);
@@ -181,7 +181,7 @@ List<PrintRow> printRows(Map<String, dynamic> design, Map<String, dynamic>? requ
     if (atts.length == 1) {
       add(key, 'c_clip', angle != null ? '${printPartJa['c_clip']}（${_g(angle)}度）' : printPartJa['c_clip']!);
     } else {
-      add(key, 'c_clip', '${attachmentLabel(a, atts)} クリップ（${_g(a['tool_d_mm'])}mm・${_g(angle)}度）');
+      add(key, 'c_clip', '${attachmentLabel(a, atts)} 留め具（${_g(a['tool_d_mm'])}mm・${_g(angle)}度）');
     }
   }
   for (final k in print.keys) {
@@ -191,7 +191,7 @@ List<PrintRow> printRows(Map<String, dynamic> design, Map<String, dynamic>? requ
 }
 
 /// OTに頼むときの版の要約。取り付け具が2つ以上なら道具ごとの角度を並べる（「カバー 2.5mm・筆 70度・ペン 60度」）。
-/// 1つ・古い版は今までどおり「カバー 2.5mm・クリップ 70度」
+/// 1つ・古い版は今までどおり「カバー 2.5mm・留め具 70度」
 String versionSummary(Map<String, dynamic> design) {
   num? cover;
   for (final p in (design['params'] as List? ?? const [])) {
@@ -200,14 +200,14 @@ String versionSummary(Map<String, dynamic> design) {
   final atts = attachmentsOf(design);
   return [
     if (cover != null) 'カバー ${_g(cover)}mm',
-    if (atts.length == 1 && atts.first['angle_deg'] != null) 'クリップ ${_g(atts.first['angle_deg'])}度',
+    if (atts.length == 1 && atts.first['angle_deg'] != null) '留め具 ${_g(atts.first['angle_deg'])}度',
     if (atts.length > 1)
       for (final a in atts)
         if (a['angle_deg'] != null) '${attachmentLabel(a, atts)} ${_g(a['angle_deg'])}度',
   ].join('・');
 }
 
-/// 「クリップは差し替えて使います」の案内を出すか（取り付け具が2つ以上のとき）
+/// 「留め具は差し替えて使います」の案内を出すか（取り付け具が2つ以上のとき）
 bool showSwapGuide(Map<String, dynamic> design) => attachmentsOf(design).length >= 2;
 
 /// S9 の検査1つ（R6f・R6h）

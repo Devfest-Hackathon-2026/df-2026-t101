@@ -520,7 +520,7 @@ def test_failed_extra_clip_is_left_out(client, monkeypatch):
     d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
     assert [a["tool_type"] for a in d["attachments"]] == ["brush"] and d["status"] == "needs_attention"
     assert d["attachments"][0]["files"]["preview_stl"].endswith("c_clip_70.preview.stl")
-    assert any(i["description_ja"].startswith("スプーンのクリップは作れませんでした（") for i in d["review"]["unresolved_issues"])
+    assert any(i["description_ja"].startswith("スプーンの留め具は作れませんでした（") for i in d["review"]["unresolved_issues"])
 
 
 def test_failed_primary_clip_promotes_next(client, monkeypatch):
@@ -544,7 +544,7 @@ def test_failed_primary_clip_promotes_next(client, monkeypatch):
     c_clip = {p["name"]: p["value"] for p in d["params"] if p["part_id"] == "c_clip"}
     assert c_clip["tool_d_mm"] == 11.5 and c_clip["angle_deg"] == 60
     assert d["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_60.preview.stl")
-    assert any(i["description_ja"].startswith("筆のクリップは作れませんでした（") for i in d["review"]["unresolved_issues"])
+    assert any(i["description_ja"].startswith("筆の留め具は作れませんでした（") for i in d["review"]["unresolved_issues"])
 
 
 def test_unrenderable_extra_clip_is_left_out(client, monkeypatch):
@@ -562,7 +562,7 @@ def test_unrenderable_extra_clip_is_left_out(client, monkeypatch):
     assert r.status_code == 200, r.text
     d = r.json()["design"]
     assert [a["tool_type"] for a in d["attachments"]] == ["brush"] and d["status"] == "needs_attention"
-    assert any(i["description_ja"] == "スプーンのクリップは作れませんでした（形を描けませんでした）"
+    assert any(i["description_ja"] == "スプーンの留め具は作れませんでした（形を描けませんでした）"
                for i in d["review"]["unresolved_issues"])
 
 

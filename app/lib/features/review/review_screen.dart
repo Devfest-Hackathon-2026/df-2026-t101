@@ -19,7 +19,7 @@ const _checks = {
 
 const _partJa = {
   'cover': 'カバー',
-  'c_clip': 'クリップ',
+  'c_clip': '留め具',
   'strap_slits': 'ベルト穴',
   'air_holes': '空気穴',
   'rail': 'レール',
@@ -437,7 +437,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final l = reviewAttachments(d, _case?['requirements'] as Map<String, dynamic>?);
     return _Panel(
       icon: Icons.attach_file_rounded,
-      title: '取り付け具（クリップ）',
+      title: '取り付け具（留め具）',
       children: [
         for (final a in l)
           Padding(

@@ -151,7 +151,7 @@ class _Viewer3DState extends State<Viewer3D> with AutomaticKeepAliveClientMixin 
                   },
                 'parts': parts,
                 'tool_d_mm': widget.toolDmm,
-                // 生成APIが版に書いた道具の軸（実際の手の座標）。なければ viewer.js がクリップの形から推定する
+                // 生成APIが版に書いた道具の軸（実際の手の座標）。なければ viewer.js が留め具の形から推定する
                 if (widget.tool != null) 'tool': widget.tool,
                 if (widget.toolType != null) 'tool_type': widget.toolType,
                 if (widget.handSide != null) 'hand_side': widget.handSide,

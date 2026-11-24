@@ -65,7 +65,7 @@ void main() {
       expect('${d['review']['unresolved_issues']}', contains(flatReason('spoon')));
     });
 
-    test('道具1つ（筆）：今と同じ70度のクリップ1つ', () async {
+    test('道具1つ（筆）：今と同じ70度の留め具1つ', () async {
       final (_, d) = await caseWith([brush()]);
       expect(atts(d).length, 1);
       expect(param(d, 'angle_deg'), 70);
@@ -218,7 +218,7 @@ void main() {
       expect(canSubmitTool(t), isFalse); // 形がまだ
       t.shaftShape = 'flat';
       expect(flatNotice(t), flatReason('spoon'));
-      expect(flatReason('spoon'), 'スプーン：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。');
+      expect(flatReason('spoon'), 'スプーン：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください。');
       expect(canSubmitTool(t), isFalse);
       t.shaftShape = 'round';
       expect(flatNotice(t), isNull);

@@ -47,7 +47,7 @@ def test_flat_tool_is_skipped_and_primary_moves():
     atts, skipped = build_attachments(req)
     assert [a["id"] for a in atts] == ["a2"] and atts[0]["primary"]
     assert skipped[0]["tool_type"] == "spoon" and "太柄スポンジ" in skipped[0]["reason_ja"]
-    assert skipped[0]["reason_ja"] == "スプーン：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。"
+    assert skipped[0]["reason_ja"] == "スプーン：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください。"
 
 
 def test_build_attachments_legacy_requirements_without_tools():

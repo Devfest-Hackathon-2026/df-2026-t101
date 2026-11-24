@@ -3,9 +3,9 @@
 作るもの（app/web/demo/）：
 - hand.glb                 実寸の手のメッシュ（試験用の握った手 api/tests/fixtures/hand_raw_fist.glb を実寸にしたもの）
 - cover.stl                カバー（手の座標。プレビュー用）
-- c_clip_{60,70,80}.stl    角度ごとのC字クリップ（手の座標。レールに差した位置）
+- c_clip_{60,70,80}.stl    角度ごとの留め具（万力式。手の座標。レールに差した位置に、受け具とねじ）
 - cover.print.stl          カバー（刷る向き）
-- c_clip_{60,70,80}.print.stl  クリップ（刷る向き）
+- c_clip_{60,70,80}.print.stl  留め具（刷る並び。受け具とねじ）
 - iso.png                  確認用画像（70度）
 
 使い方（リポジトリの直下から。api/requirements.txt の依存と、OpenSCAD の開発版が要る）：
@@ -25,11 +25,11 @@ sys.path.insert(0, str(REPO / "api"))
 import numpy as np  # noqa: E402
 
 from app.geometry import DirCache, make_design, prepare_measurement  # noqa: E402
-from app.geometry.cliplib import ANGLES  # noqa: E402
 from app.geometry.glb import read_glb  # noqa: E402
 from app.geometry.handframe import parse_joints  # noqa: E402
 
 FINGERS = ("index", "middle", "ring", "pinky")
+ANGLES = (60, 70, 80)   # 道具の立て具合（catalog.json の c_clip.angle_deg の choices）
 
 
 def measurement_from_joints(J: dict, k: float) -> dict:

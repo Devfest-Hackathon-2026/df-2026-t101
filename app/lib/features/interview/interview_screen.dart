@@ -324,9 +324,9 @@ class _InterviewScreenState extends State<InterviewScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            m('絵を描く（筆）', 'draw', '筆を挟むクリップを作ります'),
-            m('字を書く（ペン）', 'write', 'ペンを挟むクリップを作ります'),
-            m('食べる（スプーン）', 'eat', 'スプーンを挟むクリップを作ります'),
+            m('絵を描く（筆）', 'draw', '筆を挟む留め具を作ります'),
+            m('字を書く（ペン）', 'write', 'ペンを挟む留め具を作ります'),
+            m('食べる（スプーン）', 'eat', 'スプーンを挟む留め具を作ります'),
             m('その他', 'other', 'あとのチャットで教えてください'),
           ],
         );
@@ -344,7 +344,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
           [
             const SizedBox(height: 6),
             Text(
-              '指で持つあたり（クリップで挟む所）の太さです。',
+              '指で持つあたり（留め具で挟む所）の太さです。',
               style: AppText.bodyLarge.copyWith(
                 color: AppColors.onSurfaceVariant,
               ),
@@ -377,7 +377,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
             const SizedBox(height: 2),
             const InfoCard(
               tone: NoticeTone.info,
-              child: Text('できるだけmmで入れてください（クリップをぴったりに作るため）。'),
+              child: Text('できるだけmmで入れてください（留め具の大きさを合わせるため）。'),
             ),
           ],
         );
@@ -390,13 +390,13 @@ class _InterviewScreenState extends State<InterviewScreen> {
               '平たい',
               _tool.shaftShape == 'flat',
               () => _tool.shaftShape = 'flat',
-              '平たい柄のクリップは準備中です',
+              '平たい柄の留め具は準備中です',
             ),
           ],
         );
       case 4:
         return (
-          'カバーとクリップは誰が着け外ししますか？',
+          'カバーと留め具は誰が着け外ししますか？',
           [
             c('自分でできる', a.donningBy == 'self', () => a.donningBy = 'self'),
             c(
@@ -694,16 +694,16 @@ class _InterviewScreenState extends State<InterviewScreen> {
         if (one && a.tools[0].shaftShape == 'flat')
           const InfoCard(
             tone: NoticeTone.warning,
-            child: Text('平たい柄のクリップは準備中です。丸い柄の道具を使うか、家族やOTと相談してください。'),
+            child: Text('平たい柄の留め具は準備中です。丸い柄の道具を使うか、家族やOTと相談してください。'),
           ),
-        // 道具が2つ以上：平たい柄の道具だけクリップを作らない（ADR-0014 §1）
+        // 道具が2つ以上：平たい柄の道具だけ留め具を作らない（ADR-0014 §1）
         if (!one)
           for (final t in a.tools)
             if (t.shaftShape == 'flat')
               InfoCard(
                 tone: NoticeTone.warning,
                 child: Text(
-                  '${toolJa[t.toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。',
+                  '${toolJa[t.toolType] ?? '道具'}：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください。',
                 ),
               ),
         if (guessed.isNotEmpty)

@@ -77,8 +77,8 @@ def _part_name(key: str, d: dict) -> str:
         return "TPUの筒"
     for a in d.get("attachments") or []:
         if (a.get("print_key") or print_key(a)) == key:
-            return f"C字クリップ（{TOOL_JA.get(a.get('tool_type'), '道具')}・{a.get('angle_deg')}度）"
-    return "C字クリップ"
+            return f"留め具（{TOOL_JA.get(a.get('tool_type'), '道具')}・{a.get('angle_deg')}度）"
+    return "留め具"
 
 
 @router.get("/v1/cases/{case_id}/designs/{design_id}/fabricators")

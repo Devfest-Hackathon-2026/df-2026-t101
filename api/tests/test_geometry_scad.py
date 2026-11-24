@@ -1,4 +1,4 @@
-"""OpenSCAD を使う形のテスト（クリップ、通しの make_design）。OpenSCAD がなければ飛ばす。"""
+"""OpenSCAD を使う形のテスト（道具の留め具＝万力式、通しの make_design）。OpenSCAD がなければ飛ばす。"""
 from __future__ import annotations
 
 import shutil
@@ -21,33 +21,55 @@ if not (Path(openscad_bin()).exists() or shutil.which(openscad_bin())):
     pytest.skip("OpenSCAD がありません", allow_module_level=True)
 
 
+VISE = "vise_main.scad"   # 道具の留め具（万力式。2026-11-24 に C字クリップから置き換えた）
+
+
 @pytest.mark.parametrize("angle", [60, 70, 80])
 @pytest.mark.parametrize("hand", ["right", "left"])
-def test_clip_prints_as_one_piece(tmp_path, angle, hand):
-    out = run({"mode": "clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": angle, "hand": hand}, tmp_path / f"clip_{hand}_{angle}.stl")
+def test_vise_prints_as_holder_and_screw(tmp_path, angle, hand):
+    out = run({"mode": "clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": angle, "hand": hand},
+              tmp_path / f"vise_{hand}_{angle}.stl", entry=VISE)
     m = trimesh.load(out, force="mesh")
-    assert m.is_watertight and len(m.split(only_watertight=False)) == 1
+    assert m.is_watertight and len(m.split(only_watertight=False)) == 2      # 受け具とねじ
     assert abs(m.bounds[0][2]) < 0.05        # 机の面（z=0）に乗る
-    clip = {"tool_d_mm": 9.5, "opening_ratio": 0.75, "wall_mm": 2.0, "height_mm": 12, "angle_deg": angle}
-    res = {r["rule"]: r for r in check_clip(m, clip)}
-    assert res["R6f"]["ok"]
+    res = {r["rule"]: r for r in check_clip(m, {"tool_d_mm": 9.5, "angle_deg": angle})}
+    assert res["R6f"]["ok"], res["R6f"]
+    assert res["R6f"]["value"]["grip_min_mm"] == 7.0 and res["R6f"]["value"]["grip_max_mm"] == 12.0
 
 
-def test_clip_left_is_mirror_of_right(tmp_path):
-    """左手のクリップは、レールの座標で X の符号を変えた鏡像（横張り出しの向きが逆）"""
-    from app.geometry.cliplib import MIRROR_X
-    r = trimesh.load(run({"mode": "assembled", "part": "c_clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": 70, "hand": "right"}, tmp_path / "r.stl"), force="mesh")
-    l = trimesh.load(run({"mode": "assembled", "part": "c_clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": 70, "hand": "left"}, tmp_path / "l.stl"), force="mesh")
-    assert r.bounds[0][0] < -20 and l.bounds[1][0] > 20          # 右手は −X（親指側）へ、左手は +X へ張り出す
-    r.apply_transform(MIRROR_X)
-    assert np.allclose(r.bounds, l.bounds, atol=0.05) and abs(r.volume - l.volume) < 1.0
+def test_vise_left_extends_to_the_other_side(tmp_path):
+    """左手の留め具は、レールの座標で親指側（+X）へ張り出す（右手は −X）。鏡に映さずに描くので、形の大きさは同じ"""
+    def asm(hand):
+        return trimesh.load(run({"mode": "assembled", "part": "c_clip", "c_clip_tool_d_mm": 9.5, "c_clip_angle_deg": 70,
+                                 "hand": hand}, tmp_path / f"{hand}.stl", entry=VISE), force="mesh")
+    r, l = asm("right"), asm("left")
+    assert r.bounds[0][0] < -20 and l.bounds[1][0] > 20
+    assert np.allclose(r.bounds[:, 1:], l.bounds[:, 1:], atol=0.3)
+    assert np.allclose(-r.bounds[::-1, 0], l.bounds[:, 0], atol=0.3)
+    assert abs(r.volume - l.volume) < 20.0
 
 
-def test_clip_opening_too_wide_is_caught(tmp_path):
-    out = run({"mode": "clip", "c_clip_tool_d_mm": 9.5, "c_clip_opening_ratio": 0.95}, tmp_path / "clip_wide.stl")
-    m = trimesh.load(out, force="mesh")
-    clip = {"tool_d_mm": 9.5, "opening_ratio": 0.95, "wall_mm": 2.0, "height_mm": 12, "angle_deg": 70}
-    assert not {r["rule"]: r for r in check_clip(m, clip)}["R6f"]["ok"]
+@pytest.mark.parametrize("tool_d", [3.5, 9.5, 20.0])
+def test_vise_tool_axis_sits_in_the_v(tmp_path, tool_d):
+    """clipgeom の道具の軸（Python）が、OpenSCAD の受け具の V 字に収まる所（V 字の面から半径の距離）にある"""
+    from app.geometry.clipgeom import clip_axis_rail, clip_center_rail
+    clip = {"tool_d_mm": tool_d, "angle_deg": 70}
+    m = trimesh.load(run({"mode": "assembled", "part": "c_clip", "c_clip_tool_d_mm": tool_d, "c_clip_angle_deg": 70,
+                          "hand": "right"}, tmp_path / "asm.stl", entry=VISE), force="mesh")
+    c, a = clip_center_rail(clip, side=1), clip_axis_rail(clip, side=1)
+    from scipy.spatial import cKDTree
+    tree = cKDTree(m.sample(200000, seed=1) if hasattr(m, "sample") else m.vertices)
+    d, _ = tree.query([c + a * t for t in (-6.0, 0.0, 6.0)])
+    assert np.all(np.abs(d - tool_d / 2) < 0.6), d
+
+
+def test_vise_grows_for_thick_tools(tmp_path):
+    def plate(d):
+        return trimesh.load(run({"mode": "clip", "c_clip_tool_d_mm": d, "c_clip_angle_deg": 70}, tmp_path / f"p{d}.stl",
+                                entry=VISE), force="mesh")
+    small, big = plate(8.5), plate(18.0)
+    assert big.volume > small.volume and big.extents[0] > small.extents[0]
+    assert {r["rule"]: r for r in check_clip(big, {"tool_d_mm": 18.0, "angle_deg": 70})}["R6f"]["ok"]
 
 
 def test_make_design_fist_cover_and_clip(tmp_path):
@@ -63,10 +85,10 @@ def test_make_design_fist_cover_and_clip(tmp_path):
     for rule in ("R6a", "R6b", "R6c", "R6d", "R6e", "R6f"):
         assert checks[rule]["ok"], (rule, checks[rule])
     assert r["violations"] == []
-    # 筆（70度）では、スリットから離れるまで台をずらすと道具が握った指に近づきすぎるので、ずらさない
-    # （途中までずらしても穴は開かない。重なりは R6e_slit_rail・R6e_slit_open で知らせる）
-    assert checks["R6h"]["ok"] and r["placement"]["rail_shift_mm"] == 0
-    assert not checks["R6e_slit_open"]["ok"]
+    # 万力式（2026-11-24）は道具の軸が C字クリップより親指側の外にあるので、筆（70度）でも台をスリットから
+    # 離れるまでずらせて、道具は握った指に当たらない（C字のときは、ずらせずにスリットがふさがっていた）
+    assert checks["R6h"]["ok"] and r["placement"]["rail_shift_mm"] > 0
+    assert checks["R6e_slit_open"]["ok"], checks["R6e_slit_open"]
     cover = trimesh.load(r["files"]["cover"], force="mesh")
     assert cover.is_watertight and len(cover.split(only_watertight=False)) == 1
     assert len(r["views"]) == 4 and all(Path(v).exists() for v in r["views"])
@@ -122,3 +144,4 @@ def test_make_design_extra_clip_shares_cover(tmp_path):
     rp = make_design(pm["scaled_glb"], pm["joints_mm"], "right", params, str(tmp_path / "c"), cache, quality="print", extra_clips={"a2": extra})
     m = trimesh.load(rp["extra_clips"]["a2"]["file"], force="mesh")
     assert m.is_watertight and abs(m.bounds[0][2]) < 0.05      # 刷る向き：机の面に乗る
+    assert len(m.split(only_watertight=False)) == 2            # 受け具とねじ

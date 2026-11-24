@@ -445,7 +445,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
         if res.fatal:
             raise ApiError(res.fatal, details=res.violations)
         if not atts:
-            raise ApiError("DESIGN_INFEASIBLE", details=[{"rule": "R4", "message": "平たい柄は、いまのC字クリップでは挟めません"}])
+            raise ApiError("DESIGN_INFEASIBLE", details=[{"rule": "R4", "message": "平たい柄は、いまの留め具では挟めません"}])
         params = res.params
         _sync_primary(atts[0], params)
         labels = {a["id"]: attachment_label(a, atts) for a in atts}   # 外す前の一覧で名前をつける（同じ道具なら太さも）
@@ -454,9 +454,9 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             """この取り付け具だけ版から外して知らせる（ADR-0014 §3 取り付け具だけが落ちたとき）。
             足す取り付け具は外さずにエラーにする（details に検査の名前。ADR-0014 §4）"""
             if a["id"] in strict:
-                raise ApiError(code, f"{labels[a['id']]}のクリップは作れませんでした（{why}）", details=details or [])
+                raise ApiError(code, f"{labels[a['id']]}の留め具は作れませんでした（{why}）", details=details or [])
             atts.remove(a)
-            notes.append({"severity": "medium", "description_ja": f"{labels[a['id']]}のクリップは作れませんでした（{why}）"})
+            notes.append({"severity": "medium", "description_ja": f"{labels[a['id']]}の留め具は作れませんでした（{why}）"})
 
         att_params, bad, cl = _check_attachments(params, atts, selected, hand, req, overrides)
         clamped += cl
@@ -524,9 +524,9 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                 status = "needs_attention"
                 tool_name = labels[a["id"]]
                 if multi:   # どの道具のクリップかを書く
-                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。{tool_name}のクリップの角度を立ててみてください"
+                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。{tool_name}の留め具の角度を立ててみてください"
                 else:
-                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。クリップの角度を立ててみてください"
+                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。留め具の角度を立ててみてください"
                 unresolved.append({"severity": "medium", "description_ja": msg})
         if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_open") and not c.get("ok")]:
             # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）
@@ -594,7 +594,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                                  for a in atts[1:]):
                 # 取り付け具が複数のとき：直した形でどれかのクリップを描けない・検査に通らないなら、前の形にとどめる
                 status = "needs_attention"
-                unresolved.append({"severity": "medium", "description_ja": "直した形では、道具ごとのクリップが描けないか検査に通らなかったので、前の形のままにしました"})
+                unresolved.append({"severity": "medium", "description_ja": "直した形では、道具ごとの留め具が描けないか検査に通らなかったので、前の形のままにしました"})
                 break
             result, params = r2, p2
             clamped += res2.clamped + cl2
@@ -631,7 +631,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "cover_shell_sha256": result.get("cover_shell_sha256"),
             "clip_angle_deg": angle, "clip": result.get("clip"), "tool": result.get("tool"), "checks": result.get("checks", []),
             "attachments": atts,
-            "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
+            "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせた、ねじで締める留め具にしました。手のひら側と手首は開けてあります。",
             "input_snapshot": {"requirements": new_req or req, "measurement_id": case.get("measurement_id"),
                                "hand_model": case.get("hand_model")},
             "usage": {**usage.as_dict(), "openscad_ms": (result.get("timings_ms") or {}).get("openscad", 0)},

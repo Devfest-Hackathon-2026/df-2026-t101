@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 
-from .clipgeom import opening_mm
+from .clipgeom import grip_range_mm
 from .consts import fixed
 
 PALM_FACE_CHECK_DEG = 50.0
@@ -94,24 +94,22 @@ def check_cover(cover: trimesh.Trimesh, hand_ref: HandRef, cut: dict, bed=None) 
 
 
 def check_clip(clip_print: trimesh.Trimesh, clip: dict) -> list[dict]:
+    """R6f：道具の留め具（万力式。刷る並び＝受け具とねじの 2 つ）。2026-11-24 に C字クリップから置き換えた。
+    どちらも閉じた立体で、受け具とねじの 2 つのかたまりになっているか。挟める太さを記録する"""
     out = []
-    op = opening_mm(clip)
     td = float(clip["tool_d_mm"])
-    ok_open = op < td - 0.5
+    lo, hi = grip_range_mm(clip)
     wt = clip_print.is_watertight
     parts = len(clip_print.split(only_watertight=False))
-    area = overhang_area(clip_print, np.array([0, 0, -1.0]))
-    # 机に接する底（z≈0）と入口の面取りは数えないので、底の面は除く
-    n = clip_print.face_normals
-    bottom = (clip_print.triangles_center[:, 2] < 0.3) & (n[:, 2] < -0.99)
-    area -= float(clip_print.area_faces[bottom].sum())
-    out.append(_item("R6f", ok_open and wt and parts == 1,
-                     {"opening_mm": round(op, 2), "tool_d_mm": td, "watertight": wt, "parts": parts,
-                      "overhang_mm2": round(area, 1)},
-                     "クリップの開きは道具より狭く、1つのかたまり" if ok_open else "クリップの開きが広すぎて道具が抜けます"))
-    if area > 50.0:
-        out.append(_item("R6f_overhang", True, {"overhang_mm2": round(area, 1)},
-                         "この角度のクリップは、サポートが要るかもしれません", severity="info"))
+    ok = wt and parts == 2 and lo <= td <= hi
+    out.append(_item("R6f", ok,
+                     {"tool_d_mm": td, "grip_min_mm": round(lo, 2), "grip_max_mm": round(hi, 2),
+                      "watertight": wt, "parts": parts},
+                     f"留め具は受け具とねじの2つで、太さ {lo:g}〜{hi:g}mm の道具を挟める" if ok
+                     else "留め具が閉じた立体になっていないか、受け具とねじの2つに分かれていません"))
+    # 受け具は道具の軸を立てて刷るので、レールに入る舌の下にサポートが要る（ねじ山を横に崩さないため。ADR-0005）
+    out.append(_item("R6f_overhang", True, {"supports": "tongue"},
+                     "留め具は、レールに入る舌の下にサポートを付けて刷ります", severity="info"))
     return out
 
 
@@ -157,8 +155,8 @@ def check_slits_open(cover: trimesh.Trimesh | None, sl: dict, wall_t: float) -> 
                   fix_hint="strap_width_mm を狭くする", severity="warning")]
 
 
-TOOL_TIP_MM = 100.0    # クリップから道具の先まで（ペン・筆の目安）
-TOOL_REAR_MM = 50.0    # クリップから道具の後ろの端まで
+TOOL_TIP_MM = 100.0    # 留め具から道具の先まで（ペン・筆の目安）
+TOOL_REAR_MM = 50.0    # 留め具から道具の後ろの端まで
 TOOL_HAND_GAP_MM = 2.0   # 道具の面と手の間にほしいすき間
 TOOL_COVER_GAP_MM = 1.0
 

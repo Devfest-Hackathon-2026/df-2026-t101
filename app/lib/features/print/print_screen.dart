@@ -29,7 +29,7 @@ const _partImage = {
 /// 部品ごとの刷り方（parts-library.md §7）
 const _partHowTo = {
   'cover': 'カバー：手のひら側の切り口を下にして刷ります。内側にサポートが要ります（跡はフェルトで隠れます）。',
-  'c_clip': 'C字クリップ：ファイルの向きのまま（レールに差し込む所の底を下にして）刷ります。輪の下にサポートが要ります。材料はPETGが使えればPETGがおすすめです。',
+  'c_clip': '留め具：受け具とねじが1つのファイルに並んでいます。ファイルの向きのまま刷ります。受け具のレールに入る所（舌）の下にサポートが要ります。ねじは壁を4周以上にすると丈夫です。材料はPETGが使えればPETGがおすすめです。',
   'tpu_sleeve': 'TPUの筒：柔らかいTPU素材で印刷します。',
 };
 
@@ -267,7 +267,7 @@ class _PrintScreenState extends State<PrintScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // カバーを刷ったあとで、別の道具のクリップを足す（ADR-0014 §4）
+                // カバーを刷ったあとで、別の道具の留め具を足す（ADR-0014 §4）
                 if (canAdd) ...[
                   OutlinedButton.icon(
                     onPressed: () => Navigator.of(context)
@@ -367,15 +367,16 @@ class _PrintScreenState extends State<PrintScreen> {
           const _Heading(icon: Icons.edit_rounded, text: '組み立て方'),
           if (multi)
             const _Panel(
-              child: _Lines(['クリップは差し替えて使います。使う道具のクリップをレールに差し込みます。']),
+              child: _Lines(['留め具は差し替えて使います。使う道具の留め具をレールに差し込みます。']),
             ),
           const _Panel(
             child: _Steps([
               'カバーの内側にフェルトを貼ります。',
               '両側のスリットにベルトを通します。',
-              'クリップをレールに横から滑り込ませ、「カチッ」と止まるまで押します。',
-              '道具をクリップに押し込みます。',
-              '軽く引いて、抜けないか確かめます。',
+              'ねじを受け具にねじ込みます（T字のつまみを回します）。',
+              '留め具をレールに横から滑り込ませ、「カチッ」と止まるまで押します。',
+              '道具をV字の受けに差し込み、つまみを回して締めます。',
+              '軽く引いて、抜けないか確かめます。緩んだら締め直します。',
             ]),
           ),
           const _Heading(icon: Icons.back_hand_rounded, text: '着け方'),
@@ -392,9 +393,9 @@ class _PrintScreenState extends State<PrintScreen> {
               [
                 '痛みや赤みが出たら、すぐに使うのをやめて作業療法士に相談してください。',
                 '最初は短い時間から使ってください。',
-                'カバーとクリップは口に入れないでください。',
+                'カバーと留め具は口に入れないでください。',
                 'PLAは熱に弱いので、熱いお湯につけないでください。',
-                '実際の道具の太さが入力した値と違うと挟めません。注文や印刷の前に確かめてください。',
+                '挟める太さは、入力した道具の太さの前後2.5mmです。違う太さの道具は、注文や印刷の前に確かめてください。',
               ],
               icon: Icons.error_outline_rounded,
               iconColor: AppColors.error,
