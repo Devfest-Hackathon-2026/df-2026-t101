@@ -35,9 +35,9 @@ class RefineChoice {
     final clip = '${toolLabel == null ? '' : '$toolLabelの'}クリップ';
     return RefineChoice._(
       key: 'angle:$angle:$attachmentId',
-      buttonLabel: '$clipを$angle度で描き直す',
+      buttonLabel: '$clipを$angle度で作り直す',
       body: withAttachment({'clip_angle_deg': angle}, design, attachmentId),
-      busyText: '$clipを$angle度で描き直しています（カバーはそのままです）',
+      busyText: '$clipを$angle度で作り直しています（カバーはそのままです）',
       doneText: '$clipを$angle度にしました（カバーはそのままです）',
       angle: angle,
     );
@@ -70,5 +70,5 @@ class RefineChoice {
 /// OTに頼んだあと・確認済みの版を直すときの注意（直すと新しい版になり、確認は外れる）
 String? reReviewNote(String approvalStatus) =>
     approvalStatus == 'requested' || approvalStatus == 'approved'
-    ? '直すと新しい版になり、OTの確認をもう一度頼みます。'
+    ? '直すと新しい形になるため、もう一度OTに確認を頼む必要があります。'
     : null;

@@ -17,6 +17,38 @@ const _fingerJa = {
   'ring': '薬指',
   'pinky': '小指',
 };
+const _warningJa = {
+  'MESH_SCALE_INCONSISTENT': '手の甲の点の長さの比がずれています',
+  'ANGLE_DISAGREE': '3Dと画像で指の曲がり角に差があります',
+  'LENGTH_UNSTABLE': '区間の長さのばらつきが大きいです',
+  'ODD_PROPORTION': '指の長さの並びが不自然です',
+  'FEW_FRAMES': '使えたフレームが少ないです',
+  'VIEW_BIASED': '見えていない向きがあります',
+  'POINTS_MANUAL': '手首と付け根の点を手で直しました',
+  'COIN_MANUAL': '1円玉を手で指定しました',
+  'COIN_OFF_HAND': '1円玉が手の甲の上にありません',
+  'ABDUCTION_UNKNOWN': '指の開きの向きが決まりませんでした',
+  'FINGERS_SPREAD': '指の間隔が広いです',
+  'HAND_FRAME_SUSPECT': '手の向きの判定にずれがあります',
+  'MESH_FRAMES_DROPPED': '手の形が取れなかったフレームがあります',
+  'MESH_OUTLIER_FRAMES': '角度が大きく外れたフレームを除きました',
+};
+const _rejectJa = {
+  'NO_HAND': '手が見つからない',
+  'MULTIPLE_HANDS': '手が2つ以上写っている',
+  'HAND_AT_EDGE': '手が画面の端にかかっている',
+  'HAND_POINTS_OFF': '手首の点がずれた',
+  'NO_COIN': '1円玉が見つからない',
+  'COIN_JUMP': '1円玉の大きさが急に変わった',
+};
+
+String? _formatRejected(Object? raw) {
+  if (raw is! Map || raw.isEmpty) return null;
+  final parts = [
+    for (final e in raw.entries) '${_rejectJa['${e.key}'] ?? e.key}：${e.value}枚',
+  ];
+  return '使わなかった理由：${parts.join('、')}';
+}
 
 /// S5 採寸結果の確認と点の修正（docs/screens.md S5、measurement.md §13）。
 /// 採寸は解析の直後に保存してある（PUT measurement）。点を直したら同じAPIで送り直し、大きさだけが変わる
@@ -161,7 +193,7 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
       bottom: FilledButton.icon(
         onPressed: _busy ? null : _toDesign,
         icon: const Icon(Icons.auto_awesome_rounded),
-        label: const Text('合っている（保存して形を作る）'),
+        label: const Text('保存して形を作る'),
       ),
       children: [
         Semantics(
@@ -210,7 +242,7 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
           ),
         const SizedBox(height: 8),
         Text(
-          '測った手を、1円玉で実寸にした3Dの形で表しました。薄い板より手の甲側をカバーで覆います。手のひら側と手首は開けておきます。',
+          '1円玉の大きさをもとに、実寸の3Dモデルを作りました。緑の板より手の甲側をカバーで覆い、手のひら側と手首は開けます。',
           style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
         ),
         if (widget.repFrames.isNotEmpty) ...[
@@ -282,7 +314,7 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
                   tone: NoticeTone.warning,
                   child: Text(
                     '1円玉が手の甲の上にないフレームが多く、手が実物より大きく測られているおそれがあります。'
-                    '1円玉を手の甲のまん中に置いて、撮り直してください。',
+                    '1円玉を手の甲の真ん中に置いて、撮り直してください。',
                   ),
                 ),
               if (warnings.contains('FEW_FRAMES') ||
@@ -341,14 +373,16 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
             _DetailRow(
               label: '警告',
               value: warnings.isEmpty ? 'なし' : '${warnings.length}件',
-              sub: warnings.isEmpty ? null : warnings.join('、'),
+              sub: warnings.isEmpty
+                  ? null
+                  : warnings.map((w) => _warningJa[w] ?? w).join('、'),
             ),
             if (widget.stats != null)
               _DetailRow(
                 label: 'フレーム（候補 → 残した → 使えた）',
                 value:
                     '${widget.stats!['candidates']} → ${widget.stats!['kept']} → ${widget.stats!['used']}',
-                sub: '使わなかった理由：${widget.stats!['rejected']}',
+                sub: _formatRejected(widget.stats!['rejected']),
               ),
             for (final f in _fingerJa.keys)
               if (fingers[f] != null)
@@ -427,13 +461,13 @@ class _MeasureConfirmScreenState extends State<MeasureConfirmScreen> {
         Semantics(
           header: true,
           child: Text(
-            '手首と指の付け根の5つの点だけを、正しい位置までドラッグします。',
+            '手首と指の付け根の5つの点だけを、正しい位置までドラッグして直してください。',
             style: AppText.titleLarge,
           ),
         ),
         const SizedBox(height: 4),
         Text(
-          '直さなくてよい写真はそのままにします。指の点は直しません（カバーの大きさに効くのはこの5点だけです）。',
+          'ずれていない写真はそのままでかまいません。指先の点は直さなくて大丈夫です（カバーの大きさに影響するのはこの5点だけです）。',
           style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
         ),
         const SizedBox(height: 16),

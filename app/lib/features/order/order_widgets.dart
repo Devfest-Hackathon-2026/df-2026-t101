@@ -107,7 +107,7 @@ class ColorLine extends StatelessWidget {
 /// 印刷の決まり（機種・積層・充填・サポート・向き）を行で並べる
 List<Widget> printerLines(Map<String, dynamic>? p) => [
   IconLine(icon: Icons.print_rounded, text: '機種：${p?['model'] ?? ''}'),
-  IconLine(icon: Icons.layers_rounded, text: '積層の厚さ：${p?['layer_mm'] ?? ''}mm'),
+  IconLine(icon: Icons.layers_rounded, text: '積層ピッチ：${p?['layer_mm'] ?? ''}mm'),
   IconLine(icon: Icons.grid_on_rounded, text: '充填率：${p?['infill_pct'] ?? ''}%'),
   IconLine(icon: Icons.construction_rounded, text: 'サポート：${p?['supports_ja'] ?? ''}'),
   IconLine(icon: Icons.screen_rotation_alt_rounded, text: '刷る向き：${p?['orientation_ja'] ?? ''}'),

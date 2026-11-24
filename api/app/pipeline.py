@@ -522,10 +522,11 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             if [c for c in checks if c.get("rule") == "R6h" and not c.get("ok")]:
                 # 道具が手やカバーに当たる、または机に届かない（11/8 の設計変更の核心なので、黙って ready にしない）
                 status = "needs_attention"
+                tool_name = labels[a["id"]]
                 if multi:   # どの道具のクリップかを書く
-                    msg = f"{labels[a['id']]}が手やカバーに当たるか、先が机に届きません。{labels[a['id']]}のクリップの角度を立ててみてください"
+                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。{tool_name}のクリップの角度を立ててみてください"
                 else:
-                    msg = "道具（ペン・筆）が手やカバーに当たるか、先が机に届きません。クリップの角度を立ててみてください"
+                    msg = f"{tool_name}が手やカバーに当たるか、先が机に届きません。クリップの角度を立ててみてください"
                 unresolved.append({"severity": "medium", "description_ja": msg})
         if [c for c in result.get("checks", []) if c.get("rule") in ("R6e_slits", "R6e_slit_open") and not c.get("ok")]:
             # ベルトを通せないカバーは使えないので、OTに見せる（側面が低い手の形で起きる。11/8）

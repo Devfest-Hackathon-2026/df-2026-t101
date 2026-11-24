@@ -30,7 +30,7 @@ const _partImage = {
 const _partHowTo = {
   'cover': 'カバー：手のひら側の切り口を下にして刷ります。内側にサポートが要ります（跡はフェルトで隠れます）。',
   'c_clip': 'C字クリップ：ファイルの向きのまま（レールに差し込む所の底を下にして）刷ります。輪の下にサポートが要ります。材料はPETGが使えればPETGがおすすめです。',
-  'tpu_sleeve': 'TPUの筒：TPUで刷ります。',
+  'tpu_sleeve': 'TPUの筒：柔らかいTPU素材で印刷します。',
 };
 
 /// S10 ダウンロードと印刷ガイド（docs/screens.md S10、parts-library.md §7）
@@ -152,7 +152,7 @@ class _PrintScreenState extends State<PrintScreen> {
     final days = (_fabs?['delivery_days_after_ship'] as num?)?.toInt() ?? 2;
     final choice = PrintChoice(
       onOrder: _fabs == null || _notOwner ? null : _openOrder,
-      unavailableReason: _notOwner ? '注文は、ケースを作った人（本人・家族）が頼みます' : _fabsError,
+      unavailableReason: _notOwner ? '注文は、ケースを作った人（本人・家族）から行えます。' : _fabsError,
       onSelfPrint: () => setState(() => _selfPrint = !_selfPrint),
       selfPrintOpen: _selfPrint,
       fabricators: _fabs,
@@ -160,7 +160,7 @@ class _PrintScreenState extends State<PrintScreen> {
     );
     final others = [
       if (otherLive.isNotEmpty) ...[
-        const OrderHeading(icon: Icons.history_rounded, text: '前の版の注文'),
+        const OrderHeading(icon: Icons.history_rounded, text: '前の形の注文'),
         for (final o in otherLive) _orderCard(o, days),
       ],
     ];
@@ -242,7 +242,7 @@ class _PrintScreenState extends State<PrintScreen> {
     try {
       await downloadFile(path, path.split('/').last);
     } catch (e) {
-      if (mounted) showError(context, 'ダウンロードできませんでした。もう一度試してください。（$e）');
+      if (mounted) showError(context, 'ダウンロードできませんでした。もう一度試してください。');
     }
   }
 
@@ -280,7 +280,7 @@ class _PrintScreenState extends State<PrintScreen> {
                 OutlinedButton(
                   onPressed: () =>
                       Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
-                  child: const Text('ホームへ戻る'),
+                  child: const Text('ホームに戻る'),
                 ),
               ],
             )
@@ -297,7 +297,7 @@ class _PrintScreenState extends State<PrintScreen> {
         if (demo) const DemoBanner(),
         if (_error != null) ErrorCard(message: _error!, onRetry: _load),
         if (d == null && _error == null) const BusyCard(text: '読み込んでいます'),
-        if (_busy) const BusyCard(text: '印刷用のデータを作っています（20〜60秒）'),
+        if (_busy) const BusyCard(text: '印刷用データを作っています（20〜60秒）'),
         if (d != null && !ready && !demo)
           const InfoCard(
             icon: Icons.lock_outline_rounded,
@@ -308,7 +308,7 @@ class _PrintScreenState extends State<PrintScreen> {
           const InfoCard(
             tone: NoticeTone.success,
             icon: Icons.check_circle_outline_rounded,
-            child: Text('カバーは前の版と同じです。刷ってあるカバーをそのまま使えます'),
+            child: Text('カバーの形は前と同じです。すでに印刷したカバーをそのまま使えます。'),
           ),
         if (approved) ...[
           const SizedBox(height: 4),
@@ -367,7 +367,7 @@ class _PrintScreenState extends State<PrintScreen> {
           const _Heading(icon: Icons.edit_rounded, text: '組み立て方'),
           if (multi)
             const _Panel(
-              child: _Lines(['クリップは差し替えて使います。使う道具のクリップをレールに差し込みます']),
+              child: _Lines(['クリップは差し替えて使います。使う道具のクリップをレールに差し込みます。']),
             ),
           const _Panel(
             child: _Steps([
@@ -394,7 +394,7 @@ class _PrintScreenState extends State<PrintScreen> {
                 '最初は短い時間から使ってください。',
                 'カバーとクリップは口に入れないでください。',
                 'PLAは熱に弱いので、熱いお湯につけないでください。',
-                '道具の太さが聞き取りと違うと挟めません。刷る前に確かめてください。',
+                '実際の道具の太さが入力した値と違うと挟めません。注文や印刷の前に確かめてください。',
               ],
               icon: Icons.error_outline_rounded,
               iconColor: AppColors.error,
@@ -573,7 +573,10 @@ class _ApprovedCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '確認したOT：$reviewer（$decidedAt）',
+            () {
+              final when = shortTime(decidedAt);
+              return when.isEmpty ? '確認したOT：$reviewer' : '確認したOT：$reviewer（$when）';
+            }(),
             style: AppText.bodyLarge.copyWith(color: fg),
           ),
           if (comment.isNotEmpty) ...[
@@ -732,10 +735,19 @@ class _PartThumbState extends State<_PartThumb> {
   );
 }
 
-/// 刷る色の行（色の丸＋色の値）
+/// 刷る色の行（色の丸＋色の名前）
 class _ColorRow extends StatelessWidget {
   const _ColorRow({required this.hex});
   final String hex;
+
+  static const _names = {
+    '#2A9D8F': 'ティール',
+    '#E76F51': 'コーラル',
+    '#264653': '紺',
+    '#E9C46A': '黄色',
+    '#F4F1EA': '白',
+    '#5A666B': '灰色',
+  };
 
   static Color? _parse(String hex) {
     var h = hex.replaceFirst('#', '');
@@ -747,6 +759,7 @@ class _ColorRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = _parse(hex);
+    final name = _names[hex.toUpperCase()];
     return _Panel(
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       child: MergeSemantics(
@@ -774,7 +787,7 @@ class _ColorRow extends StatelessWidget {
                       color: AppColors.onSurfaceVariant,
                     ),
                   ),
-                  Text(hex, style: AppText.bodyLarge),
+                  Text(name ?? hex, style: AppText.bodyLarge),
                 ],
               ),
             ),

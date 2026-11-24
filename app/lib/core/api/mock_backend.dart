@@ -131,7 +131,7 @@ class MockBackend {
         return {
           'turn': {
             'status': 'done',
-            'message_ja': 'わかりました。「${b['message']}」をメモしました。ほかになければ「とばす」で進みます。',
+            'message_ja': 'わかりました。「${b['message']}」をメモしました。ほかになければ「まとめを見る」で進みます。',
             'choices': <String>[],
             'notes': notes,
             'suggested_changes': [],

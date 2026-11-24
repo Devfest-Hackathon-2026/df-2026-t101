@@ -331,7 +331,7 @@ class _Arrow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 4),
     child: IconButton.outlined(
-      tooltip: '選んだ点を$labelうごかす',
+      tooltip: '選んだ点を$label動かす',
       iconSize: 28,
       constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
       onPressed: onTap,
