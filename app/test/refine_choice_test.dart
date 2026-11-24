@@ -44,15 +44,24 @@ void main() {
       expect(c.angle, 80);
       expect(c.buttonLabel, '留め具を80度で作り直す');
       expect(c.body, {'clip_angle_deg': 80, 'attachment_id': 'a1'});
-      expect(c.busyText, '留め具を80度で作り直しています（カバーはそのままです）');
-      expect(c.doneText, '留め具を80度にしました（カバーはそのままです）');
+      // 主な留め具の角度：レールの台が動いてカバーも作り直すことがあるので「カバーはそのまま」と言わない
+      expect(c.busyText, '留め具を80度で作り直しています');
+      expect(c.doneText, '留め具を80度にしました');
     });
 
-    test('取り付け具が2つ以上なら道具の名前を付ける', () {
-      final c = RefineChoice.angle(60, newDesign, 'a1', toolLabel: 'ペン');
+    test('取り付け具が2つ以上なら道具の名前を付ける。主でない留め具ならカバーはそのまま', () {
+      final multi = <String, dynamic>{
+        'design_id': 'd2',
+        'attachments': [
+          {'id': 'a1', 'primary': true},
+          {'id': 'a2', 'primary': false},
+        ],
+      };
+      final c = RefineChoice.angle(60, multi, 'a2', toolLabel: 'ペン');
       expect(c.buttonLabel, 'ペンの留め具を60度で作り直す');
       expect(c.busyText, 'ペンの留め具を60度で作り直しています（カバーはそのままです）');
       expect(c.doneText, 'ペンの留め具を60度にしました（カバーはそのままです）');
+      expect(RefineChoice.angle(60, multi, 'a1', toolLabel: '筆').doneText, '筆の留め具を60度にしました');
     });
 
     test('指示の選択には角度がない', () {

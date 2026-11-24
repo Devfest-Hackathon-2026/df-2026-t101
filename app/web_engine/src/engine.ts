@@ -457,10 +457,34 @@ function cropHand(f: Frame): Promise<Blob> {
   const c = document.createElement('canvas');
   c.width = Math.round(w * scale); c.height = Math.round(h * scale);
   c.getContext('2d')!.drawImage(f.canvas, x0, y0, w, h, 0, 0, c.width, c.height);
-  return new Promise((res, rej) => c.toBlob((b) => {
-    releaseCanvas(c);
+  return jpegUnder(c, MESH_FRAME_MAX_BYTES).finally(() => releaseCanvas(c));
+}
+
+/** hand-mesh が受け取る1枚の上限（hand_mesh/config.py の MAX_FRAME_BYTES＝200KB）より少し小さく */
+const MESH_FRAME_MAX_BYTES = 180_000;
+
+/** JPEG にして、上限を超えたら画質を下げ、それでも超えたら縮めて作り直す。暗い所の映像や模様の多い背景だと、
+ *  512px でも 1 枚 200KB を超え、hand-mesh が 400（大きすぎます）を返して手の3Dが作れなかった（2026-11-24） */
+async function jpegUnder(c: HTMLCanvasElement, maxBytes: number): Promise<Blob> {
+  const enc = (cv: HTMLCanvasElement, q: number) => new Promise<Blob>((res, rej) => cv.toBlob((b) => {
     if (b) res(b); else rej(new Error('手の画像を作れませんでした'));
-  }, 'image/jpeg', 0.85));
+  }, 'image/jpeg', q));
+  let b: Blob | null = null;
+  for (const q of [0.85, 0.75, 0.6, 0.45]) {
+    b = await enc(c, q);
+    if (b.size <= maxBytes) return b;
+  }
+  // 画質を下げても大きいときは、384px に縮めて低い画質で
+  const s = 384 / Math.max(c.width, c.height);
+  const d = document.createElement('canvas');
+  d.width = Math.max(1, Math.round(c.width * s)); d.height = Math.max(1, Math.round(c.height * s));
+  d.getContext('2d')!.drawImage(c, 0, 0, d.width, d.height);
+  try {
+    b = await enc(d, 0.6);
+  } finally {
+    releaseCanvas(d);
+  }
+  return b;
 }
 
 /** §6：フレームごとの値 */

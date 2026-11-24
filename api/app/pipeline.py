@@ -122,11 +122,23 @@ def _upload_preview(case_id: str, design_id: str, result: dict, atts: list[dict]
 
 
 COVER_PARTS = ("cover", "air_holes", "strap_slits", "rail")   # カバーのSTLの形を決める部品
+UNUSED_PARTS = ("tpu_sleeve",)   # AI が選んでも作らない部品（TPUの筒は C字クリップ用。万力式に置き換えた 2026-11-24）
+
+
+def rail_placement(result: dict) -> dict | None:
+    """レールの台の位置（版に残す）。Firestore は配列の中の配列を持てないので、向きは行ごとの map にする"""
+    pl = result.get("placement") or {}
+    if not pl.get("rail_origin") or not pl.get("rail_frame"):
+        return None
+    fr = pl["rail_frame"]
+    return {"origin": list(pl["rail_origin"]), "frame": {"x": list(fr[0]), "y": list(fr[1]), "z": list(fr[2])}}
 
 
 def _reuse_parent_cover(case: dict, parent: dict | None, params: list[Param], result: dict, file_refs: dict) -> None:
     """カバーの入力が前の版と同じなら、カバーのプレビュー用STLを前の版の中身にする
-    （OpenSCAD は同じ入力でも毎回少し違うSTLを出すため。ADR-0014 §4 カバーは前の版と同じ）。検査は描き直したもののまま"""
+    （OpenSCAD は同じ入力でも毎回少し違うSTLを出すため。ADR-0014 §4 カバーは前の版と同じ）。検査は描き直したもののまま。
+    レールの台の位置も同じときだけ（台は主な留め具の角度で、道具が手に当たらない所までずれる。万力式は道具が外にあるので
+    角度ごとに位置が変わりやすく、前の版のカバーを使うと、留め具がレールから浮いて見えた。2026-11-24）"""
     old_key = ((parent or {}).get("files") or {}).get("parts", {}).get("cover", {}).get("preview_stl")
     new_ref = (file_refs.get("parts") or {}).get("cover")
     if not old_key or not new_ref or not result.get("cover_shell_sha256"):
@@ -137,6 +149,8 @@ def _reuse_parent_cover(case: dict, parent: dict | None, params: list[Param], re
     def cover_values(ps: list[Param]) -> dict:
         return {p.key(): p.value for p in ps if p.part_id in COVER_PARTS}
     if cover_values(params) != cover_values(validator.params_from_records(parent.get("params") or [])):
+        return
+    if rail_placement(result) != parent.get("rail_placement"):
         return
     data = files.get(old_key)
     if data:
@@ -353,7 +367,8 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
                        "tool_d_mm": a["tool_d_mm"]} for a in atts if not a["primary"]]
             _progress(case_id, design_id, "selecting", "部品を選んでいます")
             sel = gemini.select(req, hand, _catalog_summary(), usage)
-            parts = sel["parts"]
+            # TPUの筒は C字クリップの輪の内側に入れる部品なので、万力式の留め具（2026-11-24）では作らない
+            parts = [p for p in sel["parts"] if p.get("part_id") not in UNUSED_PARTS]
             selected = [p["part_id"] for p in parts]
             for need in validator.REQUIRED_PARTS:  # 必須の部品が抜けていたら足す（R1）
                 if need not in selected:
@@ -628,7 +643,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "hand_measurement_id": case.get("measurement_id"),
             "scale_factor": case["hand_model"].get("scale_factor"),
             "hand_clearance_mm": validator.fixed("HAND_CLEARANCE_MM", 1.5),
-            "cover_shell_sha256": result.get("cover_shell_sha256"),
+            "cover_shell_sha256": result.get("cover_shell_sha256"), "rail_placement": rail_placement(result),
             "clip_angle_deg": angle, "clip": result.get("clip"), "tool": result.get("tool"), "checks": result.get("checks", []),
             "attachments": atts,
             "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせた、ねじで締める留め具にしました。手のひら側と手首は開けてあります。",

@@ -632,7 +632,8 @@ class MockBackend {
         {'rule': 'R6f', 'ok': true, 'value': 1, 'message_ja': '留め具は受け具とねじの2つで、道具を挟める'},
         {'rule': 'R6h', 'ok': true, 'value': 0, 'message_ja': '道具の通り道に当たる所はありません'},
       ];
-      a['clip'] = {'source': 'library', 'tool_d_mm': a['tool_d_mm'], 'angle_deg': a['angle_deg']};
+      a['clip'] = {'source': 'generated', 'tool_d_mm': a['tool_d_mm'], 'angle_deg': a['angle_deg']};
+      a['tool'] = _demoTool(a['angle_deg'] as num?, a['tool_d_mm'] as num?);
     }
     final d = <String, dynamic>{
       'design_id': id,
@@ -725,6 +726,7 @@ class MockBackend {
       },
       'warnings': [],
       'hand_overlay': {'mesh_path': 'demo/hand.glb', 'frame': 'hand'},
+      'tool': _demoTool(angle, toolD),
       'files': <String, dynamic>{
         'parts': {
           'cover': {'preview_stl': 'demo/cover.stl'},
@@ -855,6 +857,23 @@ const _angleReason = {
   'pen': '字を書くので、ペンを少し寝かせた60度をおすすめします。立て気味にしたいときは70度も選べます',
   'spoon': '食べるので、スプーンを口に運びやすい60度をおすすめします。立て気味にしたいときは70度も選べます',
 };
+
+/// 見本の留め具（web/demo/c_clip_{角度}.stl）の道具の軸（実際の手の座標）。scripts/make_demo_assets.py が出す値。
+/// 万力式の留め具は形から道具の軸を推定できないので、生成APIと同じく版に書く（2026-11-24）
+Map<String, dynamic> _demoTool(num? angle, num? toolD) {
+  const axes = {
+    60: [0.0, 0.5, -0.866],
+    70: [0.0, 0.342, -0.9397],
+    80: [0.0, 0.1736, -0.9848],
+  };
+  return {
+    'center': [-65.23, 59.5, 11.68],
+    'axis': axes[angle?.toInt()] ?? axes[70],
+    'tip_mm': 100.0,
+    'rear_mm': 50.0,
+    'diameter_mm': (toolD ?? 8.5).toDouble(),
+  };
+}
 
 /// 道具1つから取り付け具を作る（生成APIの build_attachments と同じ。ID は a＋道具の番号＋1）
 Map<String, dynamic> _attachment(Map<String, dynamic> t, int i, {required bool primary}) {

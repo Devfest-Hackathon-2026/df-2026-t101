@@ -33,14 +33,25 @@ class RefineChoice {
     String? toolLabel,
   }) {
     final clip = '${toolLabel == null ? '' : '$toolLabelの'}留め具';
+    // 主な留め具の角度を変えると、道具が手に当たらないようレールの台の位置が変わり、カバーも作り直すことがある
+    // （万力式は道具が外にあるので変わりやすい。2026-11-24）。ほかの留め具の角度なら、カバーはそのまま
+    final note = _isPrimary(design, attachmentId) ? '' : '（カバーはそのままです）';
     return RefineChoice._(
       key: 'angle:$angle:$attachmentId',
       buttonLabel: '$clipを$angle度で作り直す',
       body: withAttachment({'clip_angle_deg': angle}, design, attachmentId),
-      busyText: '$clipを$angle度で作り直しています（カバーはそのままです）',
-      doneText: '$clipを$angle度にしました（カバーはそのままです）',
+      busyText: '$clipを$angle度で作り直しています$note',
+      doneText: '$clipを$angle度にしました$note',
       angle: angle,
     );
+  }
+
+  static bool _isPrimary(Map<String, dynamic> design, String? attachmentId) {
+    if (attachmentId == null) return true;
+    for (final a in (design['attachments'] as List?) ?? const []) {
+      if (a is Map && a['id'] == attachmentId) return a['primary'] != false;
+    }
+    return true;
   }
 
   final String key;
