@@ -525,7 +525,7 @@ STL・画像・実寸の手のメッシュ（GLB）は、APIを通さずに、Fi
 
 ### 3.14 `GET /v1/cases/{case_id}/designs/{design_id}/fabricators`
 
-発注の設計（[superpowers/specs/2026-11-21-in-app-ordering-design.md](superpowers/specs/2026-11-21-in-app-ordering-design.md)）の入口。受託者は架空の見本で、`api/app/data/fabrication.json` に置く。
+発注の設計の入口。受託者は架空の見本で、`api/app/data/fabrication.json` に置く。
 
 - **発注できる版**：持ち主で、ケースの今の版で、`approval.status == "approved"`、またはデモのケースで `print_prepared_at` がある版（印刷用STLが読める場所にある版）。ほかは `403 FORBIDDEN`
 - 部品ごとの目安（`print_estimates`）がなければ、印刷用STLの体積から計算して版に書き足す（重さ ＝ 体積 × 材料の密度 × 係数、時間 ＝ 重さ × 1gあたりの分 ＋ 準備の分。係数は仮）
