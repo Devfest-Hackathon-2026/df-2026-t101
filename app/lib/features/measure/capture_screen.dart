@@ -227,7 +227,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
           const SizedBox(height: 8),
           Text(
             '同意の文の版：$consentVersion',
-            style: AppText.bodySmall.copyWith(
+            style: AppText.bodyLarge.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
           ),
@@ -242,8 +242,8 @@ class _CaptureScreenState extends State<CaptureScreen> {
     final smallOutline = OutlinedButton.styleFrom(
       minimumSize: const Size(48, 48),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      textStyle: AppText.labelLarge,
-      iconSize: 18,
+      textStyle: AppText.titleMedium,
+      iconSize: 20,
     );
     return AppPage(
       title: '手を撮る',
@@ -292,16 +292,16 @@ class _CaptureScreenState extends State<CaptureScreen> {
         Semantics(
           header: true,
           child: Text(
-            'カメラをこぶしのまわりで動かして撮ります（15〜20秒）',
+            'スマホを手のまわりで動かして撮ります（15〜20秒）',
             style: AppText.titleLarge,
           ),
         ),
         const SizedBox(height: 16),
         for (final (i, s) in const [
-          '机の上に、いつもの握った形のまま、手の甲を上にしてこぶしを置きます。',
-          '1円玉を、手の甲のまん中（手首と指の付け根の間）に平らに置きます。指の付け根の出っ張りの上は避けます。',
-          '撮っているあいだ、手は動かしません。スマホを持って、こぶし全体（指の側も手首も）がいつも画面に入る近さで構えます。家族や支援者に撮ってもらってもかまいません。',
-          '15〜20秒かけて、スマホを親指側から手の甲の上、小指側へと、こぶしのまわりを半周させます。途中で、こぶしの前（指の背と関節の出っ張り）が写る所も通ります。',
+          'いつもの握った形のまま、手の甲を上に向けて、手を机に置きます。',
+          '1円玉を、手の甲のまん中（手首と指の付け根の間）に平らにのせます。指の付け根の出っ張りの上は避けてください。',
+          '撮っているあいだ、手は動かしません。指先から手首までがいつも画面に入る距離で、スマホを構えます。家族や支援者に撮ってもらってもかまいません。',
+          '15〜20秒かけて、スマホを親指側から手の甲の上を通って小指側へ、手のまわりを半周させます。途中で、指の背と関節の出っ張りも写るようにします。',
           'PCで撮るときは、ノートPCを持って同じように動かします。動かしにくいときは、スマホで撮るのがおすすめです。',
         ].indexed)
           _StepRow(number: i + 1, text: s),
@@ -364,7 +364,7 @@ class _ConsentRow extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: AppText.bodySmall.copyWith(
+                  style: AppText.titleMedium.copyWith(
                     color: AppColors.onSurfaceVariant,
                   ),
                 ),
@@ -400,7 +400,7 @@ class _StepRow extends StatelessWidget {
             ),
             child: Text(
               '$number',
-              style: AppText.titleSmall.copyWith(
+              style: AppText.titleMedium.copyWith(
                 color: AppColors.onPrimaryContainer,
               ),
             ),

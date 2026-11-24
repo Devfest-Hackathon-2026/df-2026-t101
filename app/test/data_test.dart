@@ -292,4 +292,14 @@ void main() {
       '/cases/c1/designs/d2/print',
     );
   });
+  group('発注のパス（設計 §6.4）', () {
+    test('頼む側', () {
+      expect(Paths.order('c1', 'd1'), '/cases/c1/designs/d1/order');
+      expect(Paths.orderForm('c1', 'd1', 'umikaze'), '/cases/c1/designs/d1/order/umikaze');
+    });
+    test('受託する側', () {
+      expect(Paths.fabricator(), '/fabricator');
+      expect(Paths.fabricatorOrder('o_1'), '/fabricator/orders/o_1');
+    });
+  });
 }

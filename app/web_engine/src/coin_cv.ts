@@ -93,7 +93,9 @@ export function detectCoins(cv: any, rgba: Uint8ClampedArray, W: number, H: numb
       cv.Canny(blur, edges, hi * 0.4, hi);
       const cs = new cv.MatVector();
       cv.findContours(edges, cs, hier, cv.RETR_LIST, cv.CHAIN_APPROX_NONE);
-      for (let i = 0; i < cs.size(); i++) contours.push_back(cs.get(i));
+      // cs.get(i) は新しい Mat を返すので、入れたら消す（この opencv.js は自動で消さない。前は1円玉を探すたびに
+      // WASM のメモリが増え続けた。900回で134→537MB。2026-11-24）
+      for (let i = 0; i < cs.size(); i++) { const m = cs.get(i); contours.push_back(m); m.delete(); }
       cs.delete();
     }
 

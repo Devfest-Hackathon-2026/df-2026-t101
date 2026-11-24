@@ -288,7 +288,7 @@ class ChoiceButton extends StatelessWidget {
                                   : AppColors.onSurface,
                             ),
                           ),
-                          if (sub != null) Text(sub!, style: AppText.supporting),
+                          if (sub != null) Text(sub!, style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                         ],
                       ),
                     ),
@@ -333,23 +333,40 @@ class SuggestButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    this.selected = false,
   });
   final String label;
   final VoidCallback? onPressed;
 
+  /// 選んでいる（S7：押すと選ぶだけで、画面の下のボタンで送る）。色だけで伝えないようチェックも付ける
+  final bool selected;
+
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(48, 48),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        textStyle: AppText.labelLarge.copyWith(fontSize: 16),
-        foregroundColor: AppColors.onSurfaceVariant,
-        side: const BorderSide(color: AppColors.outlineVariant),
+    final style = OutlinedButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      textStyle: AppText.labelLarge.copyWith(fontSize: 16),
+      foregroundColor: selected
+          ? AppColors.onSecondaryContainer
+          : AppColors.onSurfaceVariant,
+      backgroundColor: selected ? AppColors.secondaryContainer : null,
+      side: BorderSide(
+        color: selected ? AppColors.secondary : AppColors.outlineVariant,
+        width: selected ? 2 : 1,
       ),
-      child: Text(label),
+    );
+    return Semantics(
+      selected: selected,
+      child: selected
+          ? OutlinedButton.icon(
+              onPressed: onPressed,
+              style: style,
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: Text(label),
+            )
+          : OutlinedButton(onPressed: onPressed, style: style, child: Text(label)),
     );
   }
 }
@@ -414,9 +431,21 @@ class StatusLabel extends StatelessWidget {
   }
 }
 
-/// data:image/jpeg;base64,... をバイト列にする
-Uint8List dataUrlBytes(String dataUrl) =>
-    base64Decode(dataUrl.substring(dataUrl.indexOf(',') + 1));
+/// data:image/jpeg;base64,... をバイト列にする。
+/// 同じ文字列には同じバイト列を返す。Image.memory（MemoryImage）はバイト列が同じオブジェクトかで画像のキャッシュを引くので、
+/// 毎回デコードし直すと、描き直すたびに画像もデコードし直していた（S5 の点を動かすと1秒に約60回、1280px の JPEG。2026-11-24）
+Uint8List dataUrlBytes(String dataUrl) {
+  for (final e in _dataUrlCache) {
+    if (identical(e.key, dataUrl) || e.key == dataUrl) return e.value;
+  }
+  final bytes = base64Decode(dataUrl.substring(dataUrl.indexOf(',') + 1));
+  _dataUrlCache.insert(0, MapEntry(dataUrl, bytes));
+  if (_dataUrlCache.length > _dataUrlCacheMax) _dataUrlCache.removeLast();
+  return bytes;
+}
+
+const _dataUrlCacheMax = 12; // 確認の画面の代表フレーム（数枚）と、1円玉・点の画面の1枚が入る数
+final _dataUrlCache = <MapEntry<String, Uint8List>>[];
 
 /// 1秒を超える処理の「いま何をしているか」（docs/screens.md §2：くるくる回るだけの表示は使わない）。
 /// Figma の M3/Notice（Progress）＋進み具合の棒

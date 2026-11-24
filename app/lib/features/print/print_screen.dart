@@ -1,10 +1,20 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import 'package:jijogu_app/app/paths.dart';
 import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
+import 'package:jijogu_app/core/viewer/viewer_3d.dart';
+import 'package:jijogu_app/features/order/order_logic.dart';
+import 'package:jijogu_app/features/order/order_status_card.dart';
+import 'package:jijogu_app/features/order/order_widgets.dart';
+import 'package:jijogu_app/features/order/print_choice.dart';
 import 'package:jijogu_app/features/print/download.dart';
 
 /// 部品ごとの材料（Figma の札）
@@ -38,10 +48,164 @@ class _PrintScreenState extends State<PrintScreen> {
   String? _error;
   bool _busy = false;
 
+  // 発注（設計 §6.4 の 1a・1b）
+  Map<String, dynamic>? _fabs;
+  List<Map<String, dynamic>> _orders = const []; // ケースのすべての版の注文（新しい順）
+  String? _fabsError;
+
+  /// ケースの持ち主でない（承認したあとに開いた OT など）。注文は持ち主しか見られず・頼めない
+  bool _notOwner = false;
+  bool _selfPrint = false;
+  bool _orderBusy = false;
+  Timer? _poll;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  /// この版の注文（新しい順）と、受託者の一覧（目安）を読む。進行中の注文があれば5秒ごとに読み直す
+  Future<void> _loadOrders() async {
+    try {
+      final r = await Api.instance.get('/v1/cases/${widget.caseId}/orders');
+      final list = [for (final o in (r['orders'] as List? ?? const [])) Map<String, dynamic>.from(o as Map)];
+      if (_fabs == null) {
+        try {
+          _fabs = Map<String, dynamic>.from(
+            await Api.instance.get('/v1/cases/${widget.caseId}/designs/${widget.designId}/fabricators') as Map,
+          );
+          _fabsError = null;
+        } catch (e) {
+          // 発注できない版（今の版でない・確認前・持ち主でない）は「刷ってもらう」を押せなくし、理由を出す
+          _fabsError = e is ApiError ? e.message : '$e';
+        }
+      }
+      if (!mounted) return;
+      setState(() => _orders = list);
+      final live = list.any((o) => const {'received', 'printing', 'shipped'}.contains(o['status']));
+      if (live && _poll == null) {
+        _poll = Timer.periodic(const Duration(seconds: 5), (_) => _loadOrders());
+      } else if (!live) {
+        _poll?.cancel();
+        _poll = null;
+      }
+    } catch (e) {
+      // 注文が読めなくても、ダウンロードと刷り方は出す。持ち主でなければ 403 なので、頼めない理由をはっきり出す
+      if (e is ApiError && e.code == 'FORBIDDEN' && mounted) setState(() => _notOwner = true);
+    }
+  }
+
+  Future<void> _openOrder() async {
+    await Navigator.of(context).pushNamed(Paths.order(widget.caseId, widget.designId));
+    if (mounted) await _loadOrders();
+  }
+
+  Future<void> _orderAction(String path) async {
+    setState(() => _orderBusy = true);
+    try {
+      await Api.instance.post(path);
+      await _loadOrders();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _orderBusy = false);
+    }
+  }
+
+  Future<void> _cancel(Map<String, dynamic> o) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('注文を取り消しますか？'),
+        content: Text('#${o['display_id']} の注文を取り消します。取り消したあとは元に戻せません。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(c).pop(false), child: const Text('やめる')),
+          FilledButton(onPressed: () => Navigator.of(c).pop(true), child: const Text('取り消す')),
+        ],
+      ),
+    );
+    if (yes == true) await _orderAction('/v1/orders/${o['order_id']}/cancel');
+  }
+
+  Widget _orderCard(Map<String, dynamic> o, int days) {
+    final st = o['status'];
+    return OrderStatusCard(
+      order: o,
+      daysAfterShip: days,
+      busy: _orderBusy,
+      onCancel: st == 'received' ? () => _cancel(o) : null,
+      onDelivered: st == 'shipped' ? () => _orderAction('/v1/orders/${o['order_id']}/delivered') : null,
+    );
+  }
+
+  List<Widget> _orderSection() {
+    final (mine, otherLive) = splitOrders(_orders, widget.designId);
+    final live = mine.where((o) => o['status'] != 'cancelled').toList();
+    final active = live.isEmpty ? null : live.first;
+    final days = (_fabs?['delivery_days_after_ship'] as num?)?.toInt() ?? 2;
+    final choice = PrintChoice(
+      onOrder: _fabs == null || _notOwner ? null : _openOrder,
+      unavailableReason: _notOwner ? '注文は、ケースを作った人（本人・家族）が頼みます' : _fabsError,
+      onSelfPrint: () => setState(() => _selfPrint = !_selfPrint),
+      selfPrintOpen: _selfPrint,
+      fabricators: _fabs,
+      compact: active != null,
+    );
+    final others = [
+      if (otherLive.isNotEmpty) ...[
+        const OrderHeading(icon: Icons.history_rounded, text: '前の版の注文'),
+        for (final o in otherLive) _orderCard(o, days),
+      ],
+    ];
+    if (active == null) {
+      final est = Map<String, dynamic>.from(_fabs?['estimates'] ?? {});
+      final names = Map<String, dynamic>.from(_fabs?['names'] ?? {});
+      final mats = Map<String, dynamic>.from(_fabs?['materials'] ?? {});
+      return [
+        if (est.isNotEmpty) ...[
+          const OrderHeading(icon: Icons.view_in_ar_rounded, text: '刷る部品'),
+          OrderPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final e in est.entries)
+                  IconLine(
+                    icon: Icons.view_in_ar_rounded,
+                    text: '${names[e.key] ?? e.key}（${mats[e.key] ?? ''}）'
+                        '${gramsJa(e.value['grams'] as num)}・${minutesJa(e.value['minutes'] as num)}（目安）',
+                  ),
+              ],
+            ),
+          ),
+        ],
+        ...others,
+        const OrderHeading(icon: Icons.print_rounded, text: 'どうやって刷りますか'),
+        choice,
+      ];
+    }
+    return [
+      const OrderHeading(icon: Icons.receipt_long_rounded, text: '注文の状態'),
+      _orderCard(active, days),
+      for (final o in mine)
+        if (!identical(o, active))
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Text(
+              '前の注文 #${o['display_id']}：${orderStatusJa('${o['status']}')}（${shortTime(o['created_at'])}）',
+              style: AppText.supporting,
+            ),
+          ),
+      ...others,
+      const OrderHeading(icon: Icons.print_rounded, text: 'もう一度頼む・自分で刷る'),
+      choice,
+    ];
   }
 
   Future<void> _load() async {
@@ -54,6 +218,7 @@ class _PrintScreenState extends State<PrintScreen> {
         _case = Map<String, dynamic>.from(c);
         _design = Map<String, dynamic>.from(r['design'] ?? r);
       });
+      unawaited(_loadOrders());
     } catch (e) {
       setState(() => _error = '$e');
     }
@@ -153,11 +318,14 @@ class _PrintScreenState extends State<PrintScreen> {
             comment: comment,
           ),
         ],
-        if (ready) ...[
+        if (ready) ..._orderSection(),
+        if (ready && _selfPrint) ...[
           const _Heading(icon: Icons.download_rounded, text: '部品ごとのダウンロード'),
           for (final r in rows)
             _PartCard(
               partId: r.partId,
+              path: r.path,
+              color: colorHex.isEmpty ? '#2A9D8F' : colorHex,
               name: r.name,
               fileName: r.path.split('/').last,
               howTo: _partHowTo[r.partId],
@@ -443,6 +611,8 @@ class _ApprovedCard extends StatelessWidget {
 class _PartCard extends StatelessWidget {
   const _PartCard({
     required this.partId,
+    required this.path,
+    required this.color,
     required this.name,
     required this.fileName,
     required this.howTo,
@@ -450,6 +620,8 @@ class _PartCard extends StatelessWidget {
     required this.downloadLabel,
   });
   final String partId;
+  final String path; // ダウンロードする STL（絵もこれから描く）
+  final String color; // 刷る色
   final String name;
   final String fileName;
   final String? howTo;
@@ -465,20 +637,17 @@ class _PartCard extends StatelessWidget {
       child: Row(
         children: [
           ExcludeSemantics(
-            child: img != null
-                ? SvgPicture.asset(img, width: 56, height: 56)
-                : Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: const Icon(
+            child: _PartThumb(
+              path: path,
+              color: color,
+              // 描けるまで（描けなかったとき）は、今までの絵
+              placeholder: img != null
+                  ? SvgPicture.asset(img, width: 56, height: 56)
+                  : const Icon(
                       Icons.view_in_ar_rounded,
                       color: AppColors.onSurfaceVariant,
                     ),
-                  ),
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -506,6 +675,61 @@ class _PartCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 部品の絵：ダウンロードする STL そのものを、刷る向きのまま、足もとに薄い影を付けて描く（2026-11-22。
+/// 前は部品の種類ごとの決まった絵で、実際の形が分からなかった）。一度描いたものは覚えておく
+class _PartThumb extends StatefulWidget {
+  const _PartThumb({required this.path, required this.color, required this.placeholder});
+  final String path;
+  final String color;
+  final Widget placeholder;
+
+  static const size = 88.0;
+  static final _cache = <String, Uint8List>{};
+
+  @override
+  State<_PartThumb> createState() => _PartThumbState();
+}
+
+class _PartThumbState extends State<_PartThumb> {
+  Uint8List? _png;
+
+  String get _key => '${widget.path}|${widget.color}';
+
+  @override
+  void initState() {
+    super.initState();
+    _png = _PartThumb._cache[_key];
+    if (_png == null) unawaited(_draw());
+  }
+
+  Future<void> _draw() async {
+    try {
+      final px = (_PartThumb.size * MediaQuery.devicePixelRatioOf(context)).round().clamp(88, 264);
+      final data = await renderPartThumbnail(widget.path, widget.color, px);
+      final png = base64Decode(data.substring(data.indexOf(',') + 1));
+      _PartThumb._cache[_key] = png;
+      if (mounted) setState(() => _png = png);
+    } catch (_) {
+      // 描けなければ今までの絵のまま
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: _PartThumb.size,
+    height: _PartThumb.size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: AppColors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: _png == null
+        ? widget.placeholder
+        : Image.memory(_png!, width: _PartThumb.size, height: _PartThumb.size, fit: BoxFit.cover, gaplessPlayback: true),
+  );
 }
 
 /// 刷る色の行（色の丸＋色の値）

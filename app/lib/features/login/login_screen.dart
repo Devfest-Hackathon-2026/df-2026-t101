@@ -88,7 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
         const _GoogleColorBar(),
         const SizedBox(height: 16),
         Text(
-          'スマホで撮ったこぶしの形から、筆やペンを持つためのカバーを作ります',
+          'スマホで撮った手の形から、筆やペンを持つためのカバーを作ります',
           textAlign: TextAlign.center,
           style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
         ),

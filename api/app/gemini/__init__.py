@@ -14,7 +14,8 @@ from . import mock, schemas
 
 log = logging.getLogger("gemini")
 # 2026-11-10：system v2・attachment v2・dimension v3。理由の文に項目名（tool_type=spoon など）を書かせていたのをやめた
-PROMPT_VERSIONS = {"system": "v2", "interview": "v1", "select": "v1", "dimension": "v3", "attachment": "v2", "review": "v1", "refine": "v1"}
+# 2026-11-22：system v3。利用者に見せる文で「こぶし」と書かず「手の甲」「手」と書くようにした
+PROMPT_VERSIONS = {"system": "v3", "interview": "v1", "select": "v1", "dimension": "v3", "attachment": "v2", "review": "v1", "refine": "v1"}
 # review は画像4枚で時間がぶれやすい（11/7 の実測で6〜108秒）ので LOW にした（generation-pipeline.md §3 の表も同じ）
 THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "attachment": "LOW", "review": "LOW", "refine": "LOW"}
 
@@ -37,7 +38,9 @@ def _prompt(name: str) -> str:
 
 
 def _j(v) -> str:
-    return json.dumps(v, ensure_ascii=False, indent=1)
+    # 日時（Firestore から読んだ created_at など）は文字列にする。前は TypeError になり、チャットの2回目以降が
+    # 本番で必ず 500 だった（2026-11-10 のログ。手元の保存は文字列なので、テストでは起きなかった）
+    return json.dumps(v, ensure_ascii=False, indent=1, default=str)
 
 
 @lru_cache(maxsize=1)
@@ -113,14 +116,27 @@ _CODE_PAREN = re.compile(r"\s*[（(]\s*([A-Za-z0-9_.]+(?:\s*[=:]\s*[A-Za-z0-9_.+
 _CODE_ASSIGN = re.compile(r"(?<![A-Za-z0-9_.])[A-Za-z][A-Za-z0-9]*(?:[_.][A-Za-z0-9]+)*\s*=\s*([A-Za-z0-9_.+\-]+)")
 
 
+# 利用者に見せる文では「こぶし」と書かない（2026-11-22。アプリの言葉を「手の甲」（カバーをかぶせる所）と「手」にそろえた）。
+# プロンプト（system v3）でも頼んでいるが、書いてしまったときのためにここで置き換える。長いものから順に
+_KOBUSHI = [("こぶしの外側", "手の甲"), ("握りこぶし", "握った手"), ("こぶし", "手")]
+
+
+def _no_kobushi(text: str) -> str:
+    for a, b in _KOBUSHI:
+        text = text.replace(a, b)
+    return text
+
+
 def clean_ja(text: str) -> str:
     """AI が書いた文から、項目名と英語の値を取り除く。
     - かっこの中が項目名だけ（tool_type=spoon、activity=eat、angle_deg など。「_」「=」「:」を含む英数字）なら、かっこごと消す
     - かっこの外の「項目名=値」は、値が数なら数だけ残し、英語の値なら両方消す
+    - 「こぶし」は「手の甲」「手」に置き換える
     「PLA（ポリ乳酸）」「60度（おすすめ）」「(PLA)」のような、ふつうのかっこは残す"""
     if not isinstance(text, str) or not text:
         return text
-    out = _CODE_PAREN.sub(lambda m: "" if re.search(r"[_=:]", m.group(1)) else m.group(0), text)
+    out = _no_kobushi(text)
+    out = _CODE_PAREN.sub(lambda m: "" if re.search(r"[_=:]", m.group(1)) else m.group(0), out)
     out = _CODE_ASSIGN.sub(lambda m: m.group(1) if re.fullmatch(r"[\d.+\-]+", m.group(1)) else "", out)
     out = re.sub(r"[ \t]{2,}", " ", out)
     out = re.sub(r"[ \t]+([。、，．）)])", r"\1", out)

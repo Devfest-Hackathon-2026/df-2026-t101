@@ -45,6 +45,12 @@ class AppColors {
   static const googleYellow = Color(0xFFFBBC04);
   static const googleGreen = Color(0xFF34A853);
 
+  /// カメラの画面（黒い背景）で、録画中に手が見えているか・見えないかを示す枠の色（S3。2026-11-22）。
+  /// 上の役割の色（success など）は黒の上では暗くて目立たないので、黒の上で明るく見える緑と黄色を使う。
+  /// スマホを回している間は画面が斜めになり文字が読めないので、色の面の大きい枠で伝える（文字とアイコンの札も残す）
+  static const cameraHandSeen = Color(0xFF34A853);
+  static const cameraHandLost = Color(0xFFFBBC04);
+
   /// 写真の後ろの暗い色（Figma の写真の枠と同じ）
   static const photoBackdrop = Color(0xFF2C3134);
 }

@@ -15,20 +15,41 @@ class MockBackend {
 
   final _cases = <String, Map<String, dynamic>>{};
   final _designs = <String, Map<String, dynamic>>{};
+  final _orders = <String, Map<String, dynamic>>{};
   final _rand = Random(7);
   int _n = 0;
 
   String _id(String p) =>
       '${p}_${(++_n).toString().padLeft(3, '0')}${_rand.nextInt(900) + 100}';
 
+  bool _seeded = false;
+
+  /// `?mock_seed=print` で開くと、印刷の画面まで進んだデモのケースを1つ用意する（発注の画面の確認・デモ動画用）
+  Future<void> _seed() async {
+    _seeded = true;
+    if (Uri.base.queryParameters['mock_seed'] != 'print') return;
+    final cid = (await handle('POST', '/v1/cases', {'title': '筆のカバー（見本）'}))['case_id'] as String;
+    await handle('PUT', '/v1/cases/$cid/requirements', {
+      'activity': 'draw', 'tool_type': 'brush', 'hand_side': 'right', 'tool_d_mm': 9.5, 'tool_shaft_shape': 'round',
+    });
+    final d = (await handle('POST', '/v1/cases/$cid/designs', {}))['design'] as Map;
+    _designs[d['design_id']]?['status'] = 'ready';
+    _cases[cid]?['status'] = 'approved';
+  }
+
   Future<dynamic> handle(String method, String path, Object? body) async {
     await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (!_seeded) await _seed();
     final b = (body is Map)
         ? Map<String, dynamic>.from(body)
         : <String, dynamic>{};
     final seg = Uri.parse(path).pathSegments;
     if (method == 'GET' && path == '/v1/cases') {
-      return {'cases': _cases.values.toList().reversed.toList()};
+      return {
+        'cases': [
+          for (final c in _cases.values.toList().reversed) {...c, 'latest_order': _latestOrder(c['case_id'] as String)},
+        ],
+      };
     }
     if (method == 'POST' && path == '/v1/cases') {
       final id = _id('c');
@@ -48,7 +69,23 @@ class MockBackend {
         ],
       };
     }
+    if (method == 'GET' && path == '/v1/reviews') {
+      // モックでは誰でもOT役。OTに頼んだケースを、OTのホームの欄に出す（ブラウザ1つで試せるように）
+      final all = [
+        for (final c in _cases.values.toList().reversed)
+          if (c['reviewer_email'] != null) _reviewItem(c),
+      ];
+      return {
+        'reviews': [
+          ...all.where((r) => r['approval_status'] == 'requested'),
+          ...all.where((r) => r['approval_status'] != 'requested'),
+        ],
+      };
+    }
     if (method == 'GET' && path == '/v1/parts') return _parts;
+    if (seg.length >= 2 && (seg[1] == 'fabricator' || seg[1] == 'orders')) {
+      return _orderRoutes(method, seg, Uri.parse(path).queryParameters, b);
+    }
     if (seg.length < 3 || seg[1] != 'cases') {
       throw ApiError('モックにないAPIです：$method $path', code: 'NOT_FOUND');
     }
@@ -104,6 +141,10 @@ class MockBackend {
           'case_status': c['status'],
           'turn_count': notes.length,
         };
+      case ('GET', 'orders'):
+        final list = _orders.values.where((o) => o['case_id'] == c['case_id']).toList()
+          ..sort((x, y) => '${y['created_at']}'.compareTo('${x['created_at']}'));
+        return {'orders': list};
       case ('POST', 'consent'):
         c['mesh_consent_at'] = DateTime.now().toIso8601String();
         c['consent_text_version'] = b['consent_text_version'];
@@ -210,7 +251,13 @@ class MockBackend {
         c['status'] = 'in_review';
         c['reviewer_email'] = b['reviewer_email'];
         final d = _designs[b['design_id']];
-        if (d != null) d['approval'] = {'status': 'requested'};
+        if (d != null) {
+          d['approval'] = {
+            'status': 'requested',
+            'requested_at': DateTime.now().toIso8601String(),
+            'message_ja': '${b['message_ja'] ?? ''}',
+          };
+        }
         return {
           'case_status': 'in_review',
           'review_url': 'http://localhost:5173/#/review/${c['case_id']}',
@@ -224,6 +271,8 @@ class MockBackend {
       if (method == 'POST' && act == 'refine') {
         return _refine(c, d, b);
       }
+      if (method == 'GET' && act == 'fabricators') return _fabricatorList(d);
+      if (method == 'POST' && act == 'orders') return _createOrder(c, d, b);
       if (method == 'POST' && act == 'prepare-print') {
         d['print_prepared_at'] = DateTime.now().toIso8601String();
         d['files']['print'] = _printFiles(d);
@@ -234,8 +283,10 @@ class MockBackend {
       }
       if (method == 'POST' && act == 'approval') {
         d['approval'] = {
+          ...?(d['approval'] as Map?)?.cast<String, dynamic>(),
           'status': b['decision'] == 'approve' ? 'approved' : 'rejected',
           'comment_ja': b['comment_ja'],
+          'decided_at': DateTime.now().toIso8601String(),
         };
         c['status'] = b['decision'] == 'approve' ? 'approved' : 'previewing';
         d['files']['print'] = _printFiles(d);
@@ -247,6 +298,206 @@ class MockBackend {
       }
     }
     throw ApiError('モックにないAPIです：$method $path', code: 'NOT_FOUND');
+  }
+
+  // ---------------------------------------------------------------- 発注（設計 §6.3。値は api/app/data/fabrication.json と同じ）
+  static const _fabricators = [
+    {'id': 'umikaze', 'name': 'うみかぜ3D工房', 'region': '大阪府 大阪市', 'fictional': true,
+     'base_fee_yen': 800, 'yen_per_gram': 20, 'lead_days': 3, 'felt_service': true, 'felt_fee_yen': 200},
+    {'id': 'hoshizora', 'name': 'ほしぞら出力舎', 'region': '北海道 札幌市', 'fictional': true,
+     'base_fee_yen': 600, 'yen_per_gram': 30, 'lead_days': 5, 'felt_service': false, 'felt_fee_yen': 0},
+    {'id': 'komorebi', 'name': 'こもれび造形ラボ', 'region': '東京都 品川区', 'fictional': true,
+     'base_fee_yen': 1000, 'yen_per_gram': 25, 'lead_days': 2, 'felt_service': true, 'felt_fee_yen': 200},
+  ];
+  static const _printer = {
+    'model': 'Bambu Lab A1', 'layer_mm': 0.2, 'infill_pct': 15,
+    'supports_ja': 'カバーの内側、クリップの輪の下', 'orientation_ja': 'ファイルの向きのまま',
+  };
+  static const _colorNames = {
+    '#2A9D8F': 'ティール', '#E76F51': 'コーラル', '#264653': '紺', '#E9C46A': '黄色', '#F4F1EA': '白', '#5A666B': '灰色',
+  };
+
+  /// GET /v1/reviews の1件（api/app/routes/misc.py の reviews と同じ形）
+  Map<String, dynamic> _reviewItem(Map<String, dynamic> c) {
+    final d = _designs[c['current_design_id']] ?? const <String, dynamic>{};
+    final ap = (d['approval'] as Map?) ?? const {};
+    return {
+      'case_id': c['case_id'],
+      'title': c['title'],
+      'case_status': c['status'],
+      'design_id': c['current_design_id'],
+      'revision': d['revision'],
+      'approval_status': ap['status'] ?? 'none',
+      'requested_at': ap['requested_at'],
+      'decided_at': ap['decided_at'],
+      'message_ja': ap['message_ja'] ?? '',
+      'requester_name': '見本の利用者',
+      'iso': (d['files'] as Map?)?['views']?['iso'],
+      'updated_at': c['updated_at'],
+    };
+  }
+
+  num _gramsOf(String key) => key == 'cover' ? 18 : (key.startsWith('tpu_sleeve') ? 3 : 4);
+  String _materialOf(String key) => key == 'cover' ? 'PLA' : (key.startsWith('tpu_sleeve') ? 'TPU' : 'PETG');
+  String _nameOf(String key, Map<String, dynamic> d) {
+    if (key == 'cover') return 'カバー';
+    if (key.startsWith('tpu_sleeve')) return 'TPUの筒';
+    for (final a in (d['attachments'] as List?) ?? const []) {
+      if ('${a['print_key'] ?? 'c_clip'}' == key) {
+        return 'C字クリップ（${toolJa[a['tool_type']] ?? '道具'}・${a['angle_deg']}度）';
+      }
+    }
+    return 'C字クリップ';
+  }
+
+  Map<String, dynamic> _estimates(Map<String, dynamic> d) => {
+    for (final k in ((d['files']?['print'] as Map?) ?? const {}).keys)
+      '$k': {'volume_mm3': 0, 'grams': _gramsOf('$k'), 'minutes': _gramsOf('$k') * 5 + 5},
+  };
+
+  int _r10(num v) => ((v / 10) + 0.5).floor() * 10;
+  Map<String, int> _quote(Map f, Map<String, dynamic> est, List keys, int qty, bool felt) {
+    final g = keys.fold<num>(0, (s, k) => s + (est['$k']?['grams'] as num? ?? 0));
+    final parts = _r10((f['base_fee_yen'] as num) + (f['yen_per_gram'] as num) * g * qty);
+    final fy = felt ? _r10((f['felt_fee_yen'] as num) * qty) : 0;
+    return {'parts_yen': parts, 'felt_yen': fy, 'total_yen': parts + fy};
+  }
+
+  void _assertOrderable(Map<String, dynamic> d) {
+    final approved = d['approval']?['status'] == 'approved';
+    if (!(approved || d['print_prepared_at'] != null) || (d['files']?['print'] as Map?)?.isNotEmpty != true) {
+      throw ApiError('OTの確認が済んだ版だけ発注できます', code: 'FORBIDDEN');
+    }
+  }
+
+  Map<String, dynamic> _fabricatorList(Map<String, dynamic> d) {
+    _assertOrderable(d);
+    final est = _estimates(d);
+    final keys = est.keys.toList();
+    final list = [for (final f in _fabricators) {...f, 'price': _quote(f, est, keys, 1, false)}]
+      ..sort((a, b) => ((a['price'] as Map)['total_yen'] as int).compareTo((b['price'] as Map)['total_yen'] as int));
+    final hex = '${d['style']?['color'] ?? '#2A9D8F'}';
+    return {
+      'fabricators': list,
+      'estimates': est,
+      'printer': _printer,
+      'materials': {for (final k in keys) k: _materialOf(k)},
+      'names': {for (final k in keys) k: _nameOf(k, d)},
+      'color': {'hex': hex, 'name_ja': _colorNames[hex] ?? ''},
+      'felt': {'thickness_mm': 1.0},
+      'delivery_days_after_ship': 2,
+    };
+  }
+
+  Map<String, dynamic> _createOrder(Map<String, dynamic> c, Map<String, dynamic> d, Map<String, dynamic> b) {
+    _assertOrderable(d);
+    final f = _fabricators.where((x) => x['id'] == b['fabricator_id']).firstOrNull;
+    final prints = Map<String, dynamic>.from(d['files']['print'] as Map);
+    final keys = [for (final k in (b['print_keys'] as List? ?? const [])) '$k'];
+    final qty = b['quantity'];
+    final felt = b['felt'] == true;
+    if (f == null || keys.isEmpty || keys.any((k) => !prints.containsKey(k)) || qty is! int || qty < 1 || qty > 3) {
+      throw ApiError('入力の形が正しくありません', code: 'INVALID_ARGUMENT');
+    }
+    if (felt && !(f['felt_service'] == true && keys.contains('cover'))) {
+      throw ApiError('この受託者・部品では、フェルトを貼って送れません', code: 'INVALID_ARGUMENT');
+    }
+    final est = _estimates(d);
+    final id = _id('o');
+    final now = DateTime.now().toUtc().toIso8601String();
+    final hex = '${d['style']?['color'] ?? '#2A9D8F'}';
+    final o = <String, dynamic>{
+      'order_id': id,
+      'display_id': id.substring(2, 6).toUpperCase(),
+      'case_id': c['case_id'],
+      'design_id': d['design_id'],
+      'fabricator_id': f['id'],
+      'fabricator_snapshot': {for (final k in ['name', 'region', 'lead_days', 'felt_service', 'felt_fee_yen', 'fictional']) k: f[k]},
+      'status': 'received',
+      'items': [
+        for (final k in keys)
+          {'print_key': k, 'name_ja': _nameOf(k, d), 'material': _materialOf(k), 'path': prints[k],
+           'grams': est[k]['grams'], 'minutes': est[k]['minutes']},
+      ],
+      'quantity': qty,
+      'color': {'hex': hex, 'name_ja': _colorNames[hex] ?? ''},
+      'felt': felt,
+      'price': _quote(f, est, keys, qty, felt),
+      'lead_days': f['lead_days'],
+      'printer': _printer,
+      'approval': d['approval']?['status'] == 'approved'
+          ? {'kind': 'ot', 'reviewer_email': c['reviewer_email'], 'decided_at': now}
+          : {'kind': 'demo'},
+      'shipping': Map<String, dynamic>.from(b['shipping'] as Map? ?? const {}),
+      'demo': c['demo'] == true,
+      'created_at': now,
+      'printing_at': null,
+      'shipped_at': null,
+      'delivered_at': null,
+      'cancelled_at': null,
+      'updated_at': now,
+    };
+    _orders[id] = o;
+    return {'order': o};
+  }
+
+  Map<String, dynamic>? _latestOrder(String caseId) {
+    final list = _orders.values.where((o) => o['case_id'] == caseId && o['status'] != 'cancelled').toList()
+      ..sort((x, y) => '${y['created_at']}'.compareTo('${x['created_at']}'));
+    return list.isEmpty ? null : {'order_id': list.first['order_id'], 'status': list.first['status']};
+  }
+
+  Map<String, dynamic> _move(String id, String from, String to) {
+    final o = _orders[id];
+    if (o == null) throw ApiError('注文が見つかりません', code: 'NOT_FOUND');
+    if (o['status'] != from) throw ApiError('注文の状態が変わりました。読み込み直してください', code: 'CONFLICT');
+    final now = DateTime.now().toUtc().toIso8601String();
+    o['status'] = to;
+    o['${to}_at'] = now;
+    o['updated_at'] = now;
+    return {'order': o};
+  }
+
+  /// 受託者に見せる形（OTのメールは見せない。取り消した注文の届け先は残さない。サーバーの fabricator_view と同じ）
+  Map<String, dynamic> _fabView(Map<String, dynamic> o) {
+    final ap = Map<String, dynamic>.from(o['approval'] as Map? ?? const {});
+    return {
+      for (final e in o.entries)
+        if (!const {'case_id', 'design_id', 'owner_uid'}.contains(e.key)) e.key: e.value,
+      'approval': {'kind': ap['kind'], if (ap['kind'] == 'ot') 'decided_at': ap['decided_at']},
+      if (o['status'] == 'cancelled') 'shipping': null,
+    };
+  }
+
+  Future<dynamic> _orderRoutes(String method, List<String> seg, Map<String, String> q, Map<String, dynamic> b) async {
+    // /v1/orders/{o}/(cancel|delivered)
+    if (seg[1] == 'orders' && seg.length == 4 && method == 'POST') {
+      if (seg[3] == 'cancel') return _move(seg[2], 'received', 'cancelled');
+      if (seg[3] == 'delivered') return _move(seg[2], 'shipped', 'delivered');
+    }
+    // /v1/fabricator/...（モックの利用者は受託者アカウントも兼ねる）
+    if (seg[1] == 'fabricator') {
+      if (method == 'GET' && seg.length == 3 && seg[2] == 'me') {
+        return {'fabricators': [for (final f in _fabricators) {'id': f['id'], 'name': f['name']}]};
+      }
+      if (method == 'GET' && seg.length == 3 && seg[2] == 'orders') {
+        final list = _orders.values.where((o) => o['fabricator_id'] == q['fabricator_id']).toList()
+          ..sort((x, y) => '${y['created_at']}'.compareTo('${x['created_at']}'));
+        return {'orders': [for (final o in list) _fabView(o)]};
+      }
+      if (seg.length >= 4 && seg[2] == 'orders') {
+        final o = _orders[seg[3]];
+        if (o == null) throw ApiError('注文が見つかりません', code: 'NOT_FOUND');
+        if (method == 'GET' && seg.length == 4) return {'order': _fabView(o)};
+        if (method == 'POST' && seg.length == 5 && seg[4] == 'status') {
+          final to = b['status'];
+          if (to == 'printing') return {'order': _fabView(_move(seg[3], 'received', 'printing')['order'] as Map<String, dynamic>)};
+          if (to == 'shipped') return {'order': _fabView(_move(seg[3], 'printing', 'shipped')['order'] as Map<String, dynamic>)};
+          throw ApiError('変えられる状態は「造形中」と「発送済み」だけです', code: 'INVALID_ARGUMENT');
+        }
+      }
+    }
+    throw ApiError('モックにないAPIです：$method ${seg.join('/')}', code: 'NOT_FOUND');
   }
 
   /// 印刷用ファイル：カバーと、取り付け具ごと（print_key → 角度のクリップ）
@@ -485,7 +736,7 @@ class MockBackend {
       'style': {'color': color, 'pattern': 'none'},
       'approval': {'status': 'none'},
       'summary_ja':
-          'こぶしの外側に沿うカバーに、道具の太さ${toolD}mmに合わせた$angle度のクリップを付けました。手のひら側と手首は開けてあります。${note == null ? '' : '（「$note」に合わせて直しました）'}',
+          '手の甲に沿うカバーに、道具の太さ${toolD}mmに合わせた$angle度のクリップを付けました。手のひら側と手首は開けてあります。${note == null ? '' : '（「$note」に合わせて直しました）'}',
     };
     _designs[id] = d;
     c['current_design_id'] = id;

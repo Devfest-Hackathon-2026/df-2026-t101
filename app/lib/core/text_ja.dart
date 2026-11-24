@@ -2,10 +2,15 @@
 /// 新しい版は生成APIで掃除済み。前に作った版の文も、表示の前にここを通す。
 /// - かっこの中が項目名だけ（tool_type=spoon、activity=eat、angle_deg など。「_」「=」「:」を含む英数字）なら、かっこごと消す
 /// - かっこの外の「項目名=値」は、値が数なら数だけ残し、英語の値なら両方消す
+/// - 「こぶし」は「手の甲」「手」に置き換える（2026-11-22。アプリの言葉をそろえた）
 /// 「PLA（ポリ乳酸）」「60度（おすすめ）」「(PLA)」のような、ふつうのかっこは残す
 String cleanJa(String text) {
   if (text.isEmpty) return text;
-  var out = text.replaceAllMapped(_codeParen, (m) => RegExp(r'[_=:]').hasMatch(m[1]!) ? '' : m[0]!);
+  var out = text;
+  for (final (a, b) in _kobushi) {
+    out = out.replaceAll(a, b);
+  }
+  out = out.replaceAllMapped(_codeParen, (m) => RegExp(r'[_=:]').hasMatch(m[1]!) ? '' : m[0]!);
   out = out.replaceAllMapped(_codeAssign, (m) => RegExp(r'^[\d.+\-]+$').hasMatch(m[1]!) ? m[1]! : '');
   out = out
       .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
@@ -13,6 +18,9 @@ String cleanJa(String text) {
       .replaceAll(RegExp(r'。{2,}'), '。');
   return out.trim();
 }
+
+/// 生成APIの _KOBUSHI と同じ。長いものから順に
+const _kobushi = [('こぶしの外側', '手の甲'), ('握りこぶし', '握った手'), ('こぶし', '手')];
 
 final _codeParen = RegExp(r'\s*[（(]\s*([A-Za-z0-9_.]+(?:\s*[=:]\s*[A-Za-z0-9_.+\-]+)?)\s*[）)]');
 final _codeAssign = RegExp(r'(?<![A-Za-z0-9_.])[A-Za-z][A-Za-z0-9]*(?:[_.][A-Za-z0-9]+)*\s*=\s*([A-Za-z0-9_.+\-]+)');

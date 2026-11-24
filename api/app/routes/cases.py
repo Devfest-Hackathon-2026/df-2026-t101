@@ -36,7 +36,19 @@ def create_case(body: dict = Body(default={}), user: User = Depends(current_user
 
 @router.get("/v1/cases")
 def list_cases(user: User = Depends(current_user)):
-    out = [case_view(cid, c) for cid, c in db.list("cases") if c.get("owner_uid") == user.uid]
+    latest: dict[str, tuple[str, dict]] = {}
+    for oid, o in db.list("orders"):  # ケースごとの、いちばん新しい取り消し以外の注文（ホームの札）
+        if o.get("owner_uid") != user.uid or o.get("status") == "cancelled":
+            continue
+        cur = latest.get(o.get("case_id"))
+        if cur is None or str(o.get("created_at", "")) > str(cur[1].get("created_at", "")):
+            latest[o.get("case_id")] = (oid, o)
+    out = []
+    for cid, c in db.list("cases"):
+        if c.get("owner_uid") != user.uid:
+            continue
+        lo = latest.get(cid)
+        out.append({**case_view(cid, c), "latest_order": {"order_id": lo[0], "status": lo[1]["status"]} if lo else None})
     out.sort(key=lambda c: str(c.get("updated_at", "")), reverse=True)
     return {"cases": out}
 
@@ -57,6 +69,9 @@ def delete_case(case_id: str, user: User = Depends(current_user)):
     for sub in ("designs", "messages"):
         for doc_id, _ in db.list(f"cases/{case_id}/{sub}"):
             db.delete(f"cases/{case_id}/{sub}/{doc_id}")
+    for oid, o in db.list("orders"):  # 届け先を残さない（発注の設計 §6.1）
+        if o.get("case_id") == case_id:
+            db.delete(f"orders/{oid}")
     db.delete(f"cases/{case_id}")
     return {"deleted": True, "case_id": case_id, "files_deleted": n_files}
 
@@ -88,6 +103,22 @@ def put_requirements(case_id: str, body: dict = Body(...), user: User = Depends(
     return {"requirements": req, "case_status": status}
 
 
+def interview_history(msgs: list[tuple[str, dict]]) -> list[dict]:
+    """Gemini に渡す会話。回の順に、同じ回は利用者 → AI の順にする（ID の並びでは m01a が m01u より先に来る）。
+    渡すのは role・text・choices だけ（created_at は要らず、日時の型はそのままでは JSON にできない）"""
+    def key(item: tuple[str, dict]):
+        mid, _ = item
+        return (mid[:-1], 0 if mid.endswith("u") else 1)
+
+    out = []
+    for _, m in sorted(msgs, key=key):
+        x = {"role": m.get("role"), "text": m.get("text", "")}
+        if m.get("choices"):
+            x["choices"] = m["choices"]
+        out.append(x)
+    return out
+
+
 @router.post("/v1/cases/{case_id}/interview")
 def interview(case_id: str, body: dict = Body(...), user: User = Depends(current_user)):
     case = owned_case(case_id, user)
@@ -100,7 +131,7 @@ def interview(case_id: str, body: dict = Body(...), user: User = Depends(current
         raise ApiError("INVALID_ARGUMENT", "チャットは3回までです")
     ops.require_generation_enabled()
     ops.count_usage(user.uid, "interviews")
-    history = [m for _, m in db.list(f"cases/{case_id}/messages")]
+    history = interview_history(db.list(f"cases/{case_id}/messages"))
     usage = gemini.Usage()
     out = gemini.interview(case.get("requirements") or {}, history, msg, turn, usage)
     t = now()
