@@ -88,9 +88,15 @@ def _fake_geometry():
             path = Path(workdir) / f"{name}.png"
             Image.new("RGB", (32, 24), (200, 200, 200)).save(path)
             views.append(str(path))
-        return {"files": out, "views": views, "cover_shell_sha256": "ab" * 32, "checks": [], "violations": [],
-                "timings_ms": {"openscad": 5}, "extra_clips": extra}
+        res = {"files": out, "views": views, "cover_shell_sha256": "ab" * 32, "checks": [], "violations": [],
+               "timings_ms": {"openscad": 5}, "extra_clips": extra}
+        if m.rail_moves_with_angle:   # 本物と同じく、主な留め具の角度でレールの台がずれる
+            ang = int((params.get("c_clip") or {}).get("angle_deg", 70))
+            res["placement"] = {"rail_origin": [-50.0, 55.0, 8.0 + (2.0 if ang == 70 else 0.0)],
+                                "rail_frame": [[0.70711, 0.0, 0.70711], [0.0, 1.0, 0.0], [-0.70711, 0.0, 0.70711]]}
+        return res
 
+    m.rail_moves_with_angle = False
     m.GeometryError, m.prepare_measurement, m.make_design, m.calls = GeometryError, prepare_measurement, make_design, calls
     return m
 
@@ -520,7 +526,7 @@ def test_failed_extra_clip_is_left_out(client, monkeypatch):
     d = client.post(f"/v1/cases/{cid}/designs", json={}, headers=H).json()["design"]
     assert [a["tool_type"] for a in d["attachments"]] == ["brush"] and d["status"] == "needs_attention"
     assert d["attachments"][0]["files"]["preview_stl"].endswith("c_clip_70.preview.stl")
-    assert any(i["description_ja"].startswith("スプーンのクリップは作れませんでした（") for i in d["review"]["unresolved_issues"])
+    assert any(i["description_ja"].startswith("スプーンの留め具は作れませんでした（") for i in d["review"]["unresolved_issues"])
 
 
 def test_failed_primary_clip_promotes_next(client, monkeypatch):
@@ -544,7 +550,7 @@ def test_failed_primary_clip_promotes_next(client, monkeypatch):
     c_clip = {p["name"]: p["value"] for p in d["params"] if p["part_id"] == "c_clip"}
     assert c_clip["tool_d_mm"] == 11.5 and c_clip["angle_deg"] == 60
     assert d["files"]["parts"]["c_clip"]["preview_stl"].endswith("c_clip_60.preview.stl")
-    assert any(i["description_ja"].startswith("筆のクリップは作れませんでした（") for i in d["review"]["unresolved_issues"])
+    assert any(i["description_ja"].startswith("筆の留め具は作れませんでした（") for i in d["review"]["unresolved_issues"])
 
 
 def test_unrenderable_extra_clip_is_left_out(client, monkeypatch):
@@ -562,7 +568,7 @@ def test_unrenderable_extra_clip_is_left_out(client, monkeypatch):
     assert r.status_code == 200, r.text
     d = r.json()["design"]
     assert [a["tool_type"] for a in d["attachments"]] == ["brush"] and d["status"] == "needs_attention"
-    assert any(i["description_ja"] == "スプーンのクリップは作れませんでした（形を描けませんでした）"
+    assert any(i["description_ja"] == "スプーンの留め具は作れませんでした（形を描けませんでした）"
                for i in d["review"]["unresolved_issues"])
 
 
@@ -943,3 +949,49 @@ def test_reviews_inbox_lists_only_my_requests(client):
     assert r.status_code == 200, r.text
     [item] = mine()
     assert item["approval_status"] == "rejected" and item["decided_at"]
+
+
+def test_tpu_sleeve_is_not_made_for_the_vise(client, monkeypatch):
+    """AI が TPUの筒を選んでも作らない（C字クリップの輪の内側に入れる部品。留め具は万力式にした 2026-11-24）"""
+    from app.gemini import mock as gmock
+    orig = gmock.select
+
+    def with_sleeve(requirements):
+        out = orig(requirements)
+        out["parts"].append({"part_id": "tpu_sleeve", "variant": "standard", "reason_ja": "滑りにくくします"})
+        return out
+    monkeypatch.setattr(gmock, "select", with_sleeve)
+    cid, d = _design_with_tools(client, None)
+    assert "tpu_sleeve" not in [p["part_id"] for p in d["parts"]]
+    assert "c_clip" in [p["part_id"] for p in d["parts"]]
+
+
+def test_cover_preview_is_redrawn_when_the_rail_moves(client, monkeypatch):
+    """主な留め具の角度でレールの台がずれたら、カバーのプレビューは前の版のものを使わない（留め具がレールから浮いて
+    見えた。2026-11-24）。台が同じ所なら今までどおり前の版のものを使う"""
+    monkeypatch.setattr(GEOM, "rail_moves_with_angle", True)
+    cid, d = _design_with_tools(client, None)            # 70度
+    assert db.get(f"cases/{cid}/designs/{d['design_id']}")["rail_placement"]["frame"]["y"] == [0.0, 1.0, 0.0]
+    n = client.post(f"/v1/cases/{cid}/designs/{d['design_id']}/refine", headers=H, json={"clip_angle_deg": 60}).json()["design"]
+    assert _cover_bytes(n) != _cover_bytes(d)              # 台がずれた
+    m = client.post(f"/v1/cases/{cid}/designs/{n['design_id']}/refine", headers=H, json={"clip_angle_deg": 80}).json()["design"]
+    assert _cover_bytes(m) == _cover_bytes(n)              # 60度と80度は台が同じ所
+
+
+@pytest.mark.parametrize("value,expect", [
+    ({"gap_hand_mm": 13.4, "gap_cover_mm": 10.1, "reach_mm": 125.0}, "筆の先が机に届きにくい角度です。筆を留め具から長めに出すか"),
+    ({"gap_hand_mm": 0.7, "gap_cover_mm": 10.1, "reach_mm": 80.0}, "筆が手やカバーに当たります。留め具の角度を立ててみてください"),
+])
+def test_tool_path_warning_says_the_real_reason(client, monkeypatch, value, expect):
+    """道具の通り道（R6h）の知らせは、当たるのか・机に届かないのかを分けて書く（2026-11-24。手から 13mm 離れていても
+    「当たるか、届きません」と出て、当たると読めた）"""
+    orig = GEOM.make_design
+
+    def with_r6h(*a, **k):
+        r = orig(*a, **k)
+        r["checks"] = r["checks"] + [{"rule": "R6h", "ok": False, "value": value, "message_ja": "x", "severity": "warning"}]
+        return r
+    monkeypatch.setattr(GEOM, "make_design", with_r6h)
+    cid, d = _design_with_tools(client, [("draw", "brush", 9.5, "round")])
+    issues = [i["description_ja"] for i in d["review"]["unresolved_issues"]]
+    assert any(i.startswith(expect) for i in issues), issues

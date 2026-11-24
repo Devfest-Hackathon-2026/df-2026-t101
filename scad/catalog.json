@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-08.3",
+  "version": "2026-11-24.1",
   "units": { "length": "mm", "angle": "deg" },
   "fixed": {
     "NOZZLE_MM": 0.4,
@@ -83,7 +83,7 @@
       "id": "rail",
       "required": true,
       "variants": ["standard"],
-      "description_ja": "C字クリップを横から差し込むアリ溝のレール。人差し指の基節の、親指側かつ手の甲側の外面。寸法は固定（すべてのクリップと合うように）",
+      "description_ja": "道具の留め具を横から差し込むアリ溝のレール。人差し指の基節の、親指側かつ手の甲側の外面。寸法は固定（すべての留め具と合うように）",
       "params": [
         { "name": "width_mm", "unit": "mm", "type": "number", "default": 10, "min": 10, "max": 10, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "溝の口の幅" },
         { "name": "depth_mm", "unit": "mm", "type": "number", "default": 4, "min": 4, "max": 4, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "溝の深さ" },
@@ -98,28 +98,28 @@
       "id": "c_clip",
       "required": true,
       "variants": ["standard"],
-      "description_ja": "道具の太さぴったりのC字クリップ。押し込むだけで留まり、引き抜くだけで外れる。レールに横から差し込み、カチッと止まる。角度違いを差し替える",
+      "description_ja": "万力式の留め具（2026-11-24 に C字クリップから置き換えた）。V字の受けに道具の柄を寄せ、T字のつまみのねじで締める。道具の太さ±2.5mmを1つで挟める。受け具とねじの2つを1枚で刷る。レールに横から差し込み、カチッと止まる。角度違いを差し替える",
       "params": [
         { "name": "tool_d_mm", "unit": "mm", "type": "number", "default": 8.5, "min": 3.0, "max": 20.0, "choices": null, "decided_by": "interview", "ai_delta": 0.0, "shell": false, "description_ja": "道具の柄の太さ（挟む所）。聞き取りの値。AIは変えない" },
         { "name": "inner_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "輪の内径 ＝ 道具の太さ − しめしろ（TPUの筒を使うときは筒の外径）" },
-        { "name": "wall_mm", "unit": "mm", "type": "number", "default": 2.0, "min": 1.6, "max": 3.0, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "輪の壁の厚さ。固定（クリップは先に作っておいた固定STLから選ぶ。2026-11-08）。11/9の clip_test で値を決め直す" },
+        { "name": "wall_mm", "unit": "mm", "type": "number", "default": 2.0, "min": 1.6, "max": 3.0, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "C字クリップの輪の壁の厚さ。万力式では使わない（固定）" },
         { "name": "opening_ratio", "unit": "ratio", "type": "number", "default": 0.75, "min": 0.70, "max": 0.80, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "開きの幅 ÷ 道具の太さ。固定（同上）" },
         { "name": "height_mm", "unit": "mm", "type": "number", "default": 20.0, "min": 8.0, "max": 20.0, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "輪の高さ（道具を挟む長さ）。固定。2026-11-08 に 12 から 20 にした（ペン先までのてこが約90mmあり、12mm ではぐらついたため）" },
-        { "name": "angle_deg", "unit": "deg", "type": "enum", "default": 70, "min": null, "max": null, "choices": [60, 70, 80], "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "道具の立て具合（机に手の甲を上にして置いたときの、机に対する道具の傾き）。クリップはこぶしの親指側の横に道具を立てる。基準は筆70・ペン60。AIはやりたいことから選び、理由を書く。ユーザーがプレビューで変えられる（2026-11-08 に 0/20/40 から変えた）" },
+        { "name": "angle_deg", "unit": "deg", "type": "enum", "default": 70, "min": null, "max": null, "choices": [60, 70, 80], "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "道具の立て具合（机に手の甲を上にして置いたときの、机に対する道具の傾き）。留め具はこぶしの親指側の横に道具を立てる。基準は筆70・ペン60。AIはやりたいことから選び、理由を書く。ユーザーがプレビューで変えられる（2026-11-08 に 0/20/40 から変えた）" },
         { "name": "grip_ribs", "unit": "bool", "type": "boolean", "default": true, "min": null, "max": null, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "内側の細い溝（道具が滑りにくくなる）。固定（同上）" },
-        { "name": "count", "unit": "count", "type": "integer", "default": 1, "min": 1, "max": 2, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "クリップの数（先が細くなる筆の柄なら2を勧めてよい）。MVPのレールは1本なので、2個目は同じ形の予備として刷る（要確認）" },
-        { "name": "tpu_sleeve", "unit": "bool", "type": "boolean", "default": false, "min": null, "max": null, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "内側にTPUの筒を入れる。MVPでは使わない（固定。クリップを固定STLにしたため。2026-11-08）" }
+        { "name": "count", "unit": "count", "type": "integer", "default": 1, "min": 1, "max": 2, "choices": null, "decided_by": "ai", "ai_delta": null, "shell": false, "description_ja": "留め具の数（先が細くなる筆の柄なら2を勧めてよい）。MVPのレールは1本なので、2個目は同じ形の予備として刷る（要確認）" },
+        { "name": "tpu_sleeve", "unit": "bool", "type": "boolean", "default": false, "min": null, "max": null, "choices": null, "decided_by": "fixed", "ai_delta": null, "shell": false, "description_ja": "内側にTPUの筒を入れる。MVPでは使わない（固定。2026-11-08）" }
       ]
     },
     {
       "id": "tpu_sleeve",
       "required": false,
       "variants": ["standard"],
-      "description_ja": "C字クリップの内側に入れるTPUの筒（任意）。挟むのを柔らかいTPUに任せる",
+      "description_ja": "留め具の内側に入れるTPUの筒（任意。万力式では使わない）。挟むのを柔らかいTPUに任せる",
       "params": [
         { "name": "inner_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "道具の太さ − 0.2" },
-        { "name": "outer_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "内径 ＋ 2 × TPU_SLEEVE_WALL_MM（＝クリップの内径）" },
-        { "name": "length_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "クリップの高さと同じ" }
+        { "name": "outer_d_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "内径 ＋ 2 × TPU_SLEEVE_WALL_MM" },
+        { "name": "length_mm", "unit": "mm", "type": "number", "default": null, "min": null, "max": null, "choices": null, "decided_by": "server", "ai_delta": null, "shell": false, "description_ja": "留め具の高さと同じ" }
       ]
     }
   ],

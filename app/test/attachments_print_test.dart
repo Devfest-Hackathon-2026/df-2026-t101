@@ -58,14 +58,14 @@ void main() {
   });
 
   group('S10 の行', () {
-    test('取り付け具1つ：今までと同じ「C字クリップ（70度）」、案内の行なし', () {
+    test('取り付け具1つ：今までと同じ「留め具（70度）」、案内の行なし', () {
       final d = {
         'params': [{'part_id': 'c_clip', 'name': 'angle_deg', 'value': 70}],
         'files': {'print': {'cover': 'demo/cover.print.stl', 'c_clip': 'demo/c_clip_70.print.stl'}},
       };
       final rows = printRows(d, null);
       expect(rows.map((r) => r.key), ['cover', 'c_clip']);
-      expect(rows.map((r) => r.name), ['カバー', 'C字クリップ（70度）']);
+      expect(rows.map((r) => r.name), ['カバー', '留め具（70度）']);
       expect(rows[1].path, 'demo/c_clip_70.print.stl');
       expect(rows[1].partId, 'c_clip');
       expect(showSwapGuide(d), isFalse);
@@ -77,7 +77,7 @@ void main() {
       final dd = m(r['design']);
       final rows = printRows(dd, null);
       expect(rows.map((r) => r.key), ['cover', 'c_clip', 'c_clip_a2']);
-      expect(rows.map((r) => r.name), ['カバー', 'ペン クリップ（9mm・60度）', 'スプーン クリップ（11.5mm・60度）']);
+      expect(rows.map((r) => r.name), ['カバー', 'ペン 留め具（9mm・60度）', 'スプーン 留め具（11.5mm・60度）']);
       expect(rows[2].path, 'demo/c_clip_60.print.stl');
       expect(showSwapGuide(dd), isTrue);
     });
@@ -90,7 +90,7 @@ void main() {
         ],
         'files': {'print': {'cover': 'c.stl', 'c_clip': 'a.stl'}},
       };
-      expect(printRows(d, null).map((r) => r.name), ['カバー', 'ペン 8mm クリップ（8mm・60度）']);
+      expect(printRows(d, null).map((r) => r.name), ['カバー', 'ペン 8mm 留め具（8mm・60度）']);
     });
 
     test('古い版は要求の道具で呼ぶ。TPUの筒は最後に残す', () {
@@ -99,7 +99,7 @@ void main() {
         'files': {'print': {'cover': 'c.stl', 'c_clip': 'a.stl', 'tpu_sleeve': 't.stl'}},
       };
       final rows = printRows(d, {'tool_type': 'brush', 'tool_d_mm': 8});
-      expect(rows.map((r) => r.name), ['カバー', 'C字クリップ（70度）', 'TPUの筒']);
+      expect(rows.map((r) => r.name), ['カバー', '留め具（70度）', 'TPUの筒']);
     });
   });
 
@@ -131,7 +131,7 @@ void main() {
           {
             'id': 'a1', 'tool_type': 'pen', 'tool_d_mm': 9.0, 'angle_deg': 60,
             'checks': [
-              {'rule': 'R6f', 'ok': true, 'value': 1, 'message_ja': 'クリップの開きは足りています'},
+              {'rule': 'R6f', 'ok': true, 'value': 1, 'message_ja': '留め具の開きは足りています'},
               {'rule': 'R6h', 'ok': false, 'value': 3, 'message_ja': '道具が当たります'},
             ],
           },
@@ -179,18 +179,18 @@ void main() {
       expect(versionSummary(d), 'カバー 2.5mm・ペン 6mm 60度・ペン 9mm 70度');
     });
 
-    test('取り付け具が1つ・古い版：今までどおり「クリップ」', () {
+    test('取り付け具が1つ・古い版：今までどおり「留め具」', () {
       final one = {
         'params': [cover],
         'attachments': [
           {'id': 'a1', 'tool_type': 'pen', 'tool_d_mm': 6.0, 'angle_deg': 60},
         ],
       };
-      expect(versionSummary(one), 'カバー 2.5mm・クリップ 60度');
+      expect(versionSummary(one), 'カバー 2.5mm・留め具 60度');
       final old = {
         'params': [cover, {'part_id': 'c_clip', 'name': 'angle_deg', 'value': 70}],
       };
-      expect(versionSummary(old), 'カバー 2.5mm・クリップ 70度');
+      expect(versionSummary(old), 'カバー 2.5mm・留め具 70度');
     });
   });
 }

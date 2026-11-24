@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 
-from .clipgeom import opening_mm
+from .clipgeom import grip_range_mm
 from .consts import fixed
 
 PALM_FACE_CHECK_DEG = 50.0
@@ -94,24 +94,23 @@ def check_cover(cover: trimesh.Trimesh, hand_ref: HandRef, cut: dict, bed=None) 
 
 
 def check_clip(clip_print: trimesh.Trimesh, clip: dict) -> list[dict]:
+    """R6f：道具の留め具（万力式。刷る並び＝受け具とねじの 2 つ）。2026-11-24 に C字クリップから置き換えた。
+    どちらも閉じた立体で、受け具とねじの 2 つのかたまりになっているか。挟める太さを記録する"""
     out = []
-    op = opening_mm(clip)
     td = float(clip["tool_d_mm"])
-    ok_open = op < td - 0.5
+    lo, hi = grip_range_mm(clip)
     wt = clip_print.is_watertight
-    parts = len(clip_print.split(only_watertight=False))
-    area = overhang_area(clip_print, np.array([0, 0, -1.0]))
-    # 机に接する底（z≈0）と入口の面取りは数えないので、底の面は除く
-    n = clip_print.face_normals
-    bottom = (clip_print.triangles_center[:, 2] < 0.3) & (n[:, 2] < -0.99)
-    area -= float(clip_print.area_faces[bottom].sum())
-    out.append(_item("R6f", ok_open and wt and parts == 1,
-                     {"opening_mm": round(op, 2), "tool_d_mm": td, "watertight": wt, "parts": parts,
-                      "overhang_mm2": round(area, 1)},
-                     "クリップの開きは道具より狭く、1つのかたまり" if ok_open else "クリップの開きが広すぎて道具が抜けます"))
-    if area > 50.0:
-        out.append(_item("R6f_overhang", True, {"overhang_mm2": round(area, 1)},
-                         "この角度のクリップは、サポートが要るかもしれません", severity="info"))
+    # 体積のない小さな切れ端（1mm³ 未満）は数えない（ねじ山の面が残すことがある）
+    parts = len([p for p in clip_print.split(only_watertight=False) if abs(p.volume) >= 1.0 or p.area >= 5.0])
+    ok = wt and parts == 2
+    out.append(_item("R6f", ok,
+                     {"tool_d_mm": td, "grip_min_mm": round(lo, 2), "grip_max_mm": round(hi, 2),
+                      "watertight": wt, "parts": parts},
+                     f"留め具は受け具とねじの2つで、太さ {lo:g}〜{hi:g}mm の道具を挟める" if ok
+                     else "留め具が閉じた立体になっていないか、受け具とねじの2つに分かれていません"))
+    # 受け具は道具の軸を立てて刷るので、レールに入る舌の下にサポートが要る（ねじ山を横に崩さないため。ADR-0005）
+    out.append(_item("R6f_overhang", True, {"supports": "tongue"},
+                     "留め具は、レールに入る舌の下にサポートを付けて刷ります", severity="info"))
     return out
 
 
@@ -157,8 +156,9 @@ def check_slits_open(cover: trimesh.Trimesh | None, sl: dict, wall_t: float) -> 
                   fix_hint="strap_width_mm を狭くする", severity="warning")]
 
 
-TOOL_TIP_MM = 100.0    # クリップから道具の先まで（ペン・筆の目安）
-TOOL_REAR_MM = 50.0    # クリップから道具の後ろの端まで
+TOOL_TIP_MM = 120.0    # 留め具から道具の先まで出せる長さ。万力式は道具を差し込む深さを変えられるので、長さ約140mmのペンを
+                       # 120mm まで出せる（2026-11-24 に 100 から。100 では 101mm で「届かない」と出た）
+TOOL_REAR_MM = 50.0    # 留め具から道具の後ろの端まで
 TOOL_HAND_GAP_MM = 2.0   # 道具の面と手の間にほしいすき間
 TOOL_COVER_GAP_MM = 1.0
 
@@ -185,11 +185,12 @@ def check_tool_path(hand_ref: HandRef, cover: trimesh.Trimesh | None, rail: dict
     tilt = math.degrees(math.asin(float(np.clip(a[2], -1, 1))))
     tip = c + reach * a if math.isfinite(reach) else None
     mcp = Jc["index"][0]
-    ok = gap_hand >= TOOL_HAND_GAP_MM and (gap_cover is None or gap_cover >= TOOL_COVER_GAP_MM) and reach <= TOOL_TIP_MM
-    value = {"gap_hand_mm": round(gap_hand, 1), "gap_cover_mm": None if gap_cover is None else round(gap_cover, 1),
+    hits = gap_hand < TOOL_HAND_GAP_MM or (gap_cover is not None and gap_cover < TOOL_COVER_GAP_MM)
+    ok = not hits and reach <= TOOL_TIP_MM
+    value = {"hits": bool(hits), "gap_hand_mm": round(gap_hand, 1), "gap_cover_mm": None if gap_cover is None else round(gap_cover, 1),
              "tilt_deg": round(tilt, 0), "reach_mm": None if not math.isfinite(reach) else round(float(reach), 0),
              "tip_from_index_mcp_mm": None if tip is None else [round(float(v), 0) for v in (tip - mcp)[:2]]}
     msg = "道具は手・カバーに当たらず、先が机に届く" if ok else \
-        ("道具が手かカバーに当たります" if (gap_hand < TOOL_HAND_GAP_MM or (gap_cover is not None and gap_cover < TOOL_COVER_GAP_MM))
-         else "道具の先が机に届きません（寝すぎ）")
+        ("道具が手かカバーに当たります" if hits
+         else "道具の先が机に届きにくい角度です（道具を留め具から長めに出すか、角度を立てる）")
     return [_item("R6h", ok, value, msg, fix_hint="c_clip.angle_deg を立てる", severity="warning")]

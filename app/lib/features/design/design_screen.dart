@@ -19,8 +19,8 @@ import 'package:jijogu_app/core/viewer/viewer_3d.dart';
 const _stepJa = {
   'selecting': '部品を選んでいます',
   'dimensioning': '寸法を決めています',
-  'shelling': 'カバーの形を作っています（手の甲に沿った殻とクリップ）',
-  'rendering': 'カバーの形を作っています（手の甲に沿った殻とクリップ）',
+  'shelling': 'カバーの形を作っています（手の甲に沿った殻と留め具）',
+  'rendering': 'カバーの形を作っています（手の甲に沿った殻と留め具）',
   'reviewing': '画像で確認しています',
 };
 const _steps = ['selecting', 'dimensioning', 'shelling', 'reviewing'];
@@ -428,7 +428,7 @@ class _DesignScreenState extends State<DesignScreen> {
       if (_case != null)
         const InfoCard(
           tone: NoticeTone.info,
-          child: Text('まだデータができていません。「形を作る」を押すと、カバーとクリップを自動で設計します（1〜3分）。'),
+          child: Text('まだデータができていません。「形を作る」を押すと、カバーと留め具を自動で設計します（1〜3分）。'),
         ),
     ],
   );
@@ -516,7 +516,7 @@ class _DesignScreenState extends State<DesignScreen> {
     final demo = _case?['demo'] == true;
     final color = '${d['style']?['color'] ?? '#2A9D8F'}';
     final parts = Map<String, dynamic>.from(d['files']?['parts'] ?? {});
-    // 選んでいる取り付け具。角度・寸法・3D表示のクリップと道具の棒はこの取り付け具のもの
+    // 選んでいる取り付け具。角度・寸法・3D表示の留め具と道具の棒はこの取り付け具のもの
     final atts = _attachments(d);
     final att = atts.firstWhere((a) => a['id'] == _attId, orElse: () => atts.first);
     final multi = atts.length > 1;
@@ -606,7 +606,7 @@ class _DesignScreenState extends State<DesignScreen> {
               : Viewer3D(
                   handPath: d['hand_overlay']?['mesh_path'],
                   parts: [
-                    // クリップは選んでいる取り付け具のもの
+                    // 留め具は選んでいる取り付け具のもの
                     for (final e in parts.entries)
                       PartFile(
                         e.key,
@@ -621,7 +621,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   toolType: att['tool_type'] as String?,
                   handSide: _case?['requirements']?['hand_side'] as String?,
                   showHand: _showHand,
-                  label: '3Dの表示。カバーとクリップと道具を、手に着けた形で見られます。ドラッグで回せます',
+                  label: '3Dの表示。カバーと留め具と道具を、手に着けた形で見られます。ドラッグで回せます',
                 ),
         ),
         // 手を重ねる（3D表示の上に重ねると、Webでは押せないことがあるので下に置く）
@@ -644,8 +644,8 @@ class _DesignScreenState extends State<DesignScreen> {
         ),
         _mainDims(d, toolD, angle, att),
         _summary(d),
-        // クリップの角度（ADR-0013）。取り付け具が2つ以上なら、選んでいる取り付け具の角度
-        _Heading(multi ? 'クリップの角度（$label）' : 'クリップの角度'),
+        // 留め具の角度（ADR-0013）。取り付け具が2つ以上なら、選んでいる取り付け具の角度
+        _Heading(multi ? '留め具の角度（$label）' : '留め具の角度'),
         if (multi && ja(att['reason_ja']).isNotEmpty)
           Text(ja(att['reason_ja']), style: _noteStyle),
         IntrinsicHeight(
@@ -692,7 +692,7 @@ class _DesignScreenState extends State<DesignScreen> {
         ),
         if (locked)
           Text('OTに頼んだあとに角度を変えると、新しい形になるため、もう一度確認を頼む必要があります。', style: _noteStyle),
-        // 取り付け具（道具ごとのクリップ）の太さを直す・足す（ADR-0014 §4）
+        // 取り付け具（道具ごとの留め具）の太さを直す・足す（ADR-0014 §4）
         OutlinedButton.icon(
           onPressed: idle ? () => _openToolSheet(d, fix: att, label: label) : null,
           icon: const Icon(Icons.straighten_rounded),
@@ -706,7 +706,7 @@ class _DesignScreenState extends State<DesignScreen> {
           style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
         ),
         Text(
-          addBlocked ?? 'カバーはそのままで、別の道具のクリップを足せます（新しい形として保存されます）。',
+          addBlocked ?? 'カバーはそのままで、別の道具の留め具を足せます（新しい形として保存されます）。',
           style: _noteStyle,
         ),
         const _Heading('言葉で直す'),
@@ -721,7 +721,7 @@ class _DesignScreenState extends State<DesignScreen> {
               'もう少しきつく',
               'カバーを薄く',
               '空気穴を増やす',
-              // 「クリップを外しやすく」は 2026-11-22 にやめた
+              // 「留め具を外しやすく」は 2026-11-22 にやめた
             ])
               Builder(
                 builder: (_) {
@@ -925,13 +925,15 @@ class _DesignScreenState extends State<DesignScreen> {
   /// 主な寸法（Figma：2列のタイル）
   Widget _mainDims(Map<String, dynamic> d, double toolD, int? angle, Map<String, dynamic> att) {
     final t = _param('cover', 'cover_thickness_mm');
-    // params の c_clip は主な取り付け具の値なので、主でないときは内径を出さない
-    final inner = att['primary'] == false ? null : _param('c_clip', 'inner_d_mm');
+    // 万力式の留め具が挟める太さ（道具の太さ±2.5mm。穴はねじが通る太さ12mm用より小さくしない。
+    // api/app/geometry/clipgeom.py の grip_range_mm と同じ式。2026-11-24）
+    final gripLo = math.max(2.5, toolD - 2.5);
+    final gripHi = math.max(12.0, toolD + 2.5);
     final tiles = [
       _DimTile('カバーの厚み', '${t ?? '—'} mm'),
       _DimTile('道具の太さ', '${toolD.toStringAsFixed(1)} mm'),
-      if (inner != null) _DimTile('クリップの内径', '$inner mm'),
-      _DimTile('クリップの角度', '${angle ?? '—'}度'),
+      _DimTile('挟める太さ', '${gripLo.toStringAsFixed(1)}〜${gripHi.toStringAsFixed(1)} mm'),
+      _DimTile('留め具の角度', '${angle ?? '—'}度'),
     ];
     final estimated = att['tool_d_source'] == 'category';
     return Column(
@@ -1033,7 +1035,7 @@ class _DesignScreenState extends State<DesignScreen> {
   Widget _attachmentTabs(List<Map<String, dynamic>> atts, String? selected) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const _SubLabel('見るクリップ（道具ごと）'),
+      const _SubLabel('見る留め具（道具ごと）'),
       const SizedBox(height: 4),
       Wrap(
         spacing: 8,
@@ -1045,7 +1047,7 @@ class _DesignScreenState extends State<DesignScreen> {
               selected: a['id'] == selected,
               materialTapTargetSize: MaterialTapTargetSize.padded,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              tooltip: '${attachmentLabel(a, atts)}のクリップを見る',
+              tooltip: '${attachmentLabel(a, atts)}の留め具を見る',
               // 選んだ角度・指示はその取り付け具のものなので、切り替えたら選び直してもらう
               onSelected: (_) => setState(() {
                 _attId = a['id'] as String?;
@@ -1079,15 +1081,15 @@ class _DesignScreenState extends State<DesignScreen> {
     if (fix == null) {
       await _refine(
         {'add_attachment': t.toJson()},
-        '${toolJa[t.toolType] ?? '道具'}のクリップを足しています（カバーはそのままです）',
-        doneText: '${toolJa[t.toolType] ?? '道具'}のクリップを足しました',
+        '${toolJa[t.toolType] ?? '道具'}の留め具を足しています（カバーはそのままです）',
+        doneText: '${toolJa[t.toolType] ?? '道具'}の留め具を足しました',
       );
     } else {
       final v = toolDOf(t);
       await _refine(
         withAttachment({'tool_d_mm': v}, d, fix['id'] as String?),
-        '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで作り直しています（カバーはそのままです）',
-        doneText: '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで作り直しました',
+        '$labelの留め具を太さ${v.toStringAsFixed(1)}mmで作り直しています（カバーはそのままです）',
+        doneText: '$labelの留め具を太さ${v.toStringAsFixed(1)}mmで作り直しました',
       );
     }
   }
@@ -1145,8 +1147,8 @@ class _ToolSheetState extends State<_ToolSheet> {
                 const SizedBox(height: 4),
                 Text(
                   widget.fix
-                      ? 'このクリップだけを作り直します。カバーはそのまま使えます。'
-                      : 'カバーはそのままで、別の道具のクリップを足します。',
+                      ? 'この留め具だけを作り直します。カバーはそのまま使えます。'
+                      : 'カバーはそのままで、別の道具の留め具を足します。',
                   style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 if (!widget.fix) ...[
@@ -1182,7 +1184,8 @@ class _ToolSheetState extends State<_ToolSheet> {
                     _t.toolDmm ??= 8.5;
                     _t.shaftSize = null;
                   }, 'おすすめ。定規で測った太さを入れます'),
-                if (!widget.fix) ...[
+                // 柄の形はスプーンだけ聞く（ペン・筆の柄は丸い。2026-11-24）
+                if (!widget.fix && _t.asksShape) ...[
                   const SectionLabel('柄の形'),
                   choice('丸い', _t.shaftShape == 'round', () => _t.shaftShape = 'round'),
                   choice('平たい', _t.shaftShape == 'flat', () => _t.shaftShape = 'flat'),
@@ -1278,7 +1281,7 @@ class _NumberSheetState extends State<_NumberSheet> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '動かしたあと「この値で作り直す」を押すと、新しい形を作ります。クリップの角度は前の画面のボタンで変えられます。',
+                  '動かしたあと「この値で作り直す」を押すと、新しい形を作ります。留め具の角度は前の画面のボタンで変えられます。',
                   style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
@@ -1677,7 +1680,7 @@ class _DimTile extends StatelessWidget {
   );
 }
 
-/// クリップの角度のボタン（Figma：つながったボタンの並び。選んだものは丸く・secondaryContainer・チェック付き）
+/// 留め具の角度のボタン（Figma：つながったボタンの並び。選んだものは丸く・secondaryContainer・チェック付き）
 enum _GroupPos { first, middle, last }
 
 class _AngleButton extends StatelessWidget {
@@ -1717,7 +1720,7 @@ class _AngleButton extends StatelessWidget {
       inMutuallyExclusiveGroup: true,
       checked: selected,
       label:
-          'クリップの角度 $angle度${recommended ? '（おすすめ）' : ''}${showCurrent ? '（いまの角度）' : ''}',
+          '留め具の角度 $angle度${recommended ? '（おすすめ）' : ''}${showCurrent ? '（いまの角度）' : ''}',
       excludeSemantics: true,
       onTap: onTap,
       // 直している間は薄くして、押せないことを見せる

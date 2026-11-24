@@ -195,7 +195,7 @@ def check(params: list[Param], *, selected_parts: list[str], hand: dict, require
         res.fatal = "DESIGN_INFEASIBLE"
     if requirements.get("tool_shaft_shape") == "flat":
         res.fatal = "DESIGN_INFEASIBLE"
-        res.violations.append({"rule": "R4", "message": "平たい柄は、いまのC字クリップでは挟めません"})
+        res.violations.append({"rule": "R4", "message": "平たい柄は、いまの留め具では挟めません"})
     return res
 
 

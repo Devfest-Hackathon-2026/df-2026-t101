@@ -6,8 +6,8 @@ import 'package:jijogu_app/core/api/api_error.dart';
 import 'package:jijogu_app/core/models/attachments.dart' show angleByTool, flatReason, maxAttachments, toolJa;
 
 /// 画面だけを通すためのモック（`--dart-define=MOCK_API=true`）。応答の形は docs/api.md の例に合わせる。
-/// 3Dの見本は `web/demo/`（手 hand.glb、カバー cover.stl、クリップ c_clip_{60,70,80}.stl、刷る向きは *.print.stl、画像 iso.png）。
-/// 取り付け具（ADR-0014）は requirements.tools の丸い柄から作り、クリップの見本は角度ごとの c_clip_{角度}.stl を使う。
+/// 3Dの見本は `web/demo/`（手 hand.glb、カバー cover.stl、留め具 c_clip_{60,70,80}.stl、刷る向きは *.print.stl、画像 iso.png）。
+/// 取り付け具（ADR-0014）は requirements.tools の丸い柄から作り、留め具の見本は角度ごとの c_clip_{角度}.stl を使う。
 /// 形を変えたら `scripts/make_demo_assets.py` で作り直す
 class MockBackend {
   MockBackend._();
@@ -224,7 +224,7 @@ class MockBackend {
         final tools = _toolsOf(req);
         final pi = tools.indexWhere((t) => t['tool_shaft_shape'] != 'flat');
         if (pi < 0) {
-          throw ApiError('平たい柄は、いまのC字クリップでは挟めません', code: 'DESIGN_INFEASIBLE');
+          throw ApiError('平たい柄は、いまの留め具では挟めません', code: 'DESIGN_INFEASIBLE');
         }
         return _newDesign(
           c,
@@ -311,7 +311,7 @@ class MockBackend {
   ];
   static const _printer = {
     'model': 'Bambu Lab A1', 'layer_mm': 0.2, 'infill_pct': 15,
-    'supports_ja': 'カバーの内側、クリップの輪の下', 'orientation_ja': 'ファイルの向きのまま',
+    'supports_ja': 'カバーの内側、留め具のレールに入る舌の下', 'orientation_ja': 'ファイルの向きのまま',
   };
   static const _colorNames = {
     '#2A9D8F': 'ティール', '#E76F51': 'コーラル', '#264653': '紺', '#E9C46A': '黄色', '#F4F1EA': '白', '#5A666B': '灰色',
@@ -344,10 +344,10 @@ class MockBackend {
     if (key.startsWith('tpu_sleeve')) return 'TPUの筒';
     for (final a in (d['attachments'] as List?) ?? const []) {
       if ('${a['print_key'] ?? 'c_clip'}' == key) {
-        return 'C字クリップ（${toolJa[a['tool_type']] ?? '道具'}・${a['angle_deg']}度）';
+        return '留め具（${toolJa[a['tool_type']] ?? '道具'}・${a['angle_deg']}度）';
       }
     }
-    return 'C字クリップ';
+    return '留め具';
   }
 
   Map<String, dynamic> _estimates(Map<String, dynamic> d) => {
@@ -500,7 +500,7 @@ class MockBackend {
     throw ApiError('モックにないAPIです：$method ${seg.join('/')}', code: 'NOT_FOUND');
   }
 
-  /// 印刷用ファイル：カバーと、取り付け具ごと（print_key → 角度のクリップ）
+  /// 印刷用ファイル：カバーと、取り付け具ごと（print_key → 角度の留め具）
   Map<String, dynamic> _printFiles(Map<String, dynamic> d) {
     final atts = (d['attachments'] as List?) ?? const [];
     return <String, dynamic>{
@@ -629,10 +629,11 @@ class MockBackend {
       a['files'] = {'preview_stl': 'demo/c_clip_${a['angle_deg']}.stl'};
       a['print_key'] = a['primary'] == true ? 'c_clip' : 'c_clip_${a['id']}';
       a['checks'] = [
-        {'rule': 'R6f', 'ok': true, 'value': 1, 'message_ja': 'クリップの開きは足りています'},
+        {'rule': 'R6f', 'ok': true, 'value': 1, 'message_ja': '留め具は受け具とねじの2つで、道具を挟める'},
         {'rule': 'R6h', 'ok': true, 'value': 0, 'message_ja': '道具の通り道に当たる所はありません'},
       ];
-      a['clip'] = {'source': 'library', 'tool_d_mm': a['tool_d_mm'], 'angle_deg': a['angle_deg']};
+      a['clip'] = {'source': 'generated', 'tool_d_mm': a['tool_d_mm'], 'angle_deg': a['angle_deg']};
+      a['tool'] = _demoTool(a['angle_deg'] as num?, a['tool_d_mm'] as num?);
     }
     final d = <String, dynamic>{
       'design_id': id,
@@ -659,12 +660,12 @@ class MockBackend {
         {
           'part_id': 'rail',
           'variant': 'standard',
-          'reason_ja': '人差し指の横にクリップを差し込みます',
+          'reason_ja': '人差し指の横に留め具を差し込みます',
         },
         {
           'part_id': 'c_clip',
           'variant': 'standard',
-          'reason_ja': '道具の太さ${toolD}mmに合わせ、押し込むだけで留まるクリップにしました',
+          'reason_ja': '道具の太さ${toolD}mmに合わせ、ねじで締める留め具にしました',
         },
       ],
       'params': [
@@ -690,7 +691,7 @@ class MockBackend {
           'range': [2.0, 3.5],
           'baseline': 2.5,
           'source': 'ai',
-          'reason_ja': 'クリップの力を受けるレールのまわりが割れにくい厚さにしました',
+          'reason_ja': '留め具の力を受けるレールのまわりが割れにくい厚さにしました',
           'clamped': false,
         },
         {
@@ -725,6 +726,7 @@ class MockBackend {
       },
       'warnings': [],
       'hand_overlay': {'mesh_path': 'demo/hand.glb', 'frame': 'hand'},
+      'tool': _demoTool(angle, toolD),
       'files': <String, dynamic>{
         'parts': {
           'cover': {'preview_stl': 'demo/cover.stl'},
@@ -736,7 +738,7 @@ class MockBackend {
       'style': {'color': color, 'pattern': 'none'},
       'approval': {'status': 'none'},
       'summary_ja':
-          '手の甲に沿うカバーに、道具の太さ${toolD}mmに合わせた$angle度のクリップを付けました。手のひら側と手首は開けてあります。${note == null ? '' : '（「$note」に合わせて直しました）'}',
+          '手の甲に沿うカバーに、道具の太さ${toolD}mmに合わせた$angle度の留め具を付けました。手のひら側と手首は開けてあります。${note == null ? '' : '（「$note」に合わせて直しました）'}',
     };
     _designs[id] = d;
     c['current_design_id'] = id;
@@ -825,7 +827,7 @@ Map<String, dynamic> _normalizeTool(Map<String, dynamic> t) {
     assumptions.add('道具の太さは推定です。刷る前に太さを確かめてください');
   }
   if (out['tool_shaft_shape'] == 'flat') {
-    assumptions.add('${toolJa[out['tool_type']] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください');
+    assumptions.add('${toolJa[out['tool_type']] ?? '道具'}：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください');
   }
   out['assumptions'] = assumptions;
   return out;
@@ -855,6 +857,23 @@ const _angleReason = {
   'pen': '字を書くので、ペンを少し寝かせた60度をおすすめします。立て気味にしたいときは70度も選べます',
   'spoon': '食べるので、スプーンを口に運びやすい60度をおすすめします。立て気味にしたいときは70度も選べます',
 };
+
+/// 見本の留め具（web/demo/c_clip_{角度}.stl）の道具の軸（実際の手の座標）。scripts/make_demo_assets.py が出す値。
+/// 万力式の留め具は形から道具の軸を推定できないので、生成APIと同じく版に書く（2026-11-24）
+Map<String, dynamic> _demoTool(num? angle, num? toolD) {
+  const axes = {
+    60: [0.0, 0.5, -0.866],
+    70: [0.0, 0.342, -0.9397],
+    80: [0.0, 0.1736, -0.9848],
+  };
+  return {
+    'center': [-65.23, 59.5, 11.68],
+    'axis': axes[angle?.toInt()] ?? axes[70],
+    'tip_mm': 120.0, // 生成APIの TOOL_TIP_MM と同じ
+    'rear_mm': 50.0,
+    'diameter_mm': (toolD ?? 8.5).toDouble(),
+  };
+}
 
 /// 道具1つから取り付け具を作る（生成APIの build_attachments と同じ。ID は a＋道具の番号＋1）
 Map<String, dynamic> _attachment(Map<String, dynamic> t, int i, {required bool primary}) {

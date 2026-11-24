@@ -8,7 +8,7 @@ import 'package:jijogu_app/core/text_ja.dart';
 import 'package:jijogu_app/core/ui/tool_fields.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 
-/// S2 やりたいこと（選択式の7問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
+/// S2 やりたいこと（選択式の3〜4問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
 class InterviewScreen extends StatefulWidget {
   const InterviewScreen({super.key, required this.caseId});
   final String caseId;
@@ -84,8 +84,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
     super.dispose();
   }
 
-  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら今までの7問
-  List<(int, int)> get _steps => interviewSteps(a.tools.length);
+  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら3問（スプーンは柄の形を足して4問。着け外し・指の形は 2026-11-24 に聞くのをやめた）
+  List<(int, int)> get _steps => interviewSteps(a.tools);
 
   int get _pos => _steps.indexOf((_q, _t)).clamp(0, _steps.length - 1);
 
@@ -243,7 +243,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     if (_q == 8) return _summaryPage();
     final (title, choices) = _question(_q);
     final pos = _pos;
-    final total = interviewTotal(a.tools.length);
+    final total = interviewTotal(a.tools);
     return AppPage(
       title: 'やりたいこと',
       onBack: pos == 0
@@ -270,7 +270,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                   )
                 : null),
       children: [
-        // 進み具合（Figma：「質問 1 / 7」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
+        // 進み具合（Figma：「質問 1 / 3」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
         Text(
           '質問 ${pos + 1} / $total',
           style: AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant),
@@ -324,9 +324,9 @@ class _InterviewScreenState extends State<InterviewScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            m('絵を描く（筆）', 'draw', '筆を挟むクリップを作ります'),
-            m('字を書く（ペン）', 'write', 'ペンを挟むクリップを作ります'),
-            m('食べる（スプーン）', 'eat', 'スプーンを挟むクリップを作ります'),
+            m('絵を描く（筆）', 'draw', '筆を挟む留め具を作ります'),
+            m('字を書く（ペン）', 'write', 'ペンを挟む留め具を作ります'),
+            m('食べる（スプーン）', 'eat', 'スプーンを挟む留め具を作ります'),
             m('その他', 'other', 'あとのチャットで教えてください'),
           ],
         );
@@ -344,7 +344,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
           [
             const SizedBox(height: 6),
             Text(
-              '指で持つあたり（クリップで挟む所）の太さです。',
+              '指で持つあたり（留め具で挟む所）の太さです。',
               style: AppText.bodyLarge.copyWith(
                 color: AppColors.onSurfaceVariant,
               ),
@@ -377,7 +377,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
             const SizedBox(height: 2),
             const InfoCard(
               tone: NoticeTone.info,
-              child: Text('できるだけmmで入れてください（クリップをぴったりに作るため）。'),
+              child: Text('できるだけmmで入れてください（留め具の大きさを合わせるため）。'),
             ),
           ],
         );
@@ -390,13 +390,13 @@ class _InterviewScreenState extends State<InterviewScreen> {
               '平たい',
               _tool.shaftShape == 'flat',
               () => _tool.shaftShape = 'flat',
-              '平たい柄のクリップは準備中です',
+              '平たい柄の留め具は準備中です',
             ),
           ],
         );
       case 4:
         return (
-          'カバーとクリップは誰が着け外ししますか？',
+          'カバーと留め具は誰が着け外ししますか？',
           [
             c('自分でできる', a.donningBy == 'self', () => a.donningBy = 'self'),
             c(
@@ -523,7 +523,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
             for (final t
                 in (_choices.isNotEmpty
                     ? _choices
-                    : const ['痛い所がある', '長い時間使いたい', '目立たない見た目がいい']))
+                    // 例は形に効くものにする（見た目の好みは S7 の色で選べ、ここで伝えても色が変わるだけだった。2026-11-24）
+                    : const ['痛い所がある', '長い時間使いたい', '汗をかきやすい']))
               SuggestButton(
                 label: t,
                 onPressed: _busy || _turns >= 3 ? null : () => _send(t),
@@ -583,7 +584,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     String thick(ToolAnswer t) => t.toolDmm != null
         ? '${t.toolDmm!.toStringAsFixed(1)}mm（mmで入力）'
         : '${_shaftJa[t.shaftSize]}';
-    String shape(ToolAnswer t) => t.shaftShape == 'flat' ? '平たい' : '丸い';
+    String shape(ToolAnswer t) => t.shapeOrDefault == 'flat' ? '平たい' : '丸い';
     // (見出し, 答え, 戻る質問, 道具の番号)。道具が2つ以上なら、道具ごとに「道具・太さ・形」の1行
     final rows = <(String, String, int, int)>[
       (
@@ -595,26 +596,15 @@ class _InterviewScreenState extends State<InterviewScreen> {
       ('着ける手', a.handSide == 'left' ? '左手' : '右手', 1, 0),
       if (one) ...[
         ('柄の太さ', thick(a.tools[0]), 2, 0),
-        ('柄の形', shape(a.tools[0]), 3, 0),
+        if (a.tools[0].asksShape) ('柄の形', shape(a.tools[0]), 3, 0),
       ] else
         for (final (i, t) in a.tools.indexed)
           (_toolName(i), '柄の太さ ${thick(t)}・${shape(t)}', 2, i),
-      ('着け外し', a.donningBy == 'self' ? '自分でできる' : '家族や支援者がする', 4, 0),
-      (
-        '指の形',
-        switch (a.fingerState) {
-          'fist' => '握った形で固まっている',
-          'bent' => '少し曲がっている',
-          _ => 'ほぼ伸ばせる',
-        },
-        5,
-        0,
-      ),
       ('撮影', a.captureBy == 'self' ? '自分（片手）' : '家族や支援者', 6, 0),
     ];
     final guessed = [
       for (final (i, t) in a.tools.indexed)
-        if (t.toolDmm == null && t.shaftShape != 'flat') _toolName(i),
+        if (t.toolDmm == null && t.shapeOrDefault != 'flat') _toolName(i),
     ];
     return AppPage(
       title: 'まとめ',
@@ -691,19 +681,19 @@ class _InterviewScreenState extends State<InterviewScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (one && a.tools[0].shaftShape == 'flat')
+        if (one && a.tools[0].shapeOrDefault == 'flat')
           const InfoCard(
             tone: NoticeTone.warning,
-            child: Text('平たい柄のクリップは準備中です。丸い柄の道具を使うか、家族やOTと相談してください。'),
+            child: Text('平たい柄の留め具は準備中です。丸い柄の道具を使うか、家族やOTと相談してください。'),
           ),
-        // 道具が2つ以上：平たい柄の道具だけクリップを作らない（ADR-0014 §1）
+        // 道具が2つ以上：平たい柄の道具だけ留め具を作らない（ADR-0014 §1）
         if (!one)
           for (final t in a.tools)
-            if (t.shaftShape == 'flat')
+            if (t.shapeOrDefault == 'flat')
               InfoCard(
                 tone: NoticeTone.warning,
                 child: Text(
-                  '${toolJa[t.toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。',
+                  '${toolJa[t.toolType] ?? '道具'}：平たい柄は留め具で挟めません。太柄スポンジなどで丸くしてください。',
                 ),
               ),
         if (guessed.isNotEmpty)
