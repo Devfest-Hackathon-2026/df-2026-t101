@@ -37,24 +37,25 @@ class ToolAnswer {
 /// 質問1のやりたいことと道具の組（その他は筆）
 const activityTool = {'draw': 'brush', 'write': 'pen', 'eat': 'spoon', 'other': 'brush'};
 
-/// S2a の選択式の並び（質問3・4は道具ごと）。(質問, 道具の番号)。道具がなければ質問3・4の段は作らない
+/// S2a の選択式の並び（質問3・4は道具ごと）。(質問, 道具の番号)。道具がなければ質問3・4の段は作らない。
+/// 質問5（カバーと留め具を誰が着け外しするか）は 2026-11-24 に聞くのをやめた：形にも部品にも効かず、留め具を
+/// 万力式にしてからは、ねじを支援者が回す前提で答えが決まるため。答えは「家族や支援者がする」（helper）で送る
 List<(int, int)> interviewSteps(int nTools) => [
   (0, 0),
   (1, 0),
   for (var i = 0; i < nTools; i++) ...[(2, i), (3, i)],
-  (4, 0),
   (5, 0),
   (6, 0),
 ];
 
-/// 進み具合に出す全体の数。まだ道具を選んでいなくても、道具1つとして数える（今までの「1 / 7」）
-int interviewTotal(int nTools) => 5 + 2 * (nTools < 1 ? 1 : nTools);
+/// 進み具合に出す全体の数。まだ道具を選んでいなくても、道具1つとして数える（「1 / 6」）
+int interviewTotal(int nTools) => 4 + 2 * (nTools < 1 ? 1 : nTools);
 
 /// 選択式の答え（requirements の名前は api.md §3.2）
 class Answers {
   List<ToolAnswer> tools = []; // 選んだ順
   String? handSide;
-  String? donningBy; // self / helper
+  String? donningBy = 'helper'; // self / helper。画面では聞かない（interviewSteps）
   String? fingerState; // fist / bent / straight
   String? captureBy; // self / helper
 
@@ -98,7 +99,7 @@ class Answers {
   /// 保存済みの requirements（GET /v1/cases/{id}）から答えを戻す。開き直したときに前の答えを消さないため。
   void loadFrom(Map<String, dynamic> r) {
     handSide = r['hand_side'] as String?;
-    donningBy = r['donning_by'] as String?;
+    donningBy = r['donning_by'] as String? ?? 'helper';
     fingerState = r['finger_state'] as String?;
     captureBy = r['capture_by'] as String?;
     final ts = r['tools'];

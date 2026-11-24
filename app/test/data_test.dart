@@ -156,15 +156,24 @@ void main() {
   });
 
   group('質問の並びと進み具合（S2a）', () {
-    test('道具が0・1つなら7問、2つなら9問', () {
-      expect(interviewTotal(0), 7);
-      expect(interviewTotal(1), 7);
-      expect(interviewTotal(2), 9);
+    test('道具が0・1つなら6問、2つなら8問（着け外しは聞かない）', () {
+      expect(interviewTotal(0), 6);
+      expect(interviewTotal(1), 6);
+      expect(interviewTotal(2), 8);
     });
     test('道具がないときは質問3・4の段を作らない（番号がはみ出さない）', () {
-      expect(interviewSteps(0), [(0, 0), (1, 0), (4, 0), (5, 0), (6, 0)]);
+      expect(interviewSteps(0), [(0, 0), (1, 0), (5, 0), (6, 0)]);
       expect(interviewSteps(2),
-          [(0, 0), (1, 0), (2, 0), (3, 0), (2, 1), (3, 1), (4, 0), (5, 0), (6, 0)]);
+          [(0, 0), (1, 0), (2, 0), (3, 0), (2, 1), (3, 1), (5, 0), (6, 0)]);
+    });
+    test('着け外しは聞かずに「家族や支援者がする」で送る。前に答えた値は残す', () {
+      final a = Answers();
+      expect(a.donningBy, 'helper');
+      expect(a.toJson()['donning_by'], 'helper');
+      a.loadFrom({'donning_by': 'self'});
+      expect(a.donningBy, 'self');
+      a.loadFrom({});
+      expect(a.donningBy, 'helper');
     });
   });
 

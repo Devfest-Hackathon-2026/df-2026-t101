@@ -8,7 +8,7 @@ import 'package:jijogu_app/core/text_ja.dart';
 import 'package:jijogu_app/core/ui/tool_fields.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 
-/// S2 やりたいこと（選択式の7問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
+/// S2 やりたいこと（選択式の6問 → 任意のチャット → まとめ）。docs/screens.md S2、api.md §3.2
 class InterviewScreen extends StatefulWidget {
   const InterviewScreen({super.key, required this.caseId});
   final String caseId;
@@ -84,7 +84,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     super.dispose();
   }
 
-  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら今までの7問
+  /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら6問（着け外しは 2026-11-24 に聞くのをやめた）
   List<(int, int)> get _steps => interviewSteps(a.tools.length);
 
   int get _pos => _steps.indexOf((_q, _t)).clamp(0, _steps.length - 1);
@@ -270,7 +270,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                   )
                 : null),
       children: [
-        // 進み具合（Figma：「質問 1 / 7」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
+        // 進み具合（Figma：「質問 1 / 6」＋ M3 の進み具合の棒）。道具が2つ以上なら、質問3・4の数だけ増える
         Text(
           '質問 ${pos + 1} / $total',
           style: AppText.labelLarge.copyWith(color: AppColors.onSurfaceVariant),
@@ -599,7 +599,6 @@ class _InterviewScreenState extends State<InterviewScreen> {
       ] else
         for (final (i, t) in a.tools.indexed)
           (_toolName(i), '柄の太さ ${thick(t)}・${shape(t)}', 2, i),
-      ('着け外し', a.donningBy == 'self' ? '自分でできる' : '家族や支援者がする', 4, 0),
       (
         '指の形',
         switch (a.fingerState) {
