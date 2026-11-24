@@ -15,7 +15,8 @@ from . import mock, schemas
 log = logging.getLogger("gemini")
 # 2026-11-10：system v2・attachment v2・dimension v3。理由の文に項目名（tool_type=spoon など）を書かせていたのをやめた
 # 2026-11-22：system v3。利用者に見せる文で「こぶし」と書かず「手の甲」「手」と書くようにした
-PROMPT_VERSIONS = {"system": "v3", "interview": "v1", "select": "v1", "dimension": "v3", "attachment": "v2", "review": "v1", "refine": "v1"}
+# 2026-11-24：system v4・attachment v3。理由の文を1文・30字くらいにし、細かい数値（採寸値など）を書かせないようにした（長かった）
+PROMPT_VERSIONS = {"system": "v4", "interview": "v1", "select": "v1", "dimension": "v3", "attachment": "v3", "review": "v1", "refine": "v1"}
 # review は画像4枚で時間がぶれやすい（11/7 の実測で6〜108秒）ので LOW にした（generation-pipeline.md §3 の表も同じ）
 THINKING = {"interview": "LOW", "select": "LOW", "dimension": "MEDIUM", "attachment": "LOW", "review": "LOW", "refine": "LOW"}
 

@@ -100,7 +100,8 @@ def test_mock_attachment_angle():
 def test_prompt_versions_and_schemas():
     from app import gemini
     from app.gemini import schemas
-    assert gemini.PROMPT_VERSIONS["dimension"] == "v3" and gemini.PROMPT_VERSIONS["attachment"] == "v2"
+    assert gemini.PROMPT_VERSIONS["dimension"] == "v3" and gemini.PROMPT_VERSIONS["attachment"] == "v3"
+    assert "細かい数値" in gemini._prompt("system") and "1文で短く" in gemini._prompt("attachment")   # 理由は短く（2026-11-24）
     assert gemini.THINKING["attachment"] == "LOW"
     assert set(schemas.ATTACHMENT["required"]) == {"angle_deg", "reason_ja"}
     assert "attachments" in schemas.DIMENSION["properties"] and "attachments" not in schemas.DIMENSION["required"]
