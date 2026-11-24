@@ -63,14 +63,14 @@ flowchart LR
   GPU -- "利用回数と費用だけ（同意の記録を読む）" --> FS
 ```
 
-生成APIへ進むのは、`GEO` が集計した数値と `mesh_id` だけで、生成APIへの矢印に映像は乗らない。映像が端末の外に出るのは点線の1か所だけで、手を切り抜いたフレーム（最大8枚）を、同意を得て `hand-mesh` に送る（[ADR-0008](adr/0008-hand-model-capsules.md)）。`hand-mesh` は、フレームから合成した**手のメッシュ**（大きさは未補正）をStorageに置き、角度と `mesh_id` と結果トークンを返す。生成APIは、ブラウザが送った手の甲の長さ（1円玉で測ったmm）で倍率を出し、メッシュを実寸にして、**こぶしの外側にかぶせるカバーの殻**を作る（[ADR-0010](adr/0010-hand-mesh-fusion.md)、[ADR-0011](adr/0011-dorsal-cover.md)）。道具は、道具の太さに合わせたC字クリップで挟み、カバーのアリ溝のレールに差し込む（[ADR-0012](adr/0012-c-clip-dovetail.md)）。
+生成APIへ進むのは、`GEO` が集計した数値と `mesh_id` だけで、生成APIへの矢印に映像は乗らない。映像が端末の外に出るのは点線の1か所だけで、手を切り抜いたフレーム（最大8枚）を、同意を得て `hand-mesh` に送る（[ADR-0008](adr/0008-hand-model-capsules.md)）。`hand-mesh` は、フレームから合成した**手のメッシュ**（大きさは未補正）をStorageに置き、角度と `mesh_id` と結果トークンを返す。生成APIは、ブラウザが送った手の甲の長さ（1円玉で測ったmm）で倍率を出し、メッシュを実寸にして、**手の甲にかぶせるカバーの殻**を作る（[ADR-0010](adr/0010-hand-mesh-fusion.md)、[ADR-0011](adr/0011-dorsal-cover.md)）。道具は、道具の太さに合わせたC字クリップで挟み、カバーのアリ溝のレールに差し込む（[ADR-0012](adr/0012-c-clip-dovetail.md)）。
 
 ## 2. コンポーネントの責務
 
 | コンポーネント | 置き場所 | 責務 | 持たない責務 |
 |---|---|---|---|
 | Flutter Web アプリ（`app/`） | Firebase Hosting | 画面と遷移、ログイン、生成中の進み具合の読み取り（`GET designs/{id}` を2秒ごと）、APIの呼び出し、採寸エンジンの呼び出しと結果の表示 | Firestore・Storageへの書き込み、Geminiの呼び出し、フレームの処理 |
-| 採寸エンジン（`app/web_engine/` のTypeScriptを、`app/web/js/measure_engine.js` の1ファイルにまとめる） | ブラウザ | アプリ内カメラでの録画（スマホは背面、PCはWebカメラ。握った形のこぶしを撮る）、フレームの取り出し、ぼけの判定、MediaPipeの呼び出し、1円玉の自動検出の呼び出しと縮尺、フレームごとの値、集計（[measurement.md §2〜§7](measurement.md)）、切り抜いたフレームを `hand-mesh` に送ること、S5で直した手首と指の付け根の5点から手の甲の長さを出し直すこと。Dartからは `dart:js_interop` で呼び、結果をJSONで返す（写真2枚のモードは 2026-11-09 にやめた） | 手のメッシュの実寸化・手のモデルの組み立て（生成APIが行う） |
+| 採寸エンジン（`app/web_engine/` のTypeScriptを、`app/web/js/measure_engine.js` の1ファイルにまとめる） | ブラウザ | アプリ内カメラでの録画（スマホは背面、PCはWebカメラ。握った形の手を撮る）、フレームの取り出し、ぼけの判定、MediaPipeの呼び出し、1円玉の自動検出の呼び出しと縮尺、フレームごとの値、集計（[measurement.md §2〜§7](measurement.md)）、切り抜いたフレームを `hand-mesh` に送ること、S5で直した手首と指の付け根の5点から手の甲の長さを出し直すこと。Dartからは `dart:js_interop` で呼び、結果をJSONで返す（写真2枚のモードは 2026-11-09 にやめた） | 手のメッシュの実寸化・手のモデルの組み立て（生成APIが行う） |
 | 1円玉の自動検出（`app/web_engine/src/coin_worker.ts` → `app/web/js/coin_worker.js`） | ブラウザ（Web Worker） | OpenCV.jsで、画像の中の楕円から1円玉を探す（指先と爪のまわりの丸を外し、手の甲に置いた1円玉を先に選び、手の大きさから大きさの見当をつける）。Web Workerで動かし、画面を止めない | 寸法の計算 |
 | MediaPipe（Hand Landmarker） | ブラウザ（WebAssembly） | フレームから21点を返す（`numHands: 2`。2つ以上見つかったら、そのフレームを捨てる）。Interactive Segmenterは使わない（CPUで1回約5秒かかり画面が止まる。GPUでは空のマスクが返った） | 寸法の計算 |
 | three.js ビューア（`app/web/js/viewer.js`） | ブラウザ | STLの表示、手のメッシュ（GLB）の表示（S5）、手のメッシュにカバーとクリップと道具の棒を重ねる表示（S7。どれも手の座標系なので、そのまま重なる）、回転・拡大、色の変更 | 形を変えること |
@@ -98,7 +98,7 @@ sequenceDiagram
   participant API as 生成API
   U->>App: 同意して進む（手のメッシュを保存することも含む）
   App->>API: POST /consent（mesh-consent-2）
-  U->>App: 握った形のこぶしを、アプリの中のカメラで録る（15〜20秒。1円玉は手の甲、手は動かさずカメラを半周）
+  U->>App: 握った形の手を、アプリの中のカメラで録る（15〜20秒。1円玉は手の甲、手は動かさずカメラを半周）
   App->>EN: 候補フレーム（メモリ内）
   EN->>MP: 最初のフレーム
   EN->>CV: 最初のフレームと手の21点
@@ -250,7 +250,7 @@ sequenceDiagram
 
 秘密の値は `MESH_RESULT_HMAC_KEY` の1つだけで、Secret Managerに置く（Geminiはサービスアカウントで呼ぶため、APIキーが要らない）。
 
-GPU用の項目（`MESH_PER_USER_DAILY`・`MESH_GLOBAL_DAILY`・`MESH_MAX_EXECUTION_SECONDS`・`MESH_COST_PER_CALL_USD`）は `hand-mesh` に設定する。`STORAGE_BUCKET` は両サービスに設定する（`hand-mesh` は未補正の手のメッシュを書くため）。カバーとこぶしのすき間（`HAND_CLEARANCE_MM`）やクリップのしめしろ（`CLIP_INTERFERENCE_MM`）などの形の固定値は、環境変数ではなく `scad/lib/common.scad` と `scad/catalog.json` に置く（[parts-library.md §3](parts-library.md#3-固定値aiは変えられない)）。`DAILY_COST_LIMIT_USD` は両サービスで同じ値を使い、共通の `usage` を判定する。全体の停止はFirestoreの `settings/runtime.generation_enabled=false` で行う。生成APIの環境変数 `GENERATION_ENABLED=false` は、生成APIだけを追加で止めるためのもの（`hand-mesh` にはこの環境変数はなく、共通の設定だけを見る）。
+GPU用の項目（`MESH_PER_USER_DAILY`・`MESH_GLOBAL_DAILY`・`MESH_MAX_EXECUTION_SECONDS`・`MESH_COST_PER_CALL_USD`）は `hand-mesh` に設定する。`STORAGE_BUCKET` は両サービスに設定する（`hand-mesh` は未補正の手のメッシュを書くため）。カバーと手の甲のすき間（`HAND_CLEARANCE_MM`）やクリップのしめしろ（`CLIP_INTERFERENCE_MM`）などの形の固定値は、環境変数ではなく `scad/lib/common.scad` と `scad/catalog.json` に置く（[parts-library.md §3](parts-library.md#3-固定値aiは変えられない)）。`DAILY_COST_LIMIT_USD` は両サービスで同じ値を使い、共通の `usage` を判定する。全体の停止はFirestoreの `settings/runtime.generation_enabled=false` で行う。生成APIの環境変数 `GENERATION_ENABLED=false` は、生成APIだけを追加で止めるためのもの（`hand-mesh` にはこの環境変数はなく、共通の設定だけを見る）。
 
 ### 4.2 サービスアカウントと権限
 

@@ -108,7 +108,7 @@ orders/{orderId}
 | `geometry_hash` | string | OTに頼んだとき（デモのケースは印刷用データを作ったとき）に記録する。部品・引数・`cover_shell_sha256`・固定値の版を正規化したJSONのSHA-256（色は除く）。殻は手のメッシュから作るので、殻のファイルのハッシュを入れる。承認のときに、OT画面が見ていた版と同じかを確かめる |
 | `hand_measurement_id` | string | この版が使った採寸のID。実寸の手のメッシュ `cases/{caseId}/hand/{hand_measurement_id}.glb` を指す |
 | `scale_factor` | number | この版が使った倍率 k（未補正のメッシュ → 実寸） |
-| `hand_clearance_mm` | number | この版のカバーとこぶしのすき間（`HAND_CLEARANCE_MM`。フェルトの厚みを含む。11/9に値を変えても、前の版を同じ形で描き直せるよう記録する） |
+| `hand_clearance_mm` | number | この版のカバーと手の甲のすき間（`HAND_CLEARANCE_MM`。フェルトの厚みを含む。11/9に値を変えても、前の版を同じ形で描き直せるよう記録する） |
 | `cover_shell_sha256` | string | カバーの殻（`cover_shell.stl`）のSHA-256。ファイルは採寸の版ごとのフォルダ `internal/cases/{caseId}/cover/{measurementId}/` の下（殻は `shell/<殻の引数のハッシュ24桁>`、内側を守る立体は `keepout/<メッシュのSHA-256の先頭16桁>_c<c を小数2桁>`、距離場は `sdf`）。採寸の版と、殻を決める引数が同じ版では同じ値になる |
 | `clip_angle_deg` | number | C字クリップの角度（道具の立て具合。60／70／80。2026-11-08 に 0／20／40 から変えた）。角度だけを変えた版は、カバーのファイルを前の版と共有する |
 | `tool` | map | 道具の軸（実際の手の座標、mm）：`center`（クリップの輪の中心）、`axis`（先の向き。単位ベクトル）、`tip_mm`（先までの長さ、100）、`rear_mm`（後ろまで、50）、`diameter_mm`。S7の3D表示はこの値で道具の棒を描く（クリップの形から推定しない。2026-11-08） |
