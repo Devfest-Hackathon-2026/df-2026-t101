@@ -16,7 +16,7 @@ const toolActivity = {'brush': 'draw', 'pen': 'write', 'spoon': 'eat'};
 
 /// 平たい柄の道具の知らせ（生成APIの flat_reason と同じ）
 String flatReason(String? toolType) =>
-    '${toolJa[toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください';
+    '${toolJa[toolType] ?? '道具'}：平たい柄はクリップで挟めません。太柄スポンジなどで丸くしてください。';
 
 num? _param(Map<String, dynamic> design, String name) {
   for (final p in (design['params'] as List? ?? const [])) {

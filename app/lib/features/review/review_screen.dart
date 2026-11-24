@@ -9,12 +9,12 @@ import 'package:jijogu_app/core/ui/ui.dart';
 import 'package:jijogu_app/core/viewer/viewer_3d.dart';
 
 const _checks = {
-  'dimensions_reviewed': '寸法を見た',
-  'edges_safe': '角が安全（丸めてある）',
+  'dimensions_reviewed': '寸法を確認した',
+  'edges_safe': '角が丸められており安全である',
   'not_an_orthosis': '握った指を無理に開かせない形である（装具ではない）',
-  'palm_open_wrist_free': '手のひら側が開いていて、手首を覆っていない',
-  'no_mouth_contact': '口に入れない',
-  'user_informed': '本人と家族に使い方と「痛みや赤みが出たらやめる」を伝える',
+  'palm_open_wrist_free': '手のひら側が開いており、手首を覆っていない',
+  'no_mouth_contact': '口に入れる用途や部品が含まれていない',
+  'user_informed': '本人と家族に使い方と「痛みや赤みが出たら使用をやめること」を伝える',
 };
 
 const _partJa = {
@@ -48,6 +48,9 @@ const _warningJa = {
   'COIN_OFF_HAND': ('1円玉が手の甲の上になく、手が大きめに測られているおそれがあります', true),
   'ABDUCTION_UNKNOWN': ('指の開きの向きが決まらず、0度にしました（比較用）', false),
   'FINGERS_SPREAD': ('指の間隔が広く、比較用の太さを仮の比で出しました', false),
+  'HAND_FRAME_SUSPECT': ('手の向きの判定にずれがあります。指が手の甲側に曲がって見えています', true),
+  'MESH_FRAMES_DROPPED': ('手の形が取れなかったフレームがあり、残りのフレームで作りました', false),
+  'MESH_OUTLIER_FRAMES': ('角度が大きく外れたフレームを除いて作り直しました', false),
 };
 
 const _fingerJa = {
@@ -965,7 +968,7 @@ class _ParamTable extends StatelessWidget {
             children: [
               for (final (i, t) in const [
                 '部品',
-                '名前（専門用語）',
+                '項目名',
                 '値',
                 '範囲',
                 '基準値',

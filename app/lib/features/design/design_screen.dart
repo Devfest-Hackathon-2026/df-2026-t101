@@ -352,7 +352,7 @@ class _DesignScreenState extends State<DesignScreen> {
 
   Future<void> _prepareDemo() async {
     final d = _design!;
-    setState(() => _busy = '印刷用のデータを作っています（20〜60秒）');
+    setState(() => _busy = '印刷用データを作っています（20〜60秒）');
     try {
       await Api.instance.post(
         '/v1/cases/$_cid/designs/${d['design_id']}/prepare-print',
@@ -363,7 +363,7 @@ class _DesignScreenState extends State<DesignScreen> {
     } on ApiError catch (e) {
       setState(
         () => _error = e.code == 'RENDER_FAILED'
-            ? 'このままでは刷れない形でした。形を直してから、もう一度試してください。（${e.message}）'
+            ? 'このままでは印刷できない形でした。形を直してから、もう一度試してください。'
             : e.message,
       );
     } finally {
@@ -428,7 +428,7 @@ class _DesignScreenState extends State<DesignScreen> {
       if (_case != null)
         const InfoCard(
           tone: NoticeTone.info,
-          child: Text('まだ形がありません。「形を作る」を押すと、カバーとクリップの形を作ります（1〜3分）。'),
+          child: Text('まだデータができていません。「形を作る」を押すと、カバーとクリップを自動で設計します（1〜3分）。'),
         ),
     ],
   );
@@ -581,7 +581,7 @@ class _DesignScreenState extends State<DesignScreen> {
           const InfoCard(
             tone: NoticeTone.success,
             icon: Icons.check_circle_outline_rounded,
-            child: Text('カバーは前の版と同じです。刷ってあるカバーをそのまま使えます'),
+            child: Text('カバーの形は前と同じです。すでに印刷したカバーをそのまま使えます。'),
           ),
         if (_error != null) ErrorCard(message: _error!),
         // 取り付け具の切り替え（2つ以上のときだけ。ADR-0014 §5）
@@ -691,7 +691,7 @@ class _DesignScreenState extends State<DesignScreen> {
           ),
         ),
         if (locked)
-          Text('OTに頼んだあとに角度を変えると、新しい版になり、もう一度確認を頼みます。', style: _noteStyle),
+          Text('OTに頼んだあとに角度を変えると、新しい形になるため、もう一度確認を頼む必要があります。', style: _noteStyle),
         // 取り付け具（道具ごとのクリップ）の太さを直す・足す（ADR-0014 §4）
         OutlinedButton.icon(
           onPressed: idle ? () => _openToolSheet(d, fix: att, label: label) : null,
@@ -706,7 +706,7 @@ class _DesignScreenState extends State<DesignScreen> {
           style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
         ),
         Text(
-          addBlocked ?? 'カバーはそのままで、別の道具のクリップを足せます。足すと新しい版になります。',
+          addBlocked ?? 'カバーはそのままで、別の道具のクリップを足せます（新しい形として保存されます）。',
           style: _noteStyle,
         ),
         const _Heading('言葉で直す'),
@@ -829,7 +829,7 @@ class _DesignScreenState extends State<DesignScreen> {
         Text('色は形に関係ないので、確認を頼んだあとでも変えられます。', style: _noteStyle),
         const InfoCard(
           tone: NoticeTone.info,
-          child: Text('手のひら側を開ける・手首を覆わない・角を丸める・厚みの下限は、見た目のためでも変えられません。'),
+          child: Text('安全のため、手のひら側や手首の開き、角の丸み、最低限の厚みは変えられません。'),
         ),
       ]),
     );
@@ -958,7 +958,7 @@ class _DesignScreenState extends State<DesignScreen> {
           const SizedBox(height: 8),
           const InfoCard(
             tone: NoticeTone.warning,
-            child: Text('道具の太さは推定です。刷る前に、定規で確かめてください。'),
+            child: Text('道具の太さは目安の値です。注文や印刷の前に、定規で確かめてください。'),
           ),
         ],
       ],
@@ -1086,8 +1086,8 @@ class _DesignScreenState extends State<DesignScreen> {
       final v = toolDOf(t);
       await _refine(
         withAttachment({'tool_d_mm': v}, d, fix['id'] as String?),
-        '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しています（カバーはそのままです）',
-        doneText: '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しました',
+        '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで作り直しています（カバーはそのままです）',
+        doneText: '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで作り直しました',
       );
     }
   }
@@ -1145,8 +1145,8 @@ class _ToolSheetState extends State<_ToolSheet> {
                 const SizedBox(height: 4),
                 Text(
                   widget.fix
-                      ? 'このクリップだけを描き直します。カバーはそのままです。新しい版になります'
-                      : 'カバーはそのままで、別の道具のクリップを足します。新しい版になります',
+                      ? 'このクリップだけを作り直します。カバーはそのまま使えます。'
+                      : 'カバーはそのままで、別の道具のクリップを足します。',
                   style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 if (!widget.fix) ...[
@@ -1236,13 +1236,13 @@ class _ParamLabel {
 }
 
 const Map<String, _ParamLabel> _paramLabels = {
-  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '薄い', highJa: '厚い'),
-  'cover.palm_cut_offset_mm': _ParamLabel('手のひら側をどこまで覆うか', 'プラスにするとカバーが手のひら側へ深くなり、マイナスにすると浅く小さくなります。手のひらは覆いません', lowJa: '浅い', highJa: '深い'),
-  'cover.wrist_cut_mm': _ParamLabel('手首からカバーまでの長さ', '大きくするとカバーが短くなり、手首が動かしやすくなります', lowJa: '長いカバー', highJa: '短いカバー'),
-  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '大きい'),
-  'air_holes.count': _ParamLabel('空気穴の数', '多いほど蒸れにくくなります', unit: '個', lowJa: '少ない', highJa: '多い'),
-  'air_holes.diameter_mm': _ParamLabel('空気穴の大きさ', '大きいほど蒸れにくく、小さいほどカバーが丈夫です', lowJa: '小さい', highJa: '大きい'),
-  'strap_slits.strap_thickness_mm': _ParamLabel('ベルトの厚み', '使うベルト（面ファスナー）の厚みに合わせます。穴の大きさが変わります', lowJa: '薄い', highJa: '厚い'),
+  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります。', lowJa: '薄い', highJa: '厚い'),
+  'cover.palm_cut_offset_mm': _ParamLabel('カバーの深さ（手のひら側のふち）', 'プラスにするとカバーが手のひら側へ深くなり、マイナスにすると浅くなります。手のひらは覆いません。', lowJa: '浅い', highJa: '深い'),
+  'cover.wrist_cut_mm': _ParamLabel('手首まわりのあき', '大きくすると手首側が広く開き、動かしやすくなります。', lowJa: '狭い（長いカバー）', highJa: '広い（短いカバー）'),
+  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます。', lowJa: '小さい', highJa: '大きい'),
+  'air_holes.count': _ParamLabel('空気穴の数', '多いほど蒸れにくくなります。', unit: '個', lowJa: '少ない', highJa: '多い'),
+  'air_holes.diameter_mm': _ParamLabel('空気穴の大きさ', '大きいほど蒸れにくく、小さいほどカバーが丈夫です。', lowJa: '小さい', highJa: '大きい'),
+  'strap_slits.strap_thickness_mm': _ParamLabel('ベルトの厚み', '使うベルト（面ファスナー）の厚みに合わせます。穴の大きさが変わります。', lowJa: '薄い', highJa: '厚い'),
 };
 
 /// 数値で直す画面（ボトムシート）。変えた値を返す（作り直すのは呼び出し側）
@@ -1278,7 +1278,7 @@ class _NumberSheetState extends State<_NumberSheet> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '動かしたあと「この値で作り直す」を押すと、新しい版を作ります。クリップの角度は前の画面のボタンで変えられます',
+                  '動かしたあと「この値で作り直す」を押すと、新しい形を作ります。クリップの角度は前の画面のボタンで変えられます。',
                   style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
@@ -1935,7 +1935,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
       setState(
         () => _error = switch (e.code) {
           'REVIEWER_NOT_ALLOWED' => 'このアドレスはOTとして登録されていません。',
-          'RENDER_FAILED' => 'このままでは刷れない形でした。形を直してから、もう一度頼んでください。',
+          'RENDER_FAILED' => 'このままでは印刷できない形でした。形を直してから、もう一度頼んでください。',
           _ => e.message,
         },
       );
@@ -1981,7 +1981,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${widget.design['revision'] ?? 1}版',
+                    '版${widget.design['revision'] ?? 1}',
                     style: AppText.titleMedium.copyWith(
                       color: AppColors.onSurface,
                     ),
@@ -2009,7 +2009,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
             Semantics(
               header: true,
               child: Text(
-                'OTに確認を頼む（${widget.design['revision'] ?? 1}版）',
+                'OTに確認を頼む（版${widget.design['revision'] ?? 1}）',
                 style: AppText.headlineSmall.copyWith(
                   color: AppColors.onSurface,
                 ),
@@ -2072,9 +2072,9 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
               ),
               const InfoCard(
                 tone: NoticeTone.info,
-                child: Text('頼むと、形（模様を含む）はこの版で固定されます。色はあとでも変えられます。'),
+                child: Text('頼むと、この形で確認依頼が固定されます。色はあとでも変えられます。'),
               ),
-              if (_busy) const BusyCard(text: '印刷用のデータを準備しています（20〜60秒）'),
+              if (_busy) const BusyCard(text: '印刷用データを準備しています（20〜60秒）'),
               if (_error != null) ErrorCard(message: _error!),
               FilledButton.icon(
                 onPressed:

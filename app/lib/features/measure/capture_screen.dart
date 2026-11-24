@@ -119,11 +119,11 @@ class _CaptureScreenState extends State<CaptureScreen> {
           ),
         ),
       );
-    } on EngineError catch (e) {
+    } on EngineError {
       if (mounted && gen == _pickGen) {
         showError(
           context,
-          'この動画は読めませんでした。カメラの設定を「互換性優先」にして撮り直すか、「カメラで撮る」で撮ってください。（${e.message}）',
+          'この動画は読めませんでした。カメラの設定を「互換性優先」にして撮り直すか、「カメラで撮る」で撮ってください。',
         );
       }
     } catch (e) {
@@ -178,7 +178,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
           const SizedBox(height: 16),
           Semantics(
             header: true,
-            child: Text('手の3Dの形を作るための同意', style: AppText.headlineSmall),
+            child: Text('手の3Dモデルを作るための同意', style: AppText.headlineSmall),
           ),
           const SizedBox(height: 16),
           Container(
@@ -192,27 +192,27 @@ class _CaptureScreenState extends State<CaptureScreen> {
                 _ConsentRow(
                   icon: Icons.image_rounded,
                   label: '送るもの',
-                  text: '手の3Dの形を作るため、手の部分を切り抜いた画像を最大8枚',
+                  text: '手の3Dモデルを作るため、手の部分を切り抜いた画像を最大8枚送ります。',
                 ),
                 _ConsentRow(
                   icon: Icons.monitor_rounded,
-                  label: 'どこで',
-                  text: 'シンガポールのサーバーに送り、計算のためだけに使います',
+                  label: '送り先と使い道',
+                  text: 'シンガポールのサーバーに送り、計算のためだけに使います。',
                 ),
                 _ConsentRow(
                   icon: Icons.lock_rounded,
                   label: '保存しないもの',
-                  text: '送った画像は保存しません。動画そのものは、この端末から外に出しません',
+                  text: '送った画像は保存しません。動画そのものは、この端末から外に出しません。',
                 ),
                 _ConsentRow(
                   icon: Icons.back_hand_rounded,
                   label: '保存するもの',
-                  text: '作った手の3Dの形（写真ではありません）。作った形を確かめるために保存します',
+                  text: 'できあがった手の3Dモデル（写真ではありません）は、形を確かめるために保存します。',
                 ),
                 _ConsentRow(
                   icon: Icons.close_rounded,
                   label: '消すとき',
-                  text: 'ケースを消すと、手の3Dの形も消えます',
+                  text: 'ケースを消すと、手の3Dモデルも一緒に消えます。',
                 ),
               ],
             ),
@@ -226,7 +226,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '同意の文の版：$consentVersion',
+            '同意書バージョン：$consentVersion',
             style: AppText.bodyLarge.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
@@ -299,9 +299,9 @@ class _CaptureScreenState extends State<CaptureScreen> {
         const SizedBox(height: 16),
         for (final (i, s) in const [
           'いつもの握った形のまま、手の甲を上に向けて、手を机に置きます。',
-          '1円玉を、手の甲のまん中（手首と指の付け根の間）に平らにのせます。指の付け根の出っ張りの上は避けてください。',
+          '1円玉を、手の甲の真ん中（手首と指の付け根の間）に平らにのせます。指の付け根の出っ張りの上は避けてください。',
           '撮っているあいだ、手は動かしません。指先から手首までがいつも画面に入る距離で、スマホを構えます。家族や支援者に撮ってもらってもかまいません。',
-          '15〜20秒かけて、スマホを親指側から手の甲の上を通って小指側へ、手のまわりを半周させます。途中で、指の背と関節の出っ張りも写るようにします。',
+          '15〜20秒かけて、スマホを親指側から手の甲の上を通って小指側へ、手のまわりを半周するように動かします。途中で、指の背と関節の出っ張りも写るようにしてください。',
           'PCで撮るときは、ノートPCを持って同じように動かします。動かしにくいときは、スマホで撮るのがおすすめです。',
         ].indexed)
           _StepRow(number: i + 1, text: s),

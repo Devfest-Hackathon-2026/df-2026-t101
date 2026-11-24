@@ -57,8 +57,8 @@ class _FabricatorOrderScreenState extends State<FabricatorOrderScreen> {
         '$key.stl',
         mockPath: item['path'] as String?,
       );
-    } catch (e) {
-      if (mounted) showError(context, 'ダウンロードできませんでした。もう一度試してください。（$e）');
+    } catch (_) {
+      if (mounted) showError(context, 'ダウンロードできませんでした。もう一度試してください。');
     }
   }
 
@@ -184,7 +184,7 @@ class _FabricatorOrderScreenState extends State<FabricatorOrderScreen> {
           ),
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text('手の3D・採寸・聞き取りの内容は、受託者には見せません。', style: AppText.supporting),
+            child: Text('手の3Dモデル・採寸・聞き取りの内容は、工房には表示されません。', style: AppText.supporting),
           ),
         ],
       ],

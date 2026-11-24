@@ -79,7 +79,7 @@ def check_cover(cover: trimesh.Trimesh, hand_ref: HandRef, cut: dict, bed=None) 
     dmin = float(d.min())
     out.append(_item("R6e", dmin >= cut["c"] - 0.3, {"min_dist_to_hand_mm": round(dmin, 2), "clearance_mm": cut["c"],
                      "thickness_mm": cut["t"]},
-                     "手に食い込まない（厚さは作り方で t 以上）" if dmin >= cut["c"] - 0.3 else "カバーが手に近すぎます"))
+                     "手に食い込まず、必要な厚みを保っています" if dmin >= cut["c"] - 0.3 else "カバーが手に近すぎます"))
     # R6g：刷る向き（手のひら側の切り口が下 ＝ 正準形の +z が下）での外側の張り出し（記録だけ）
     outer = trimesh.Trimesh(V, cover.faces, process=False)
     fc = outer.triangles_center
@@ -88,7 +88,7 @@ def check_cover(cover: trimesh.Trimesh, hand_ref: HandRef, cut: dict, bed=None) 
     sel = ((n @ np.array([0, 0, 1.0])) > math.cos(math.radians(45))) & (dc > cut["c"] + cut["t"] * 0.6)
     area = float(outer.area_faces[sel].sum())
     out.append(_item("R6g", True, {"outer_overhang_mm2": round(area, 1)},
-                     "外側の張り出しは少ない" if area <= 300 else "外側にもサポートが要るおそれがあります（印刷ガイドに出す）",
+                     "外側の張り出しは少ない" if area <= 300 else "外側にもサポートが要るおそれがあります",
                      severity="info"))
     return out
 
@@ -111,7 +111,7 @@ def check_clip(clip_print: trimesh.Trimesh, clip: dict) -> list[dict]:
                      "クリップの開きは道具より狭く、1つのかたまり" if ok_open else "クリップの開きが広すぎて道具が抜けます"))
     if area > 50.0:
         out.append(_item("R6f_overhang", True, {"overhang_mm2": round(area, 1)},
-                         "この角度のクリップは、サポートが要るかもしれません（印刷ガイドに出す）", severity="info"))
+                         "この角度のクリップは、サポートが要るかもしれません", severity="info"))
     return out
 
 

@@ -56,7 +56,7 @@ class _FabricatorListScreenState extends State<FabricatorListScreen> {
     final d = _data;
     final list = [for (final f in (d?['fabricators'] as List? ?? const [])) Map<String, dynamic>.from(f as Map)];
     return AppPage(
-      title: '受託者を選ぶ',
+      title: '工房を選ぶ',
       children: [
         if (_demo) const DemoBanner(),
         const InfoCard(tone: NoticeTone.warning, child: Text(fictionalNotice)),
@@ -66,7 +66,7 @@ class _FabricatorListScreenState extends State<FabricatorListScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              'アプリが決めた機種（${d['printer']?['model'] ?? ''}）を持つ受託者だけを出しています。金額の安い順です。',
+              '指定の機種（${d['printer']?['model'] ?? ''}）に対応している工房だけを表示しています。金額の安い順です。',
               style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
             ),
           ),

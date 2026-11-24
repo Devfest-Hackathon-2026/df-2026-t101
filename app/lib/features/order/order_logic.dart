@@ -2,7 +2,7 @@
 /// 金額の式は生成APIの app/fabrication.py と同じ。画面ではこれでその場で計算し、保存する値はサーバーが計算し直す
 library;
 
-const fictionalNotice = 'デモ用の架空の受託者です。実在の会社ではありません。';
+const fictionalNotice = 'デモ用の架空の工房です。実在の会社ではありません。';
 
 /// 10円単位の四捨五入（サーバーの round10 と同じ）
 int round10(num yen) => ((yen / 10) + 0.5).floor() * 10;
@@ -50,7 +50,7 @@ String orderStatusJa(String? s) => switch (s) {
   'received' => '受付',
   'printing' => '造形中',
   'shipped' => '発送済み',
-  'delivered' => '受け取った',
+  'delivered' => '受取済み',
   'cancelled' => '取り消し',
   _ => '',
 };
