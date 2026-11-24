@@ -6,15 +6,22 @@ class ToolAnswer {
   String? shaftSize; // thin / medium / thick / unknown（区分を選んだとき）
   String? shaftShape; // round / flat
 
+  /// 柄の形（丸い／平たい）を聞く道具か。ペン・筆の柄は丸いので聞かず「丸い」で送る（2026-11-24）。
+  /// 平たい柄があり得るスプーン（食べる）と、その他だけ聞く
+  bool get asksShape => activity == 'eat' || activity == 'other' || toolType == 'spoon';
+
+  /// 送る柄の形。聞かない道具は「丸い」（前に選んだ形が残っていても見ない）
+  String? get shapeOrDefault => asksShape ? shaftShape : 'round';
+
   bool get isComplete =>
-      activity != null && (toolDmm != null || shaftSize != null) && shaftShape != null;
+      activity != null && (toolDmm != null || shaftSize != null) && shapeOrDefault != null;
 
   Map<String, dynamic> toJson() => {
     'activity': activity,
     'tool_type': toolType,
     'tool_d_mm': toolDmm,
     'tool_shaft_size': toolDmm == null ? shaftSize : null,
-    'tool_shaft_shape': shaftShape,
+    'tool_shaft_shape': shapeOrDefault,
   };
 
   /// 区分で答えたときはサーバーが tool_d_mm に目安を入れて tool_d_source を 'category' にするので、
@@ -37,19 +44,21 @@ class ToolAnswer {
 /// 質問1のやりたいことと道具の組（その他は筆）
 const activityTool = {'draw': 'brush', 'write': 'pen', 'eat': 'spoon', 'other': 'brush'};
 
-/// S2a の選択式の並び（質問3・4は道具ごと）。(質問, 道具の番号)。道具がなければ質問3・4の段は作らない。
+/// S2a の選択式の並び（質問3・4は道具ごと。質問4の柄の形は、聞く道具＝ToolAnswer.asksShape だけ）。
+/// (質問, 道具の番号)。道具がなければ質問3・4の段は作らない。
 /// 質問5（カバーと留め具を誰が着け外しするか）は 2026-11-24 に聞くのをやめた：形にも部品にも効かず、留め具を
 /// 万力式にしてからは、ねじを支援者が回す前提で答えが決まるため。答えは「家族や支援者がする」（helper）で送る
-List<(int, int)> interviewSteps(int nTools) => [
+List<(int, int)> interviewSteps(List<ToolAnswer> tools) => [
   (0, 0),
   (1, 0),
-  for (var i = 0; i < nTools; i++) ...[(2, i), (3, i)],
+  for (var i = 0; i < tools.length; i++) ...[(2, i), if (tools[i].asksShape) (3, i)],
   (5, 0),
   (6, 0),
 ];
 
-/// 進み具合に出す全体の数。まだ道具を選んでいなくても、道具1つとして数える（「1 / 6」）
-int interviewTotal(int nTools) => 4 + 2 * (nTools < 1 ? 1 : nTools);
+/// 進み具合に出す全体の数。まだ道具を選んでいなくても、道具1つ（柄の形を聞かない）として数える（「1 / 5」）
+int interviewTotal(List<ToolAnswer> tools) =>
+    4 + (tools.isEmpty ? 1 : tools.fold(0, (n, t) => n + (t.asksShape ? 2 : 1)));
 
 /// 選択式の答え（requirements の名前は api.md §3.2）
 class Answers {
@@ -62,7 +71,7 @@ class Answers {
   /// 主な道具（最初の丸い柄、なければ最初）。空のときは空の答えを返す（tools は増やさない）。
   ToolAnswer get primary => tools.isEmpty
       ? ToolAnswer()
-      : tools.firstWhere((t) => t.shaftShape != 'flat', orElse: () => tools[0]);
+      : tools.firstWhere((t) => t.shapeOrDefault != 'flat', orElse: () => tools[0]);
 
   // setter だけが道具を作る（空なら1つ足す）。あれば主な道具に書く
   ToolAnswer get _target {
@@ -119,7 +128,7 @@ class Answers {
     0 => tools.isNotEmpty && tools.every((t) => t.activity != null),
     1 => handSide != null,
     2 => tools.isNotEmpty && tools.every((t) => t.toolDmm != null || t.shaftSize != null),
-    3 => tools.isNotEmpty && tools.every((t) => t.shaftShape != null),
+    3 => tools.isNotEmpty && tools.every((t) => t.shapeOrDefault != null),
     4 => donningBy != null,
     5 => fingerState != null,
     _ => captureBy != null,

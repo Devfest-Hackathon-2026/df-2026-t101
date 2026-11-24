@@ -85,7 +85,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
   }
 
   /// 選択式の並び（質問3・4は道具ごと）。道具が1つなら6問（着け外しは 2026-11-24 に聞くのをやめた）
-  List<(int, int)> get _steps => interviewSteps(a.tools.length);
+  List<(int, int)> get _steps => interviewSteps(a.tools);
 
   int get _pos => _steps.indexOf((_q, _t)).clamp(0, _steps.length - 1);
 
@@ -243,7 +243,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     if (_q == 8) return _summaryPage();
     final (title, choices) = _question(_q);
     final pos = _pos;
-    final total = interviewTotal(a.tools.length);
+    final total = interviewTotal(a.tools);
     return AppPage(
       title: 'やりたいこと',
       onBack: pos == 0
@@ -583,7 +583,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     String thick(ToolAnswer t) => t.toolDmm != null
         ? '${t.toolDmm!.toStringAsFixed(1)}mm（mmで入力）'
         : '${_shaftJa[t.shaftSize]}';
-    String shape(ToolAnswer t) => t.shaftShape == 'flat' ? '平たい' : '丸い';
+    String shape(ToolAnswer t) => t.shapeOrDefault == 'flat' ? '平たい' : '丸い';
     // (見出し, 答え, 戻る質問, 道具の番号)。道具が2つ以上なら、道具ごとに「道具・太さ・形」の1行
     final rows = <(String, String, int, int)>[
       (
@@ -595,7 +595,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
       ('着ける手', a.handSide == 'left' ? '左手' : '右手', 1, 0),
       if (one) ...[
         ('柄の太さ', thick(a.tools[0]), 2, 0),
-        ('柄の形', shape(a.tools[0]), 3, 0),
+        if (a.tools[0].asksShape) ('柄の形', shape(a.tools[0]), 3, 0),
       ] else
         for (final (i, t) in a.tools.indexed)
           (_toolName(i), '柄の太さ ${thick(t)}・${shape(t)}', 2, i),
@@ -613,7 +613,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
     ];
     final guessed = [
       for (final (i, t) in a.tools.indexed)
-        if (t.toolDmm == null && t.shaftShape != 'flat') _toolName(i),
+        if (t.toolDmm == null && t.shapeOrDefault != 'flat') _toolName(i),
     ];
     return AppPage(
       title: 'まとめ',
@@ -690,7 +690,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (one && a.tools[0].shaftShape == 'flat')
+        if (one && a.tools[0].shapeOrDefault == 'flat')
           const InfoCard(
             tone: NoticeTone.warning,
             child: Text('平たい柄の留め具は準備中です。丸い柄の道具を使うか、家族やOTと相談してください。'),
@@ -698,7 +698,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         // 道具が2つ以上：平たい柄の道具だけ留め具を作らない（ADR-0014 §1）
         if (!one)
           for (final t in a.tools)
-            if (t.shaftShape == 'flat')
+            if (t.shapeOrDefault == 'flat')
               InfoCard(
                 tone: NoticeTone.warning,
                 child: Text(

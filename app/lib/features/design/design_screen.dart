@@ -1184,7 +1184,8 @@ class _ToolSheetState extends State<_ToolSheet> {
                     _t.toolDmm ??= 8.5;
                     _t.shaftSize = null;
                   }, 'おすすめ。定規で測った太さを入れます'),
-                if (!widget.fix) ...[
+                // 柄の形はスプーンだけ聞く（ペン・筆の柄は丸い。2026-11-24）
+                if (!widget.fix && _t.asksShape) ...[
                   const SectionLabel('柄の形'),
                   choice('丸い', _t.shaftShape == 'round', () => _t.shaftShape = 'round'),
                   choice('平たい', _t.shaftShape == 'flat', () => _t.shaftShape = 'flat'),

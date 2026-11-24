@@ -117,13 +117,13 @@ ToolAnswer newTool(String toolType) => ToolAnswer()
   ..activity = toolActivity[toolType];
 
 /// 平たい柄を選んだときの知らせ
-String? flatNotice(ToolAnswer t) => t.shaftShape == 'flat' ? flatReason(t.toolType) : null;
+String? flatNotice(ToolAnswer t) => t.shapeOrDefault == 'flat' ? flatReason(t.toolType) : null;
 
 /// 「足す」「この太さで直す」を押せるか。太さを直すときは形を聞かない
 bool canSubmitTool(ToolAnswer t, {bool fixOnly = false}) {
   final thick = t.toolDmm != null || t.shaftSize != null;
   if (fixOnly) return thick;
-  return t.toolType != null && t.activity != null && thick && t.shaftShape == 'round';
+  return t.toolType != null && t.activity != null && thick && t.shapeOrDefault == 'round';
 }
 
 /// 送る太さ（mm、なければ区分の目安、わからなければ道具の目安）
