@@ -9,6 +9,8 @@ import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/session.dart';
 import 'package:jijogu_app/core/storage/files.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
+import 'package:jijogu_app/features/order/order_logic.dart';
+import 'package:jijogu_app/features/order/order_status_card.dart';
 
 const caseStatusJa = {
   'interviewing': '聞き取り中',
@@ -37,27 +39,112 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
   List<Map<String, dynamic>>? _cases;
   String? _error;
   bool _busy = false;
+
+  /// 受託者アカウントなら「受けた注文」の入口を出す（設計 §6.4）
+  bool _isFabricator = false;
+
+  /// OTのアカウントなら、自分宛ての確認の依頼（GET /v1/reviews）。OTでなければ null で、欄を出さない
+  List<Map<String, dynamic>>? _reviews;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _checkFabricator();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) AppRouter.observer.subscribe(this, route);
+  }
+
+  @override
+  void dispose() {
+    AppRouter.observer.unsubscribe(this);
+    super.dispose();
+  }
+
+  /// 上の画面が閉じてホームに戻ってきたら、ケースと依頼を読み直す。
+  /// 開いた画面の push を待って読み直すのでは足りない：問診は撮影の画面に置き換わって移るので、その時点で
+  /// 待ちが終わってしまい、生成の画面から「ホームに戻る」で戻っても読み直さなかった（カードが「撮影を待っています」の
+  /// まま残り、押すとカメラが開いた）
+  @override
+  void didPopNext() => _load();
+
+  Future<void> _loadReviews() async {
+    try {
+      final r = await Api.instance.get('/v1/reviews');
+      final list = (r is Map ? r['reviews'] : r) as List? ?? [];
+      if (mounted) {
+        setState(() => _reviews = [for (final x in list) Map<String, dynamic>.from(x)]);
+      }
+    } catch (_) {
+      // OTでなければ 403。欄を出さない
+    }
+  }
+
+  Future<void> _openReview(Map<String, dynamic> r) async {
+    await Navigator.of(context).pushNamed(AppRouter.review('${r['case_id']}'));
+    // 読み直しは didPopNext
+  }
+
+  /// OTのホームの欄：確認待ちを上に、確認済み・差し戻しは畳んでおく
+  List<Widget> _reviewSection() {
+    final all = _reviews ?? const <Map<String, dynamic>>[];
+    if (all.isEmpty) return const [];
+    final pending = [for (final r in all) if (r['approval_status'] == 'requested') r];
+    final done = [for (final r in all) if (r['approval_status'] != 'requested') r];
+    return [
+      SectionLabel('確認を頼まれているケース（${pending.length}件）'),
+      if (pending.isEmpty)
+        const InfoCard(child: Text('いま確認を待っているケースはありません。')),
+      for (final r in pending)
+        _ReviewCard(key: ValueKey('review-${r['case_id']}'), data: r, onTap: () => _openReview(r)),
+      if (done.isNotEmpty)
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text('確認済み・差し戻し（${done.length}件）', style: AppText.titleMedium),
+            children: [
+              for (final r in done)
+                _ReviewCard(key: ValueKey('review-${r['case_id']}'), data: r, onTap: () => _openReview(r)),
+            ],
+          ),
+        ),
+      const SizedBox(height: 8),
+    ];
+  }
+
+  Future<void> _checkFabricator() async {
+    try {
+      await Api.instance.get('/v1/fabricator/me');
+      if (mounted) setState(() => _isFabricator = true);
+    } catch (_) {
+      // 受託者アカウントでなければ 403。入口を出さない
+    }
+  }
+
+  /// 自分のケースと、OTなら確認の依頼も読み直す（ほかの画面から戻ったときも、依頼の状態が変わっているので）
   Future<void> _load() async {
+    _loadReviews();
+    if (!mounted) return;
     setState(() => _error = null);
     try {
       final r = await Api.instance.get('/v1/cases');
       final list = (r is Map ? r['cases'] : r) as List? ?? [];
+      if (!mounted) return;
       setState(
         () => _cases = [for (final c in list) Map<String, dynamic>.from(c)],
       );
     } catch (e) {
-      setState(() => _error = '$e');
+      if (mounted) setState(() => _error = '$e');
     }
   }
 
@@ -67,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final r = await Api.instance.post('/v1/cases', {'title': '筆のカバー'});
       if (!mounted) return;
       await Navigator.of(context).pushNamed(AppRouter.interview(r['case_id']));
-      _load();
+      // 読み直しは didPopNext（問診は撮影の画面に置き換わるので、ここで待っても戻ってきた時ではない）
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -118,7 +205,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final empty = _error == null && _cases != null && _cases!.isEmpty;
+    final noCases = _error == null && _cases != null && _cases!.isEmpty;
+    final hasReviews = _reviews?.isNotEmpty ?? false;
+    // 大きな空の状態は、OTの欄がないときだけ（OTのホームは、確認の依頼が主役）
+    final empty = noCases && !hasReviews;
     return AppPage(
       title: 'Hand-Some-Fit',
       titleWidget: Image.asset(
@@ -129,17 +219,27 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       large: true,
       actions: [
+        if (_isFabricator)
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).pushNamed(Paths.fabricator()),
+            icon: const Icon(Icons.storefront_rounded),
+            label: const Text('受けた注文'),
+          ),
         _AccountMenu(name: Session.instance.displayName),
         const SizedBox(width: 4),
       ],
-      floatingActionButton: empty
+      // 「新しく作る」は画面の下に幅いっぱいで置く（主なボタンの決まり）。右下の浮いたボタンだと
+      // 右手の親指でしか届きにくく、左手や片手で使う人に遠かった（2026-11-22）。
+      // 空の状態は、本文のまん中に同じボタンがあるので出さない
+      bottom: empty
           ? null
-          : FloatingActionButton.extended(
+          : FilledButton.icon(
               onPressed: _busy ? null : _create,
-              icon: const Icon(Icons.add_rounded, size: 24),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('新しく作る'),
             ),
       children: [
+        ..._reviewSection(),
         if (_error != null)
           ErrorCard(message: '読み込めませんでした（$_error）', onRetry: _load)
         else if (_cases == null) ...[
@@ -147,16 +247,19 @@ class _HomeScreenState extends State<HomeScreen> {
           for (var i = 0; i < 3; i++) const _CardSkeleton(),
         ] else if (empty)
           _EmptyState(onCreate: _busy ? null : _create)
-        else ...[
+        else if (noCases) ...[
+          const SectionLabel('作りかけ・作った道具'),
+          Text(
+            'まだありません。',
+            style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+          ),
+        ] else ...[
           const SectionLabel('作りかけ・作った道具'),
           for (final c in _cases!)
             _CaseCard(
               key: ValueKey(c['case_id']),
               data: c,
-              onTap: () async {
-                await Navigator.of(context).pushNamed(continueRoute(c));
-                _load();
-              },
+              onTap: () => Navigator.of(context).pushNamed(continueRoute(c)),  // 読み直しは didPopNext
               onDelete: () => _delete(c),
             ),
           const SizedBox(height: 8),
@@ -276,31 +379,47 @@ class _CaseCardState extends State<_CaseCard> {
   Uint8List? _thumb;
   bool _rejected = false;
 
+  int _loadSeq = 0; // 古い読み込みの結果で上書きしないため
+
   @override
   void initState() {
     super.initState();
     _loadDesign();
   }
 
+  /// ホームが読み直してケースが変わっていたら、版も読み直す。カードは case_id をキーに使い回されるので、
+  /// initState だけでは、生成のあとの画像や、もう一度頼んだあとの「差し戻し」の取り消しが反映されなかった
+  @override
+  void didUpdateWidget(_CaseCard old) {
+    super.didUpdateWidget(old);
+    const keys = ['current_design_id', 'status', 'updated_at'];
+    if (keys.any((k) => '${old.data[k]}' != '${widget.data[k]}')) _loadDesign();
+  }
+
   /// 最新の版を読み、画像と「差し戻し」かどうかを取る。失敗してもカードはそのまま出す
   Future<void> _loadDesign() async {
+    final seq = ++_loadSeq;
     final c = widget.data;
     final d = c['current_design_id'] as String?;
-    if (d == null) return;
+    if (d == null) {
+      _rejected = false; // initState・didUpdateWidget から同期で来るので、このあと build される
+      return;
+    }
     try {
       final r = await Api.instance.get('/v1/cases/${c['case_id']}/designs/$d');
+      if (!mounted || seq != _loadSeq) return;
       final design = Map<String, dynamic>.from(
         (r is Map && r['design'] != null) ? r['design'] : r,
       );
       final rejected = (design['approval'] as Map?)?['status'] == 'rejected';
       final iso =
           ((design['files'] as Map?)?['views'] as Map?)?['iso'] as String?;
-      if (mounted && rejected) setState(() => _rejected = true);
+      if (rejected != _rejected) setState(() => _rejected = rejected);
       if (iso == null) return;
       final ref = await Files.resolve(iso);
       final res = await http.get(Uri.parse(ref.url), headers: ref.headers);
       if (res.statusCode >= 400 || res.bodyBytes.isEmpty) return;
-      if (mounted) setState(() => _thumb = res.bodyBytes);
+      if (mounted && seq == _loadSeq) setState(() => _thumb = res.bodyBytes);
     } catch (_) {
       // 画像がなくても一覧は使える
     }
@@ -325,6 +444,8 @@ class _CaseCardState extends State<_CaseCard> {
     }
     final title = '${c['title'] ?? '道具'}';
     final updated = _updated(c['updated_at']);
+    final lo = c['latest_order'] is Map ? Map<String, dynamic>.from(c['latest_order'] as Map) : null;
+    final orderLabel = lo == null ? '' : '注文：${orderStatusJa('${lo['status']}')}';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Material(
@@ -337,7 +458,7 @@ class _CaseCardState extends State<_CaseCard> {
             Expanded(
               child: Semantics(
                 button: true,
-                label: '$title、$label、$updated',
+                label: '$title、$label${orderLabel.isEmpty ? '' : '、$orderLabel'}、$updated',
                 excludeSemantics: true,
                 child: InkWell(
                   onTap: widget.onTap,
@@ -354,6 +475,14 @@ class _CaseCardState extends State<_CaseCard> {
                               Text(title, style: AppText.titleMedium),
                               const SizedBox(height: 4),
                               StatusLabel(label: label, tone: tone, icon: icon),
+                              if (lo != null) ...[
+                                const SizedBox(height: 4),
+                                StatusLabel(
+                                  label: orderLabel,
+                                  tone: OrderStatusCard.toneOf('${lo['status']}'),
+                                  icon: Icons.local_shipping_rounded,
+                                ),
+                              ],
                               if (updated.isNotEmpty) ...[
                                 const SizedBox(height: 4),
                                 Text(
@@ -399,6 +528,128 @@ class _CaseCardState extends State<_CaseCard> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// OTの確認の状態の札（approval.status）
+(String, StatusTone, IconData) _reviewLook(String? s) => switch (s) {
+  'requested' => ('確認待ち', StatusTone.warning, Icons.hourglass_top_rounded),
+  'approved' => ('確認済み', StatusTone.success, Icons.check_circle_outline_rounded),
+  'rejected' => ('差し戻し済み', StatusTone.error, Icons.undo_rounded),
+  // 差し戻しのあと、依頼した人が形を直していて、新しい版はまだ頼まれていない
+  _ => ('依頼した人が直しています', StatusTone.neutral, Icons.edit_outlined),
+};
+
+/// 確認の依頼のカード（OTのホーム）。押すと S9 OT確認へ
+class _ReviewCard extends StatefulWidget {
+  const _ReviewCard({super.key, required this.data, required this.onTap});
+  final Map<String, dynamic> data;
+  final VoidCallback onTap;
+  @override
+  State<_ReviewCard> createState() => _ReviewCardState();
+}
+
+class _ReviewCardState extends State<_ReviewCard> {
+  Uint8List? _thumb;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumb();
+  }
+
+  Future<void> _loadThumb() async {
+    final iso = widget.data['iso'] as String?;
+    if (iso == null) return;
+    try {
+      final ref = await Files.resolve(iso);
+      final res = await http.get(Uri.parse(ref.url), headers: ref.headers);
+      if (res.statusCode >= 400 || res.bodyBytes.isEmpty) return;
+      if (mounted) setState(() => _thumb = res.bodyBytes);
+    } catch (_) {
+      // 画像がなくてもカードは使える
+    }
+  }
+
+  static String _date(Object? v) {
+    final t = DateTime.tryParse('${v ?? ''}')?.toLocal();
+    if (t == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.month}/${t.day} ${two(t.hour)}:${two(t.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.data;
+    final (label, tone, icon) = _reviewLook(r['approval_status'] as String?);
+    final rev = r['revision'];
+    final title = '${r['title'] ?? '道具'}${rev == null ? '' : '・版$rev'}';
+    final who = '${r['requester_name'] ?? ''}'.trim();
+    final requested = _date(r['requested_at']);
+    final decided = _date(r['decided_at']);
+    final when = [
+      if (requested.isNotEmpty) '依頼 $requested',
+      if (decided.isNotEmpty) '確認 $decided',
+    ].join('　');
+    final msg = '${r['message_ja'] ?? ''}'.trim();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Material(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Semantics(
+          button: true,
+          label: [
+            title,
+            label,
+            if (who.isNotEmpty) '$whoさんから',
+            if (when.isNotEmpty) when,
+            if (msg.isNotEmpty) 'ひとこと：$msg',
+          ].join('、'),
+          excludeSemantics: true,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              child: Row(
+                children: [
+                  _Thumb(bytes: _thumb, statusIcon: icon),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: AppText.titleMedium),
+                        const SizedBox(height: 4),
+                        StatusLabel(label: label, tone: tone, icon: icon),
+                        if (who.isNotEmpty || when.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            [if (who.isNotEmpty) '$whoさんから', if (when.isNotEmpty) when].join('　'),
+                            style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant),
+                          ),
+                        ],
+                        if (msg.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '「$msg」',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.bodyLarge.copyWith(color: AppColors.onSurface),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppColors.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

@@ -630,7 +630,7 @@ def run(case_id: str, *, origin: str = "initial", parent: dict | None = None, st
             "cover_shell_sha256": result.get("cover_shell_sha256"),
             "clip_angle_deg": angle, "clip": result.get("clip"), "tool": result.get("tool"), "checks": result.get("checks", []),
             "attachments": atts,
-            "summary_ja": summary_ja or "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
+            "summary_ja": summary_ja or "手の甲に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。",
             "input_snapshot": {"requirements": new_req or req, "measurement_id": case.get("measurement_id"),
                                "hand_model": case.get("hand_model")},
             "usage": {**usage.as_dict(), "openscad_ms": (result.get("timings_ms") or {}).get("openscad", 0)},
@@ -671,12 +671,21 @@ def _discard_added(case_id: str, design_id: str, origin: str, parent: dict | Non
     return True
 
 
-def design_view(case_id: str, design_id: str) -> dict:
-    d = db.get(f"cases/{case_id}/designs/{design_id}") or {}
+def design_view(case_id: str, design_id: str, d: dict | None = None) -> dict:
+    """版を画面に返す形にする。d に読んだばかりの版を渡せば、もう一度は読まない（2026-11-24。
+    GET design は生成中に2秒ごとに呼ばれ、前は同じ文書を2回読んでいた）"""
+    if d is None:
+        d = db.get(f"cases/{case_id}/designs/{design_id}") or {}
     keep = ("revision", "status", "parts", "params", "review", "warnings", "hand_overlay", "files", "approval",
             "summary_ja", "progress", "style", "clip_angle_deg", "clip", "tool", "error", "clamped", "geometry_hash", "origin",
             "parent_design_id", "print_prepared_at", "attachments")
     return {"design_id": design_id, **{k: d.get(k) for k in keep if k in d}}
+
+
+def current_geometry_hash(case: dict, d: dict) -> str:
+    """版の今の形のハッシュ（prepare_print が書く geometry_hash と同じ計算。作り直さずに比べるため）"""
+    return geometry_hash([p["part_id"] for p in d["parts"]], validator.params_from_records(d["params"]),
+                         d.get("cover_shell_sha256"), _attachments_of(d, case.get("requirements") or {}))
 
 
 def prepare_print(case_id: str, design_id: str, kind: str) -> dict:
@@ -687,6 +696,7 @@ def prepare_print(case_id: str, design_id: str, kind: str) -> dict:
     params = validator.params_from_records(d["params"])
     selected = [p["part_id"] for p in d["parts"]]
     atts = _attachments_of(d, case.get("requirements") or {})
+    ghash = current_geometry_hash(case, d)   # 形を作る前の値で（前と同じ）
     stems = clip_stems(atts)
     extras = {a["id"]: {"tool_d_mm": a["tool_d_mm"], "angle_deg": a["angle_deg"]} for a in atts[1:]}
     workdir = tempfile.mkdtemp(prefix="jijogu_print_")
@@ -712,8 +722,7 @@ def prepare_print(case_id: str, design_id: str, kind: str) -> dict:
             files.put(key, data, "model/stl")
             shas[pk] = hashlib.sha256(data).hexdigest()
             keys[pk] = key
-        return {"print_sha256": shas, "internal_keys": keys,
-                "geometry_hash": geometry_hash(selected, params, d.get("cover_shell_sha256"), atts)}
+        return {"print_sha256": shas, "internal_keys": keys, "geometry_hash": ghash}
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

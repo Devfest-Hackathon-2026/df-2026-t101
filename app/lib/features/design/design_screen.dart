@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:jijogu_app/app/router.dart';
 import 'package:jijogu_app/core/api/api.dart';
 import 'package:jijogu_app/core/models/attachments.dart';
+import 'package:jijogu_app/core/models/param_step.dart';
+import 'package:jijogu_app/core/models/refine_choice.dart';
 import 'package:jijogu_app/core/models/requirements.dart' show ToolAnswer;
 import 'package:jijogu_app/core/storage/files.dart';
 import 'package:jijogu_app/core/text_ja.dart';
@@ -17,8 +19,8 @@ import 'package:jijogu_app/core/viewer/viewer_3d.dart';
 const _stepJa = {
   'selecting': '部品を選んでいます',
   'dimensioning': '寸法を決めています',
-  'shelling': 'カバーの形を作っています（こぶしに沿った殻とクリップ）',
-  'rendering': 'カバーの形を作っています（こぶしに沿った殻とクリップ）',
+  'shelling': 'カバーの形を作っています（手の甲に沿った殻とクリップ）',
+  'rendering': 'カバーの形を作っています（手の甲に沿った殻とクリップ）',
   'reviewing': '画像で確認しています',
 };
 const _steps = ['selecting', 'dimensioning', 'shelling', 'reviewing'];
@@ -50,12 +52,14 @@ class DesignScreen extends StatefulWidget {
     this.autoStart = false,
     this.recommendedAngles = const {},
     this.attachmentId,
+    this.doneNotice,
   });
   final String caseId;
   final String? designId;
   final bool autoStart;
   final Map<String, int> recommendedAngles; // 取り付け具ごとにAIが選んだ角度（版をまたいで「おすすめ」を出すため）
   final String? attachmentId; // 選んでいる取り付け具（新しい版でも同じものを見せるため）
+  final String? doneNotice; // 直してできた版を開いたときに上に出す文（何を直したか）
   @override
   State<DesignScreen> createState() => _DesignScreenState();
 }
@@ -69,7 +73,10 @@ class _DesignScreenState extends State<DesignScreen> {
   String? _progressIso; // 生成中に読めた確認用画像（S6「AIが確認している画像」）
   String? _error;
   bool _errorRetry = false;
-  String? _busy; // 微調整中の文
+  String? _busy; // 微調整中の文（画面の下のボタンの所に出す。上に出すと、下のほうで押したときに見えない）
+  // 選んだ直し方（よく使う指示・角度）。押しただけでは送らず、画面の下の「〜で直す」で送る（2026-11-22）
+  RefineChoice? _choice;
+  String? _refineError; // 直すのに失敗したときの文（画面の下に出す）
   bool _showHand = true;
   late Map<String, int> _recommended = {...widget.recommendedAngles};
   late String? _attId = widget.attachmentId; // 選んでいる取り付け具（最初は主な取り付け具）
@@ -123,6 +130,7 @@ class _DesignScreenState extends State<DesignScreen> {
   Future<void> _loadDesign(String id) async {
     final r = await Api.instance.get('/v1/cases/$_cid/designs/$id');
     final d = Map<String, dynamic>.from(r['design'] ?? r);
+    if (!mounted) return;
     _setDesign(d);
   }
 
@@ -264,7 +272,7 @@ class _DesignScreenState extends State<DesignScreen> {
   }
 
   /// 新しい版を開く（パスも新しい版にする。戻るでケース一覧へ）
-  void _openVersion(String nid) {
+  void _openVersion(String nid, {String? notice}) {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         settings: RouteSettings(name: AppRouter.design(_cid, nid)),
@@ -273,17 +281,39 @@ class _DesignScreenState extends State<DesignScreen> {
           designId: nid,
           recommendedAngles: _recommended,
           attachmentId: _attId,
+          doneNotice: notice,
         ),
       ),
     );
   }
 
-  Future<void> _refine(Map<String, dynamic> body, String busyText) async {
+  /// 選んだ直し方を送る（画面の下の「〜で直す」）
+  Future<void> _sendChoice() async {
+    final c = _choice;
+    if (c == null) return;
+    await _refine(c.body, c.busyText, doneText: c.doneText, choice: c);
+  }
+
+  /// 選ぶ・選び直す。同じものをもう一度押したら、選ぶのをやめる
+  void _toggleChoice(RefineChoice c) => setState(() {
+    _choice = _choice == c ? null : c;
+    _refineError = null;
+  });
+
+  /// [doneText] は新しい版を開いたときに上に出す文。失敗したら [choice] を選んだままに戻す（入力を残す）
+  Future<void> _refine(
+    Map<String, dynamic> body,
+    String busyText, {
+    String? doneText,
+    RefineChoice? choice,
+  }) async {
     final d = _design;
     if (d == null) return;
     setState(() {
       _busy = busyText;
       _error = null;
+      _refineError = null;
+      _choice = null;
       _clarify = null;
     });
     try {
@@ -300,7 +330,10 @@ class _DesignScreenState extends State<DesignScreen> {
         _attId = selectionAfter(before, _attachments(nd), _attId);
         _setDesign(nd);
         if (r['design']['design_id'] != d['design_id'] && mounted) {
-          _openVersion(r['design']['design_id'] as String); // 新しい版
+          _openVersion(
+            r['design']['design_id'] as String,
+            notice: doneText,
+          ); // 新しい版
         }
       }
     } on ApiError catch (e) {
@@ -308,7 +341,10 @@ class _DesignScreenState extends State<DesignScreen> {
         _followServer();
         return;
       }
-      setState(() => _error = e.message);
+      setState(() {
+        _refineError = e.message;
+        _choice = choice;
+      });
     } finally {
       if (mounted && !_detached) setState(() => _busy = null);
     }
@@ -336,8 +372,10 @@ class _DesignScreenState extends State<DesignScreen> {
   }
 
   /// S8 を下から出す（Figma：モーダルのボトムシート）
-  void _openReview(Map<String, dynamic> d) {
-    showModalBottomSheet<void>(
+  /// 閉じたら版を読み直す。頼んだあとは approval が requested になり、「確認を待っています」と直す操作の
+  /// 鍵がかかる（読み直さないと、もう一度頼めたり、直して版が変わり OT の承認が STALE_DESIGN で失敗したりした）
+  Future<void> _openReview(Map<String, dynamic> d) async {
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -345,6 +383,12 @@ class _DesignScreenState extends State<DesignScreen> {
       backgroundColor: AppColors.surfaceContainerLow,
       builder: (_) => ReviewRequestDialog(caseId: _cid, design: d),
     );
+    if (!mounted) return;
+    try {
+      await _loadDesign('${d['design_id']}');
+    } catch (_) {
+      // 読み直せなくても、画面はそのまま使える（次に開いたときに直る）
+    }
   }
 
   @override
@@ -401,8 +445,10 @@ class _DesignScreenState extends State<DesignScreen> {
     return AppPage(
       title: '形を作っています',
       bottom: OutlinedButton(
+        // ホームへ戻るだけで、形を作る処理はサーバーで続く（中止の API はない）。
+        // 前は「中止して戻る」で、止まると思われやすかった（2026-11-22）
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('中止して戻る（作業は続きます）'),
+        child: const Text('ホームに戻る（作業は続きます）'),
       ),
       children: _spaced(16, [
         if (iso != null) _CheckImage(path: iso),
@@ -493,46 +539,29 @@ class _DesignScreenState extends State<DesignScreen> {
     final locked = approval == 'requested';
     final idle = _busy == null;
     return AppPage(
-      title: '形を確かめる（${d['revision'] ?? 1}版）',
+      // 版の番号は見出しに出さない（使う人には「版」が分かりにくい。2026-11-22）
+      title: '形を確かめる',
       onBack: () =>
           Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false),
-      bottom: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (approval == 'approved')
-            FilledButton.icon(
-              onPressed: () =>
-                  Navigator.of(context)
-                      .pushNamed(AppRouter.print(_cid, d['design_id'])),
-              icon: const Icon(Icons.print_rounded),
-              label: const Text('印刷へ進む'),
-            )
-          else ...[
-            FilledButton.icon(
-              onPressed: !idle || (locked && !demo)
-                  ? null
-                  : () => _openReview(d),
-              icon: Icon(
-                locked && !demo
-                    ? Icons.hourglass_top_rounded
-                    : Icons.verified_user_rounded,
-              ),
-              label: Text(locked && !demo ? '確認を待っています' : 'OTに確認を頼む'),
-            ),
-            if (demo) ...[
-              const SizedBox(height: 8),
-              FilledButton.tonalIcon(
-                onPressed: idle ? _prepareDemo : null,
-                icon: const Icon(Icons.print_rounded),
-                label: const Text('印刷用データを作る（デモ）'),
-              ),
-            ],
-          ],
-        ],
+      bottom: _bottom(
+        d,
+        demo: demo,
+        approval: approval,
+        locked: locked,
+        idle: idle,
       ),
       children: _spaced(12, [
         if (demo) const DemoBanner(),
+        // 直してできた版：何を直したか
+        if (widget.doneNotice != null)
+          Semantics(
+            liveRegion: true,
+            child: InfoCard(
+              tone: NoticeTone.success,
+              icon: Icons.check_circle_outline_rounded,
+              child: Text(widget.doneNotice!),
+            ),
+          ),
         if (d['status'] == 'needs_attention')
           InfoCard(
             tone: NoticeTone.warning,
@@ -554,13 +583,13 @@ class _DesignScreenState extends State<DesignScreen> {
             icon: Icons.check_circle_outline_rounded,
             child: Text('カバーは前の版と同じです。刷ってあるカバーをそのまま使えます'),
           ),
-        if (_busy != null) BusyCard(text: _busy!),
         if (_error != null) ErrorCard(message: _error!),
         // 取り付け具の切り替え（2つ以上のときだけ。ADR-0014 §5）
         if (multi) _attachmentTabs(atts, attId),
-        // 3D表示（three.js）
+        // 3D表示（three.js）。3D表示の上では1本指のスワイプで3Dが回り、ページはスクロールしない。片手の親指で
+        // スクロールしにくかったので、326から240に縮めた（2026-11-22）
         SizedBox(
-          height: 326,
+          height: 240,
           child: parts.isEmpty
               ? Container(
                   decoration: BoxDecoration(
@@ -605,7 +634,10 @@ class _DesignScreenState extends State<DesignScreen> {
               '手を重ねる',
               style: AppText.titleMedium.copyWith(color: AppColors.onSurface),
             ),
-            subtitle: const Text('カバーが手の甲と関節に沿っているか、手のひら側と手首が開いているかを見ます'),
+            subtitle: Text(
+              'カバーが手の甲と関節に沿っているか、手のひら側と手首が開いているかを見ます',
+              style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
+            ),
             value: _showHand,
             onChanged: (v) => setState(() => _showHand = v),
           ),
@@ -621,24 +653,37 @@ class _DesignScreenState extends State<DesignScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // 道具の立て具合（机に対する傾き。ADR-0013、2026-11-08 に 0/20/40 から変えた）
+              // 押すと選ぶだけ。画面の下の「〜で描き直す」で送る。隣を押し間違えにくいよう、すき間は8（2026-11-22 に2から）
               for (final (i, a) in const [60, 70, 80].indexed) ...[
-                if (i > 0) const SizedBox(width: 2),
+                if (i > 0) const SizedBox(width: 8),
                 Expanded(
                   child: _AngleButton(
                     angle: a,
-                    selected: a == angle,
+                    selected: a == (_choice?.angle ?? angle),
+                    current: a == angle,
                     recommended: a == _recommended[attId],
                     position: i == 0
                         ? _GroupPos.first
                         : (i == 2 ? _GroupPos.last : _GroupPos.middle),
-                    onTap: () {
-                      if (a != angle && _busy == null) {
-                        _refine(
-                          withAttachment({'clip_angle_deg': a}, d, attId),
-                          '${multi ? '$labelの' : ''}クリップを$a度で描き直しています（カバーはそのままです）',
-                        );
-                      }
-                    },
+                    onTap: !idle
+                        ? null
+                        : () {
+                            if (a == angle) {
+                              // いまの角度を押したら、角度を選ぶのをやめる
+                              if (_choice?.angle != null) {
+                                setState(() => _choice = null);
+                              }
+                            } else {
+                              _toggleChoice(
+                                RefineChoice.angle(
+                                  a,
+                                  d,
+                                  attId,
+                                  toolLabel: multi ? label : null,
+                                ),
+                              );
+                            }
+                          },
                   ),
                 ),
               ],
@@ -665,6 +710,8 @@ class _DesignScreenState extends State<DesignScreen> {
           style: _noteStyle,
         ),
         const _Heading('言葉で直す'),
+        // 押すと選ぶだけ。「もう少しゆるく」と「もう少しきつく」のような反対の指示が隣にあるので、
+        // 押し間違えても作り直さないよう、画面の下の「〜で直す」で送る（2026-11-22）
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -674,16 +721,17 @@ class _DesignScreenState extends State<DesignScreen> {
               'もう少しきつく',
               'カバーを薄く',
               '空気穴を増やす',
-              'クリップを外しやすく',
+              // 「クリップを外しやすく」は 2026-11-22 にやめた
             ])
-              SuggestButton(
-                label: t,
-                onPressed: !idle
-                    ? null
-                    : () => _refine(
-                        withAttachment({'instruction': t}, d, attId),
-                        '「$t」に合わせて直しています',
-                      ),
+              Builder(
+                builder: (_) {
+                  final c = RefineChoice.instruction(t, d, attId);
+                  return SuggestButton(
+                    label: t,
+                    selected: _choice == c,
+                    onPressed: !idle ? null : () => _toggleChoice(c),
+                  );
+                },
               ),
           ],
         ),
@@ -722,6 +770,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   : () => _refine(
                       withAttachment({'instruction': _instruction.text.trim()}, d, attId),
                       '「${_instruction.text.trim()}」に合わせて直しています',
+                      doneText: '「${_instruction.text.trim()}」に合わせて直しました',
                     ),
             ),
           ],
@@ -749,7 +798,7 @@ class _DesignScreenState extends State<DesignScreen> {
           children: [
             for (final e in _vibes.entries)
               FilterChip(
-                label: Text(e.key),
+                label: Text(e.key, style: AppText.bodyLarge),
                 selected: e.value.toUpperCase() == color.toUpperCase(),
                 onSelected: !idle
                     ? null
@@ -783,6 +832,84 @@ class _DesignScreenState extends State<DesignScreen> {
           child: Text('手のひら側を開ける・手首を覆わない・角を丸める・厚みの下限は、見た目のためでも変えられません。'),
         ),
       ]),
+    );
+  }
+
+  /// S7 の画面の下（いつも見える所）。直している間はその文、直し方を選んだら「〜で直す」、それ以外はいつものボタン。
+  /// 直す操作はページの下のほうにあるので、待つ文や失敗の文を上に出すと見えない（2026-11-22）
+  Widget _bottom(
+    Map<String, dynamic> d, {
+    required bool demo,
+    required String approval,
+    required bool locked,
+    required bool idle,
+  }) {
+    if (_busy != null) {
+      // Column で包む（画面の下の欄は高さの上限が画面いっぱいなので、そのままだと札が伸びる）
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(liveRegion: true, child: BusyCard(text: _busy!)),
+        ],
+      );
+    }
+    final choice = _choice;
+    final note = choice == null ? null : reReviewNote(approval);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_refineError != null) ...[
+          Semantics(liveRegion: true, child: ErrorCard(message: _refineError!)),
+          const SizedBox(height: 8),
+        ],
+        if (choice != null) ...[
+          if (note != null) ...[
+            Text(note, style: _noteStyle),
+            const SizedBox(height: 8),
+          ],
+          FilledButton.icon(
+            onPressed: _sendChoice,
+            icon: const Icon(Icons.auto_fix_high_rounded),
+            label: Text(choice.buttonLabel),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () => setState(() {
+              _choice = null;
+              _refineError = null;
+            }),
+            child: const Text('選ぶのをやめる'),
+          ),
+        ] else if (approval == 'approved')
+          FilledButton.icon(
+            onPressed: () =>
+                Navigator.of(context)
+                    .pushNamed(AppRouter.print(_cid, d['design_id'])),
+            icon: const Icon(Icons.print_rounded),
+            label: const Text('印刷へ進む'),
+          )
+        else ...[
+          FilledButton.icon(
+            onPressed: !idle || (locked && !demo) ? null : () => _openReview(d),
+            icon: Icon(
+              locked && !demo
+                  ? Icons.hourglass_top_rounded
+                  : Icons.verified_user_rounded,
+            ),
+            label: Text(locked && !demo ? '確認を待っています' : 'OTに確認を頼む'),
+          ),
+          if (demo) ...[
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: idle ? _prepareDemo : null,
+              icon: const Icon(Icons.print_rounded),
+              label: const Text('印刷用データを作る（デモ）'),
+            ),
+          ],
+        ],
+      ],
     );
   }
 
@@ -859,7 +986,7 @@ class _DesignScreenState extends State<DesignScreen> {
                   header: true,
                   child: Text(
                     'AIが決めた理由',
-                    style: AppText.titleSmall.copyWith(color: fg),
+                    style: AppText.titleMedium.copyWith(color: fg),
                   ),
                 ),
               ),
@@ -898,6 +1025,7 @@ class _DesignScreenState extends State<DesignScreen> {
     await _refine(
       withAttachment({'param_changes': changes}, d, attId),
       '値に合わせて作り直しています',
+      doneText: '値に合わせて作り直しました',
     );
   }
 
@@ -918,7 +1046,11 @@ class _DesignScreenState extends State<DesignScreen> {
               materialTapTargetSize: MaterialTapTargetSize.padded,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               tooltip: '${attachmentLabel(a, atts)}のクリップを見る',
-              onSelected: (_) => setState(() => _attId = a['id'] as String?),
+              // 選んだ角度・指示はその取り付け具のものなので、切り替えたら選び直してもらう
+              onSelected: (_) => setState(() {
+                _attId = a['id'] as String?;
+                _choice = null;
+              }),
             ),
         ],
       ),
@@ -948,12 +1080,14 @@ class _DesignScreenState extends State<DesignScreen> {
       await _refine(
         {'add_attachment': t.toJson()},
         '${toolJa[t.toolType] ?? '道具'}のクリップを足しています（カバーはそのままです）',
+        doneText: '${toolJa[t.toolType] ?? '道具'}のクリップを足しました',
       );
     } else {
       final v = toolDOf(t);
       await _refine(
         withAttachment({'tool_d_mm': v}, d, fix['id'] as String?),
         '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しています（カバーはそのままです）',
+        doneText: '$labelのクリップを太さ${v.toStringAsFixed(1)}mmで描き直しました',
       );
     }
   }
@@ -1013,7 +1147,7 @@ class _ToolSheetState extends State<_ToolSheet> {
                   widget.fix
                       ? 'このクリップだけを描き直します。カバーはそのままです。新しい版になります'
                       : 'カバーはそのままで、別の道具のクリップを足します。新しい版になります',
-                  style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant),
+                  style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 if (!widget.fix) ...[
                   const SectionLabel('道具'),
@@ -1102,10 +1236,10 @@ class _ParamLabel {
 }
 
 const Map<String, _ParamLabel> _paramLabels = {
-  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '軽い', highJa: '丈夫'),
+  'cover.cover_thickness_mm': _ParamLabel('カバーの厚み', '厚いほど丈夫で、薄いほど軽くなります', lowJa: '薄い', highJa: '厚い'),
   'cover.palm_cut_offset_mm': _ParamLabel('手のひら側をどこまで覆うか', 'プラスにするとカバーが手のひら側へ深くなり、マイナスにすると浅く小さくなります。手のひらは覆いません', lowJa: '浅い', highJa: '深い'),
   'cover.wrist_cut_mm': _ParamLabel('手首からカバーまでの長さ', '大きくするとカバーが短くなり、手首が動かしやすくなります', lowJa: '長いカバー', highJa: '短いカバー'),
-  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '丸い'),
+  'cover.edge_radius_mm': _ParamLabel('ふちの丸み', '大きいほど、ふちが手に当たったときにやわらかく感じます', lowJa: '小さい', highJa: '大きい'),
   'air_holes.count': _ParamLabel('空気穴の数', '多いほど蒸れにくくなります', unit: '個', lowJa: '少ない', highJa: '多い'),
   'air_holes.diameter_mm': _ParamLabel('空気穴の大きさ', '大きいほど蒸れにくく、小さいほどカバーが丈夫です', lowJa: '小さい', highJa: '大きい'),
   'strap_slits.strap_thickness_mm': _ParamLabel('ベルトの厚み', '使うベルト（面ファスナー）の厚みに合わせます。穴の大きさが変わります', lowJa: '薄い', highJa: '厚い'),
@@ -1145,7 +1279,7 @@ class _NumberSheetState extends State<_NumberSheet> {
                 const SizedBox(height: 4),
                 Text(
                   '動かしたあと「この値で作り直す」を押すと、新しい版を作ります。クリップの角度は前の画面のボタンで変えられます',
-                  style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant),
+                  style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 for (final p in widget.params) ...[
@@ -1203,6 +1337,32 @@ class _NumberSheetState extends State<_NumberSheet> {
     final orig = (p['value'] as num).toDouble().clamp(lo, hi);
     final v = (_pending[key] ?? orig).toDouble().clamp(lo, hi);
     final changed = _pending.containsKey(key);
+    // 値を1つ決める（スライダー・−／＋ボタン共通）。元の値に戻したら、変えていない扱い
+    void put(num nv) => setState(() {
+      if ((nv - orig).abs() < 1e-9) {
+        _pending.remove(key);
+      } else {
+        _pending[key] = nv;
+      }
+    });
+    // −／＋ボタン（ToolDmmCard と同じ丸い大きなボタン）。曲がった指ではスライダーを狙った値に止められないので、
+    // 1段ずつ動かせるようにする（2026-11-22）。値を変えるとカードが水色になるので、そのときはボタンを白地にして溶けないようにする。
+    // 読み上げでは外す（カードは MergeSemantics で1つにまとまり、押せるものが重なる。読み上げではスライダーの増やす・減らすで1段ずつ動かせる）
+    Widget stepButton(int dir) => ExcludeSemantics(
+      child: IconButton.filled(
+        tooltip: dir > 0 ? '${label.title}を増やす' : '${label.title}を減らす',
+        iconSize: 28,
+        style: IconButton.styleFrom(
+          fixedSize: const Size(56, 56),
+          backgroundColor: changed ? AppColors.surfaceContainerLowest : AppColors.secondaryContainer,
+          foregroundColor: AppColors.onSecondaryContainer,
+        ),
+        onPressed: canStep(v, dir, lo: lo, hi: hi)
+            ? () => put(stepParam(v, dir, lo: lo, hi: hi, isInt: isInt))
+            : null,
+        icon: Icon(dir > 0 ? Icons.add_rounded : Icons.remove_rounded),
+      ),
+    );
     return MergeSemantics(
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -1224,34 +1384,35 @@ class _NumberSheetState extends State<_NumberSheet> {
               ],
             ),
             const SizedBox(height: 2),
-            Text(label.help, style: AppText.bodyMedium.copyWith(color: AppColors.onSurfaceVariant)),
-            Slider(
-              min: lo,
-              max: hi,
-              divisions: isInt ? (hi - lo).round().clamp(1, 100) : ((hi - lo) * 10).round().clamp(1, 200),
-              value: v,
-              label: '${_fmt(v, isInt)} ${label.unit}',
-              semanticFormatterCallback: (x) => '${label.title} ${_fmt(x, isInt)} ${label.unit}',
-              onChanged: (x) => setState(() {
-                final nv = isInt ? x.round() : double.parse(x.toStringAsFixed(1));
-                if ((nv - orig).abs() < 1e-9) {
-                  _pending.remove(key); // 元の値に戻したら、変えていない扱い
-                } else {
-                  _pending[key] = nv;
-                }
-              }),
+            Text(label.help, style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
+            Row(
+              children: [
+                stepButton(-1),
+                Expanded(
+                  child: Slider(
+                    min: lo,
+                    max: hi,
+                    divisions: isInt ? (hi - lo).round().clamp(1, 100) : ((hi - lo) * 10).round().clamp(1, 200),
+                    value: v,
+                    label: '${_fmt(v, isInt)} ${label.unit}',
+                    semanticFormatterCallback: (x) => '${label.title} ${_fmt(x, isInt)} ${label.unit}',
+                    onChanged: (x) => put(isInt ? x.round() : double.parse(x.toStringAsFixed(1))),
+                  ),
+                ),
+                stepButton(1),
+              ],
             ),
             if (label.lowJa != null || label.highJa != null)
               Row(
                 children: [
-                  Text(label.lowJa ?? '', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                  Text(label.lowJa ?? '', style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                   const Spacer(),
-                  Text(label.highJa ?? '', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                  Text(label.highJa ?? '', style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                 ],
               ),
             Row(
               children: [
-                Text('元の値：${_fmt(orig, isInt)} ${label.unit}', style: AppText.bodySmall.copyWith(color: AppColors.onSurfaceVariant)),
+                Text('元の値：${_fmt(orig, isInt)} ${label.unit}', style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                 const Spacer(),
                 if (changed)
                   TextButton(
@@ -1299,7 +1460,7 @@ class _SubLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     text,
-    style: AppText.titleSmall.copyWith(color: AppColors.onSurfaceVariant),
+    style: AppText.titleMedium.copyWith(color: AppColors.onSurfaceVariant),
   );
 }
 
@@ -1419,7 +1580,7 @@ class _CheckImage extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       'AIが確認している画像',
-                      style: AppText.labelLarge.copyWith(
+                      style: AppText.titleMedium.copyWith(
                         color: AppColors.onSurfaceVariant,
                       ),
                     ),
@@ -1501,7 +1662,7 @@ class _DimTile extends StatelessWidget {
         children: [
           Text(
             label,
-            style: AppText.bodySmall.copyWith(
+            style: AppText.bodyLarge.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
           ),
@@ -1523,15 +1684,17 @@ class _AngleButton extends StatelessWidget {
   const _AngleButton({
     required this.angle,
     required this.selected,
+    required this.current,
     required this.recommended,
     required this.position,
     required this.onTap,
   });
   final int angle;
-  final bool selected;
+  final bool selected; // 選んでいる（いまの角度、または描き直すために選んだ角度）
+  final bool current; // いまの版の角度
   final bool recommended;
   final _GroupPos position;
-  final VoidCallback onTap;
+  final VoidCallback? onTap; // null なら押せない（直している間）
 
   BorderRadius get _radius {
     const big = Radius.circular(28), small = Radius.circular(8);
@@ -1546,56 +1709,72 @@ class _AngleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = selected ? AppColors.onSecondaryContainer : AppColors.onSurface;
+    // 別の角度を選んでいる間は、いまの版の角度に「いまの角度」と添える
+    final showCurrent = current && !selected;
     return Semantics(
       button: true,
+      enabled: onTap != null,
       inMutuallyExclusiveGroup: true,
       checked: selected,
-      label: 'クリップの角度 $angle度${recommended ? '（おすすめ）' : ''}',
+      label:
+          'クリップの角度 $angle度${recommended ? '（おすすめ）' : ''}${showCurrent ? '（いまの角度）' : ''}',
       excludeSemantics: true,
       onTap: onTap,
-      child: Material(
-        color: selected
-            ? AppColors.secondaryContainer
-            : AppColors.surfaceContainerHigh,
-        borderRadius: _radius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CustomPaint(
-                  size: const Size(48, 36),
-                  painter: _AnglePainter(
-                    angle: angle,
-                    color: selected
-                        ? AppColors.onSecondaryContainer
-                        : AppColors.onSurfaceVariant,
+      // 直している間は薄くして、押せないことを見せる
+      child: Opacity(
+        opacity: onTap == null ? 0.38 : 1,
+        child: Material(
+          color: selected
+              ? AppColors.secondaryContainer
+              : AppColors.surfaceContainerHigh,
+          borderRadius: _radius,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CustomPaint(
+                    size: const Size(48, 36),
+                    painter: _AnglePainter(
+                      angle: angle,
+                      color: selected
+                          ? AppColors.onSecondaryContainer
+                          : AppColors.onSurfaceVariant,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (selected) ...[
-                      Icon(
-                        Icons.check_circle_outline_rounded,
-                        size: 18,
-                        color: fg,
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (selected) ...[
+                        Icon(
+                          Icons.check_circle_outline_rounded,
+                          size: 18,
+                          color: fg,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        '$angle度',
+                        style: AppText.titleMedium.copyWith(color: fg),
                       ),
-                      const SizedBox(width: 4),
                     ],
+                  ),
+                  if (recommended)
                     Text(
-                      '$angle度',
+                      'おすすめ',
                       style: AppText.titleMedium.copyWith(color: fg),
                     ),
-                  ],
-                ),
-                if (recommended)
-                  Text('おすすめ', style: AppText.labelMedium.copyWith(color: fg)),
-              ],
+                  if (showCurrent)
+                    Text(
+                      'いまの角度',
+                      style: AppText.titleMedium.copyWith(color: fg),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1749,8 +1928,10 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
           'message_ja': _msg.text.trim(),
         },
       );
+      if (!mounted) return;
       setState(() => _url = '${r['review_url']}');
     } on ApiError catch (e) {
+      if (!mounted) return;
       setState(
         () => _error = switch (e.code) {
           'REVIEWER_NOT_ALLOWED' => 'このアドレスはOTとして登録されていません。',
@@ -1805,7 +1986,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
                       color: AppColors.onSurface,
                     ),
                   ),
-                  if (sub.isNotEmpty) Text(sub, style: AppText.supporting),
+                  if (sub.isNotEmpty) Text(sub, style: AppText.bodyLarge.copyWith(color: AppColors.onSurfaceVariant)),
                 ],
               ),
             ),
@@ -1837,7 +2018,7 @@ class _ReviewRequestDialogState extends State<ReviewRequestDialog> {
             if (_url != null) ...[
               const InfoCard(
                 tone: NoticeTone.success,
-                child: Text('頼みました。確認用のURLをOTに伝えてください。'),
+                child: Text('頼みました。OTがログインすると、ホームに表示されます。下のURLを送って知らせることもできます。'),
               ),
               Container(
                 padding: const EdgeInsets.all(16),

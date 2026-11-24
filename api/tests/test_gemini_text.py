@@ -49,3 +49,20 @@ def test_prompts_do_not_ask_for_field_names():
     for name in ("attachment", "dimension"):
         t = gemini._prompt(name)
         assert "（activity）" not in t and "（tool_type）" not in t, name
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("こぶしの外側に沿うカバーにしました", "手の甲に沿うカバーにしました"),
+    ("道具はこぶしの親指側の横に付けました", "道具は手の親指側の横に付けました"),
+    ("握りこぶしのまま使えます", "握った手のまま使えます"),
+    ("こぶしに沿った殻です", "手に沿った殻です"),
+])
+def test_clean_ja_avoids_kobushi(raw, want):
+    """利用者に見せる文では「こぶし」と書かない（2026-11-22。アプリの言葉を「手の甲」「手」にそろえた）"""
+    assert clean_ja(raw) == want
+
+
+def test_fallback_summary_has_no_kobushi():
+    from app.gemini import mock
+    src = (mock.__file__)
+    assert "こぶし" not in open(src, encoding="utf-8").read().split("summary_ja")[1][:200]

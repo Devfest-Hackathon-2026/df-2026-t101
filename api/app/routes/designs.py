@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from functools import lru_cache
 
@@ -13,7 +14,7 @@ from ..attachments import MAX_ATTACHMENTS, flat_reason, stored_tools
 from ..auth import User, current_user, is_therapist
 from ..config import SCHEMA_DIR
 from ..errors import ApiError
-from ..store import db, now
+from ..store import _deep_merge, db, files, now
 from .common import owned_case, readable_case
 
 router = APIRouter()
@@ -82,8 +83,7 @@ def create_design(case_id: str, body: dict = Body(default={}), user: User = Depe
 @router.get("/v1/cases/{case_id}/designs/{design_id}")
 def get_design(case_id: str, design_id: str, user: User = Depends(current_user)):
     readable_case(case_id, user)
-    _design(case_id, design_id)
-    return {"design": pipeline.design_view(case_id, design_id)}
+    return {"design": pipeline.design_view(case_id, design_id, _design(case_id, design_id))}
 
 
 @router.post("/v1/cases/{case_id}/designs/{design_id}/refine")
@@ -106,7 +106,8 @@ def refine(case_id: str, design_id: str, body: dict = Body(...), user: User = De
         style = {**(d.get("style") or {}), **body["style"]}
         if style.get("pattern", "none") == (d.get("style") or {}).get("pattern", "none"):
             db.update(f"cases/{case_id}/designs/{design_id}", {"style": style})  # 色だけなら版を作らない
-            return {"design": pipeline.design_view(case_id, design_id)}
+            # 書いた結果は手元で作れるので読み直さない（db.update と同じ混ぜ方）
+            return {"design": pipeline.design_view(case_id, design_id, _deep_merge(d, {"style": style}))}
         raise ApiError("INVALID_ARGUMENT", "模様の変更は、いまは使えません")
     if d.get("status") not in ("ready", "needs_attention"):
         raise ApiError("CONFLICT", "この版はまだ直せません")
@@ -215,6 +216,24 @@ def approval(case_id: str, design_id: str, body: dict = Body(...), user: User = 
         ops.end(case_id, op)
 
 
+def _reusable_prints(case: dict, d: dict) -> dict | None:
+    """前に作った印刷用データが、今の形のままなら、それを返す（作り直さない）。
+    本番では同じ版を8回作り直していた（1回7〜13秒）。作り直すと刷るSTLが少し変わることがあり、前の注文の
+    ダウンロードが STALE_DESIGN になるおそれもあった（2026-11-24）。形のハッシュが同じで、刷るファイルが
+    すべて残っていて中身のハッシュも合うときだけ使い回す。どれか違えば今までどおり作り直す"""
+    prints = (d.get("files") or {}).get("print") or {}
+    shas = d.get("print_sha256") or {}
+    if not d.get("print_prepared_at") or not prints or set(prints) != set(shas):
+        return None
+    if d.get("geometry_hash") != pipeline.current_geometry_hash(case, d):
+        return None
+    for k, path in prints.items():
+        data = files.get(path)
+        if data is None or hashlib.sha256(data).hexdigest() != shas[k]:
+            return None
+    return prints
+
+
 @router.post("/v1/cases/{case_id}/designs/{design_id}/prepare-print")
 def prepare_print(case_id: str, design_id: str, user: User = Depends(current_user)):
     case = owned_case(case_id, user)
@@ -227,11 +246,13 @@ def prepare_print(case_id: str, design_id: str, user: User = Depends(current_use
         raise ApiError("RENDER_FAILED", "安全の検査に通っていないので、印刷用のデータは作れません")
     op = ops.begin(case_id, "prepare_print", design_id)
     try:
-        pr = pipeline.prepare_print(case_id, design_id, "prepare_print")
-        prints = pipeline.publish_print(case_id, design_id, pr["internal_keys"], pr["print_sha256"])
-        db.update(f"cases/{case_id}/designs/{design_id}", {
-            "print_prepared_at": now(), "print_sha256": pr["print_sha256"], "geometry_hash": pr["geometry_hash"],
-            "files": {"print": prints}})
+        prints = _reusable_prints(case, d)
+        if prints is None:
+            pr = pipeline.prepare_print(case_id, design_id, "prepare_print")
+            prints = pipeline.publish_print(case_id, design_id, pr["internal_keys"], pr["print_sha256"])
+            db.update(f"cases/{case_id}/designs/{design_id}", {
+                "print_prepared_at": now(), "print_sha256": pr["print_sha256"], "geometry_hash": pr["geometry_hash"],
+                "files": {"print": prints}})
         return {"files": {"print": prints}, "demo_notice_ja": "デモ用：OTの確認を省略しています。実際に使う前には必ずOTの確認が必要です"}
     finally:
         ops.end(case_id, op)

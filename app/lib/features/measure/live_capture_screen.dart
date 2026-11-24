@@ -6,6 +6,7 @@ import 'package:web/web.dart' as web;
 import 'package:jijogu_app/core/ui/ui.dart';
 import 'package:jijogu_app/features/measure/coin_screen.dart';
 import 'package:jijogu_app/features/measure/measure_engine.dart';
+import 'package:jijogu_app/features/measure/stop_recording_dialog.dart';
 
 /// アプリの中でカメラを開いて撮る（スマホは背面カメラ、PCはWebカメラ）。
 /// 映像に手の骨組みを重ね、撮っている間は残り時間と「手が見えているか」を出す。
@@ -32,6 +33,11 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
   double _sec = 0;
   int _cameras = 0;
   String? _error;
+  // 録画中に閉じようとして、確かめる画面を出している間。その間に20秒たって録画が終わったら、
+  // 次の画面へは進まずに結果を取っておき、「撮影を続ける」を選んだら進む（2026-11-22）
+  bool _confirming = false;
+  Map<String, dynamic>? _heldResult;
+  bool _cancelled = false; // 「やめる」を選んだ。あとから届いた録画の結果は捨てる
 
   Future<void> _open(web.HTMLElement el) async {
     try {
@@ -40,7 +46,7 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
       setState(() {
         _ready = true;
         _cameras = (r['cameras'] as num?)?.toInt() ?? 1;
-        _status = '1円玉を手の甲に置き、こぶし全体を画面に入れてください';
+        _status = '1円玉を手の甲にのせて、指先から手首までを画面に入れてください';
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -61,23 +67,48 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
           });
         }
       });
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => CoinScreen(
-            caseId: widget.caseId,
-            hand: widget.hand,
-            first: first,
-          ),
-        ),
-      );
+      if (!mounted || _cancelled) return;
+      if (_confirming) {
+        _heldResult = first; // 確かめる画面の答えを待つ
+        return;
+      }
+      _goCoin(first);
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_cancelled) {
         setState(() {
           _recording = false;
           _error = '$e';
         });
       }
+    }
+  }
+
+  void _goCoin(Map<String, dynamic> first) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) =>
+            CoinScreen(caseId: widget.caseId, hand: widget.hand, first: first),
+      ),
+    );
+  }
+
+  /// 録画中に閉じようとした（左上の「×」・ブラウザの戻る）。確かめてから閉じる
+  Future<void> _confirmClose() async {
+    if (_confirming) return;
+    setState(() => _confirming = true);
+    final stop = await confirmStopRecording(context);
+    if (!mounted) return;
+    setState(() => _confirming = false);
+    if (stop) {
+      _cancelled = true;
+      _heldResult = null;
+      Navigator.of(context).pop(); // dispose で録画とカメラを止める
+      return;
+    }
+    final held = _heldResult;
+    if (held != null) {
+      _heldResult = null;
+      _goCoin(held); // 確かめている間に録画が終わっていた
     }
   }
 
@@ -106,150 +137,180 @@ class _LiveCaptureScreenState extends State<LiveCaptureScreen> {
         : _recording
         ? (_handVisible
               ? (_Tone.success, '手が見えています。スマホをゆっくり半周させてください')
-              : (_Tone.warning, '手が見えません。こぶし全体を画面に入れてください'))
+              : (_Tone.warning, '手が見えません。指先から手首までを画面に入れてください'))
         : (_Tone.info, _status);
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            // PCの横長のWebカメラも大きく映すため、ほかの画面（720）より広くする
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: Column(
-              children: [
-                // 上：閉じる・録画中の札・残り秒数
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 4, 16, 8),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.close_rounded),
-                        color: fg,
-                        tooltip: '閉じる',
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Semantics(
-                          header: true,
-                          label: title,
-                          child: ExcludeSemantics(
-                            child: _recording
-                                ? Row(
-                                    children: [
-                                      const _RecBadge(),
-                                      const Spacer(),
-                                      Text(
-                                        'あと$left秒',
-                                        style: AppText.titleLarge.copyWith(
-                                          color: fg,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : Text(
-                                    title,
-                                    style: AppText.titleLarge.copyWith(
-                                      color: fg,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // カメラは残りの場所いっぱいに広げる（スクロールさせない。撮り方の説明は前の画面にある）。
-                // 映像は枠いっぱいに広げる（object-fit: cover。web_engine/src/camera.ts）。はみ出た端は見えないが撮れている
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(28),
-                      child: ColoredBox(
-                        color: AppColors.inverseSurface,
-                        child: SizedBox.expand(
-                          child: HtmlElementView.fromTagName(
-                            tagName: 'div',
-                            onElementCreated: (Object el) {
-                              final div = el as web.HTMLDivElement;
-                              div.style.width = '100%';
-                              div.style.height = '100%';
-                              unawaited(_open(div));
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // 手が見えているか・進み具合の棒。文が変わってもカメラの大きさが変わらないよう、高さをとっておく
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 88),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+    // 録画中は、閉じる前に確かめる（左上の「×」もブラウザの戻るも、ここを通る）
+    return PopScope(
+      canPop: !_recording,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_confirmClose());
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              // PCの横長のWebカメラも大きく映すため、ほかの画面（720）より広くする
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Column(
+                children: [
+                  // 上：閉じる・録画中の札・残り秒数
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 16, 8),
+                    child: Row(
                       children: [
-                        _StatusChip(tone: statusTone, text: statusText),
-                        const SizedBox(height: 10),
-                        Visibility(
-                          visible: _recording,
-                          maintainSize: true,
-                          maintainAnimation: true,
-                          maintainState: true,
-                          child: LinearProgressIndicator(value: _sec / maxSec),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: const Icon(Icons.close_rounded),
+                          color: fg,
+                          tooltip: '閉じる',
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Semantics(
+                            header: true,
+                            label: title,
+                            child: ExcludeSemantics(
+                              child: _recording
+                                  ? Row(
+                                      children: [
+                                        const _RecBadge(),
+                                        const Spacer(),
+                                        Text(
+                                          'あと$left秒',
+                                          style: AppText.titleLarge.copyWith(
+                                            color: fg,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      title,
+                                      style: AppText.titleLarge.copyWith(
+                                        color: fg,
+                                      ),
+                                    ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-                // 下：カメラの切り替え・撮る／撮り終えるボタン
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 56,
-                        height: 56,
-                        child: _cameras > 1 && !_recording
-                            ? IconButton.filled(
-                                onPressed: () => _eng.switchCamera(),
-                                icon: const Icon(Icons.cameraswitch_rounded),
-                                tooltip: 'カメラを切り替える',
-                                style: IconButton.styleFrom(
-                                  backgroundColor: AppColors.inverseSurface,
-                                  foregroundColor: fg,
-                                  fixedSize: const Size(56, 56),
+                  // カメラは残りの場所いっぱいに広げる（スクロールさせない。撮り方の説明は前の画面にある）。
+                  // 映像は枠いっぱいに広げる（object-fit: cover。web_engine/src/camera.ts）。はみ出た端は見えないが撮れている
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      // 録画中は、手が見えているかを太い枠の色でも示す（緑＝見えている、黄色＝見えない）。
+                      // スマホを回している間は画面が斜めになり、下の札の文字が読めないため（2026-11-22）。
+                      // 枠と映像の間に黒い線を入れて、緑や黄色っぽい映像でも枠が溶けないようにする
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: !_recording
+                              ? Colors.transparent
+                              : _handVisible
+                              ? AppColors.cameraHandSeen
+                              : AppColors.cameraHandLost,
+                          borderRadius: BorderRadius.circular(38),
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(28),
+                            child: ColoredBox(
+                              color: AppColors.inverseSurface,
+                              child: SizedBox.expand(
+                                child: HtmlElementView.fromTagName(
+                                  tagName: 'div',
+                                  onElementCreated: (Object el) {
+                                    final div = el as web.HTMLDivElement;
+                                    div.style.width = '100%';
+                                    div.style.height = '100%';
+                                    unawaited(_open(div));
+                                  },
                                 ),
-                              )
-                            : null,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 40),
-                      _Shutter(
-                        recording: _recording,
-                        label: shutterLabel,
-                        onPressed: onShutter,
-                      ),
-                      const SizedBox(width: 40),
-                      const SizedBox(width: 56, height: 56),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                  child: ExcludeSemantics(
-                    child: Text(
-                      shutterLabel,
-                      textAlign: TextAlign.center,
-                      style: AppText.titleMedium.copyWith(color: fg),
                     ),
                   ),
-                ),
-              ],
+                  // 手が見えているか・進み具合の棒。文が変わってもカメラの大きさが変わらないよう、高さをとっておく
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 88),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _StatusChip(tone: statusTone, text: statusText),
+                          const SizedBox(height: 10),
+                          Visibility(
+                            visible: _recording,
+                            maintainSize: true,
+                            maintainAnimation: true,
+                            maintainState: true,
+                            child: LinearProgressIndicator(
+                              value: _sec / maxSec,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 下：カメラの切り替え・撮る／撮り終えるボタン
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: _cameras > 1 && !_recording
+                              ? IconButton.filled(
+                                  onPressed: () => _eng.switchCamera(),
+                                  icon: const Icon(Icons.cameraswitch_rounded),
+                                  tooltip: 'カメラを切り替える',
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: AppColors.inverseSurface,
+                                    foregroundColor: fg,
+                                    fixedSize: const Size(56, 56),
+                                  ),
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 40),
+                        _Shutter(
+                          recording: _recording,
+                          label: shutterLabel,
+                          onPressed: onShutter,
+                        ),
+                        const SizedBox(width: 40),
+                        const SizedBox(width: 56, height: 56),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                    child: ExcludeSemantics(
+                      child: Text(
+                        shutterLabel,
+                        textAlign: TextAlign.center,
+                        style: AppText.titleMedium.copyWith(color: fg),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -279,7 +340,7 @@ class _RecBadge extends StatelessWidget {
             decoration: BoxDecoration(color: onError, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
-          Text('録画中', style: AppText.labelLarge.copyWith(color: onError)),
+          Text('録画中', style: AppText.titleMedium.copyWith(color: onError)),
         ],
       ),
     );

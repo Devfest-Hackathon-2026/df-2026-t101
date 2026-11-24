@@ -8,7 +8,10 @@ from .config import settings
 from .errors import ApiError
 from .store import db, files, now, parse_time
 
-OP_TTL = timedelta(seconds=300)
+# 処理中の印の期限。生成の期限（REQUEST_TIMEOUT_S）より長くする。前は300秒で決め打ちで、本番の生成の期限（840秒）より
+# 短く、生成中にアプリが16秒ごとに呼ぶ /recover が、まだ動いている生成を失敗にしていた（2026-11-24）。
+# 期限のあとの片付け（保存・アップロード）の分として60秒を足す。既定（280秒）なら340秒
+OP_TTL = timedelta(seconds=max(300, settings.request_timeout_s + 60))
 JST = timezone(timedelta(hours=9))
 
 

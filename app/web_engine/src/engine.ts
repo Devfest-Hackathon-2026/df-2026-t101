@@ -105,11 +105,31 @@ function init(): Promise<void> {
   return initP;
 }
 
+// MediaPipe の本体（WASM の場所）。検出器を作る前に1回だけ
+let visionP: Promise<void> | undefined;
+function vision(): Promise<void> {
+  visionP ??= FilesetResolver.forVisionTasks(base() + 'mediapipe/wasm')
+    .then((v) => { st.vision = v; })
+    .catch((e) => { visionP = undefined; throw e; });
+  return visionP;
+}
+
+// 手のモデル（約7.8MB）は1回だけ取ってきて、2つの検出器で使い回す。前は検出器を作るたびに取りに行っていた（2026-11-24）
+let modelP: Promise<Uint8Array> | undefined;
+function handModel(): Promise<Uint8Array> {
+  modelP ??= fetch(base() + 'mediapipe/models/hand_landmarker.task')
+    .then((r) => { if (!r.ok) throw new Error(`手のモデルを読み込めませんでした（${r.status}）`); return r.arrayBuffer(); })
+    .then((b) => new Uint8Array(b))
+    .catch((e) => { modelP = undefined; throw e; });
+  return modelP;
+}
+
 async function initOnce(): Promise<void> {
-  st.vision = await FilesetResolver.forVisionTasks(base() + 'mediapipe/wasm');
+  await vision();
+  const model = await handModel();
   const make = async (delegate: 'GPU' | 'CPU') =>
     HandLandmarker.createFromOptions(st.vision!, {
-      baseOptions: { modelAssetPath: base() + 'mediapipe/models/hand_landmarker.task', delegate },
+      baseOptions: { modelAssetBuffer: model, delegate },
       runningMode: 'IMAGE',
       numHands: 2,
     });
@@ -119,11 +139,15 @@ async function initOnce(): Promise<void> {
 
 // 手を追いかける検出器（VIDEO モード）。一度見つけた手を次の画像で追いかけるので、手のひらが見えない「真上からの握りこぶし」
 // でも途切れにくい。手が1つ見つかったら手のひらを探し直さないよう numHands は1、しきい値は0.3（2026-11-10）。
-// 撮影中の表示と、解析の手の点の両方に使う（それぞれ別の検出器。時刻と追いかける手を混ぜないため）
-function makeTrackingHand(): Promise<HandLandmarker> {
+// 撮影中の表示と、解析の手の点の両方に使う。前は解析のたびに新しく作っていた（WASM と GPU の準備をやり直し、メモリも
+// 1つ分増えた）が、表示と同じ設定なので1つを使い回す。前の動画の手を追いかけないよう、解析の始めに黒い画像を見せて
+// 追いかけを切る（resetTracking。2026-11-24）。時刻は表示と解析で共通に増やす（Cam.videoTs）
+async function makeTrackingHand(): Promise<HandLandmarker> {
+  await vision();
+  const model = await handModel();
   const make = (delegate: 'GPU' | 'CPU') =>
     HandLandmarker.createFromOptions(st.vision!, {
-      baseOptions: { modelAssetPath: base() + 'mediapipe/models/hand_landmarker.task', delegate },
+      baseOptions: { modelAssetBuffer: model, delegate },
       runningMode: 'VIDEO',
       numHands: 1,
       minHandDetectionConfidence: 0.3,
@@ -139,6 +163,14 @@ let previewHandP: Promise<HandLandmarker> | undefined;
 function previewHand(): Promise<HandLandmarker> {
   previewHandP ??= makeTrackingHand().catch((e) => { previewHandP = undefined; throw e; });
   return previewHandP;
+}
+
+// 追いかけている手を忘れさせる（手のない黒い画像を1枚見せる。次の画像では手を探し直す）
+function resetTracking(h: HandLandmarker) {
+  const t = document.createElement('canvas');
+  t.width = 256; t.height = 256;
+  t.getContext('2d')!.fillRect(0, 0, t.width, t.height);
+  try { h.detectForVideo(t, Cam.videoTs(performance.now())); } finally { t.width = 0; t.height = 0; }
 }
 
 function pickFile(accept: string): Promise<File[]> {
@@ -169,6 +201,21 @@ function pickFile(accept: string): Promise<File[]> {
   });
 }
 
+// iOS の Safari はキャンバスのメモリを GC まで返さず、合わせて約384MBを超えると getContext が null になる。
+// 1280px のフレームは1枚約3.7MB・1回の撮影で最大60枚あるので、撮り直しを2〜3回続けると超える。
+// 使い終わったキャンバスは大きさを0にして、すぐ返す
+function releaseCanvas(c?: HTMLCanvasElement) {
+  if (!c) return;
+  c.width = 0; c.height = 0;
+}
+
+/** 前の撮影のフレームを捨てる（新しい動画を読む前・reset のとき） */
+function releaseFrames() {
+  for (const f of st.frames) releaseCanvas(f.canvas);
+  st.frames = [];
+  st.result = undefined;  // 解析の結果は捨てたフレームを指しているので、一緒に捨てる
+}
+
 function canvasOf(src: CanvasImageSource, w: number, h: number): HTMLCanvasElement {
   const scale = Math.min(1, ANALYSIS_LONG_SIDE / Math.max(w, h));
   const c = document.createElement('canvas');
@@ -188,6 +235,7 @@ function sharpnessOf(c: HTMLCanvasElement): number {
   const d = ctx.getImageData(0, 0, w, h).data;
   const g = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+  releaseCanvas(t);
   return G.sharpness(g, w, h);
 }
 
@@ -196,14 +244,17 @@ const toJpeg = (c: HTMLCanvasElement, longSide = 900, q = 0.82) => {
   const t = document.createElement('canvas');
   t.width = Math.round(c.width * scale); t.height = Math.round(c.height * scale);
   t.getContext('2d')!.drawImage(c, 0, 0, t.width, t.height);
-  return t.toDataURL('image/jpeg', q);
+  const url = t.toDataURL('image/jpeg', q);
+  releaseCanvas(t);
+  return url;
 };
 
 /** §3：動画から1秒に6枚の候補を取り出し、ぼけの少ない上位3枚/秒を残す */
 async function loadVideoFile(file: File, progress?: (stage: string, i: number, n: number) => void) {
   const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  const cands: Frame[] = [];
   try {
-    const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
     v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
     v.src = url;
@@ -238,7 +289,6 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
     const times: number[] = [];
     const fps = Math.min(SAMPLE_FPS, MAX_CANDIDATES / Math.max(1, dur));
     for (let t = 0.05; t < dur; t += 1 / fps) times.push(t);
-    const cands: Frame[] = [];
     for (const [i, t] of times.entries()) {
       progress?.('フレームを選んでいます', i + 1, times.length);
       // seeked が来ないフレームは5秒でとばす（そのまま待ち続けないため）
@@ -252,7 +302,14 @@ async function loadVideoFile(file: File, progress?: (stage: string, i: number, n
       cands.push({ t, canvas: c, sharp: sharpnessOf(c) });
     }
     useCandidates(cands, dur);
+  } catch (e) {
+    for (const f of cands) releaseCanvas(f.canvas);  // 途中で失敗したら、取り出した分を返す
+    throw e;
   } finally {
+    // 動画の読み込み（デコーダー）も手放す
+    v.onloadeddata = v.oncanplay = v.onerror = v.onloadedmetadata = v.onseeked = null;
+    v.removeAttribute('src');
+    v.load();
     URL.revokeObjectURL(url);
   }
 }
@@ -266,6 +323,8 @@ function useCandidates(cands: Frame[], duration: number) {
   // 1秒あたりに残す枚数：取り出した枚数の半分（最大 KEEP_PER_SEC）。1秒に6枚なら3枚、3枚なら2枚
   const keep = Math.min(KEEP_PER_SEC, Math.max(1, Math.ceil(cands.length / Math.max(1, duration) / 2)));
   st.frames = [...bySec.values()].flatMap((fs) => fs.sort((a, b) => b.sharp - a.sharp).slice(0, keep)).sort((a, b) => a.t - b.t);
+  const kept = new Set(st.frames);
+  for (const f of cands) if (!kept.has(f)) releaseCanvas(f.canvas);  // 残さなかった候補（約半分）はすぐ返す
   st.coinSeed = undefined;
 }
 
@@ -380,7 +439,9 @@ function drawOverlay(f: Frame, opts: { coin?: Ellipse | null; landmarks?: boolea
     ctx.fillStyle = '#ffffff';
     for (const q of p) { ctx.beginPath(); ctx.arc(q.x, q.y, lw * 1.6, 0, Math.PI * 2); ctx.fill(); }
   }
-  return toJpeg(c, 720, 0.8);
+  const url = toJpeg(c, 720, 0.8);
+  releaseCanvas(c);
+  return url;
 }
 
 function cropHand(f: Frame): Promise<Blob> {
@@ -393,7 +454,10 @@ function cropHand(f: Frame): Promise<Blob> {
   const c = document.createElement('canvas');
   c.width = Math.round(w * scale); c.height = Math.round(h * scale);
   c.getContext('2d')!.drawImage(f.canvas, x0, y0, w, h, 0, 0, c.width, c.height);
-  return new Promise((res) => c.toBlob((b) => res(b!), 'image/jpeg', 0.85));
+  return new Promise((res, rej) => c.toBlob((b) => {
+    releaseCanvas(c);
+    if (b) res(b); else rej(new Error('手の画像を作れませんでした'));
+  }, 'image/jpeg', 0.85));
 }
 
 /** §6：フレームごとの値 */
@@ -420,13 +484,18 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
   // 手のひらが見えない握りこぶしを見落としやすく、IMG_0150・0152・0153 で使えるフレームが 5・2・7 枚しかなく、
   // 手首→中指の付け根が 57〜74mm とばらついた（追いかけると 17・5・13 枚、75〜79mm）。解析のたびに作り直す
   // （前の動画の手を追いかけないため）。作れなければ今までの検出器を使う。手は1つだけ追う（2つ目の手は見ない）
-  const tracker = await makeTrackingHand().catch(() => undefined);
-  let ts = 0;
+  await init();  // 1枚ずつ探す検出器（st.hand）も使う。ふつうは1円玉の画面ですでにできている
+  let tracker = await previewHand().catch(() => undefined);
+  if (tracker) { try { resetTracking(tracker); } catch { tracker = undefined; } }
+  const t0 = Cam.videoTs(performance.now());  // 表示で使った時刻より後から始める（時刻は増やすだけ）
+  let painted = 0;
   for (const [i, f] of st.frames.entries()) {
     progress?.('手の形を調べています', i + 1, n);
-    await paint();
+    // 進み具合を画面に出すのは 0.15 秒に1回で足りる。前はフレームごとに描かせて待ち（1回約46ms）、最大75枚で
+    // 2〜3.5秒、何もせずに待っていた（2026-11-24）。1円玉を探す間（Worker）も画面は描かれる
+    if (performance.now() - painted > 150) { await paint(); painted = performance.now(); }
     if (tracker) {
-      ts = Math.max(ts + 1, Math.round(f.t * 1000));  // st.frames は時間の順
+      const ts = Cam.videoTs(t0 + f.t * 1000);  // st.frames は時間の順
       try { f.det = tracker.detectForVideo(f.canvas, ts); } catch { /* だめなら下で今までの検出器を使う */ }
     }
     const r = detectHand(f);
@@ -454,7 +523,7 @@ async function analyze(progress?: (stage: string, i: number, n: number) => void)
     if (w.length === 21) f.side = w[5].z < w[17].z ? 'thumb_side' : 'pinky_side';
     perFrame(f);
   }
-  tracker?.close();
+  // tracker は撮影中の表示と使い回すので閉じない
   progress?.('まとめています', n, n);
   const ok = st.frames.filter((f) => f.s);
   if (!ok.length) {
@@ -651,7 +720,14 @@ async function callHandMesh(url: string, caseId: string, authName: string, authV
   const frames = r.meshFrames as Frame[];
   fd.append('meta', JSON.stringify({ case_id: caseId, hand_side: handSide, frames: frames.map((f, i) => ({ name: `frame_${i}`, view: f.side ?? 'top' })) }));
   for (const [i, f] of frames.entries()) fd.append(`frame_${i}`, await cropHand(f), `frame_${i}.jpg`);
-  const res = await fetch(url.replace(/\/$/, '') + '/v1/hand', { method: 'POST', body: fd, headers: { [authName]: authValue } });
+  // 通信そのものの失敗（電波・CORSの付かない500/503・起動待ちの打ち切りなど）は fetch が例外になる。
+  // 撮り直さなくても直ることが多いので、やり直せるエラーにして、アプリ側の自動のやり直し（最大3回）に乗せる
+  let res: Response;
+  try {
+    res = await fetch(url.replace(/\/$/, '') + '/v1/hand', { method: 'POST', body: fd, headers: { [authName]: authValue } });
+  } catch (e: any) {
+    throw Object.assign(new Error(`手の3Dのサーバーにつながりませんでした（${e?.message ?? e}）`), { code: 'MESH_UNAVAILABLE', retryable: true });
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = body?.error ?? body?.detail?.error ?? {};
@@ -706,6 +782,7 @@ const api = {
     // capture を付けると iPhone ではカメラが開く。撮った動画をライブラリから選べるように付けない（2026-11-09）
     const files = await pickFile('video/*');
     if (!files.length) return JSON.stringify({ cancelled: true });
+    releaseFrames();  // 新しいフレームを作る前に、前の撮影の分を返す
     await loadVideoFile(files[0], progress);
     st.source = 'file';
     if (!st.frames.length) throw new Error('フレームを取り出せませんでした');
@@ -713,18 +790,33 @@ const api = {
   },
   /** アプリの中でカメラを開く（スマホは背面、PCはWebカメラ）。el は映像を出す要素 */
   async startCamera(el: HTMLElement) {
-    await init();
-    // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
-    const ph = await previewHand().catch(() => undefined);
-    return JSON.stringify(await Cam.startCamera(el, ph ?? st.hand!, !!ph));
+    // 検出器の読み込み（初回は MediaPipe 約18MB）とカメラの起動を並べて進める。前は読み込みが終わってから
+    // カメラを開いていたので、タブを開いて最初の1回はカメラが出るまで遅かった（2026-11-24）
+    const ready = (async (): Promise<Cam.PreviewHand> => {
+      // 表示に要るのは追いかける検出器だけなので、1枚ずつ探す検出器（init。解析と1円玉で使う）を待たずに作る。
+      // 前は init が終わってから作っていたので、初回は骨組みが出て「撮り始める」を押せるまでが長かった（2026-11-24）。
+      // init は撮影の画面（同意）から裏で始まっているので、並べて進む
+      void init().catch(() => { /* ここでは待たない。失敗は解析・1円玉の画面で出る */ });
+      const ph = await previewHand().catch(() => undefined);
+      if (ph) return { hand: ph, tracking: true };
+      // 表示用の検出器が作れなければ、解析の検出器（IMAGE）で表示する
+      await init();
+      return { hand: st.hand!, tracking: false };
+    })();
+    ready.catch(() => { /* カメラの側が先に失敗したときに、未処理の失敗にしない */ });
+    return JSON.stringify(await Cam.startCamera(el, ready));
   },
   async switchCamera() { return JSON.stringify(await Cam.switchCamera()); },
   /** 録画する。maxSec 秒か stopRecording で終わる。終わったら最初のフレームを返す */
   async record(maxSec: number, onTick?: (sec: number, hand: boolean) => void) {
+    releaseFrames();  // 録画でためる前に、前の撮影の分を返す
     const raw = await Cam.startRecording(maxSec, onTick);
+    if (raw.length < 6) {
+      for (const f of raw) releaseCanvas(f.canvas);
+      throw new Error('撮れたフレームが少なすぎます。もう一度撮ってください');
+    }
     const cands: Frame[] = raw.map((f) => ({ t: f.t, canvas: f.canvas, sharp: sharpnessOf(f.canvas) }));
-    const dur = raw.length ? raw[raw.length - 1].t : 0;
-    if (raw.length < 6) throw new Error('撮れたフレームが少なすぎます。もう一度撮ってください');
+    const dur = raw[raw.length - 1].t;
     useCandidates(cands, dur);
     st.source = 'live_camera';
     Cam.stopCamera();
@@ -768,7 +860,7 @@ const api = {
     return JSON.stringify(applyManualPoints(JSON.parse(json)));
   },
   /** 動画とフレームを捨てる */
-  reset() { Cam.stopCamera(); st.frames = []; st.result = undefined; st.coinSeed = undefined; st.coinRef = undefined; st.coinTapped = false; st.coinManual = false; },
+  reset() { Cam.stopCamera(); releaseFrames(); st.coinSeed = undefined; st.coinRef = undefined; st.coinTapped = false; st.coinManual = false; },
 };
 
 /** Dart から扱いやすいよう、失敗も JSON（{"error": {...}}）で返す */

@@ -57,7 +57,7 @@ def dimension(requirements: dict, param_defs: list, attachments: list | None = N
         if d["part_id"] == "c_clip" and d["name"] == "opening_ratio" and requirements.get("donning_by") == "helper":
             src, why = "ai", "家族や支援者が着け外しするので、押し込みやすさを優先しました"
         out.append({"part_id": d["part_id"], "name": d["name"], "value": v, "source": src, "reason_ja": why})
-    res = {"params": out, "summary_ja": "こぶしの外側に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。"}
+    res = {"params": out, "summary_ja": "手の甲に沿うカバーと、道具の太さに合わせたクリップにしました。手のひら側と手首は開けてあります。"}
     if attachments:
         res["attachments"] = [{"attachment_id": a["attachment_id"], **attachment_angle(a)} for a in attachments]
     return res

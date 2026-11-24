@@ -2,7 +2,9 @@
 # ビルドはリポジトリの直下から：docker build -f api/Dockerfile -t jijogu-api .
 # （scad/ と schemas/ を同梱するため、文脈はリポジトリの直下）
 # 要確認：openscad/openscad:dev の中身（Debian の版と python3 の版）と、Manifold が既定で使えるか
-FROM openscad/openscad:dev
+# dev は毎日変わる版なので、作り直すたびに違う OpenSCAD が入らないよう、本番で動かしてきた版（2026-11-23 のビルド
+# 1b7459cc で使われたもの）に固定する（2026-11-24）。上げるときは digest を書き換えて、形のテストを流してから
+FROM openscad/openscad:dev@sha256:c7e532e701d3add64de98c317abbbcacbf1ab9efb656014dcb001b90e7538c38
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates \

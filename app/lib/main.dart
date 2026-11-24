@@ -24,6 +24,7 @@ class JijoguApp extends StatelessWidget {
       theme: appTheme(),
       initialRoute: '/',
       onGenerateRoute: AppRouter.onGenerateRoute,
+      navigatorObservers: [AppRouter.observer],
     );
   }
 }

@@ -4,16 +4,23 @@ import 'package:jijogu_app/app/paths.dart';
 import 'package:jijogu_app/core/session.dart';
 import 'package:jijogu_app/core/ui/ui.dart';
 import 'package:jijogu_app/features/design/design_screen.dart';
+import 'package:jijogu_app/features/fabricator/fabricator_order_screen.dart';
+import 'package:jijogu_app/features/fabricator/fabricator_orders_screen.dart';
 import 'package:jijogu_app/features/home/home_screen.dart';
 import 'package:jijogu_app/features/interview/interview_screen.dart';
 import 'package:jijogu_app/features/login/login_screen.dart';
 import 'package:jijogu_app/features/measure/capture_screen.dart';
+import 'package:jijogu_app/features/order/fabricator_list_screen.dart';
+import 'package:jijogu_app/features/order/order_form_screen.dart';
 import 'package:jijogu_app/features/print/print_screen.dart';
 import 'package:jijogu_app/features/review/review_screen.dart';
 
 /// 画面のパス（docs/screens.md §1）。ログインしていなければ S0 に移し、ログイン後に元のパスへ戻す
 class AppRouter {
   AppRouter._();
+
+  /// 上の画面が閉じて戻ってきたことを知るため（ホームが読み直す）。ダイアログ・ボトムシートは数えない
+  static final observer = RouteObserver<PageRoute<dynamic>>();
 
   static String interview(String c) => Paths.interview(c);
   static String capture(String c) => Paths.capture(c);
@@ -49,6 +56,12 @@ class AppRouter {
         case 'capture':
           return CaptureScreen(caseId: c);
         case 'designs' when seg.length >= 4:
+          if (seg.length >= 5 && seg[4] == 'order') {
+            if (seg.length >= 6) {
+              return OrderFormScreen(caseId: c, designId: seg[3], fabricatorId: seg[5]);
+            }
+            return FabricatorListScreen(caseId: c, designId: seg[3]);
+          }
           if (seg.length >= 5 && seg[4] == 'print') {
             return PrintScreen(caseId: c, designId: seg[3]);
           }
@@ -57,6 +70,10 @@ class AppRouter {
             designId: seg[3] == 'new' ? null : seg[3],
           );
       }
+    }
+    if (seg.isNotEmpty && seg[0] == 'fabricator') {
+      if (seg.length == 1) return const FabricatorOrdersScreen();
+      if (seg.length == 3 && seg[1] == 'orders') return FabricatorOrderScreen(orderId: seg[2]);
     }
     if (seg.length == 2 && seg[0] == 'review') {
       return ReviewScreen(caseId: seg[1]);

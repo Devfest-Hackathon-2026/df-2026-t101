@@ -912,7 +912,7 @@ class OutOfScopeDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                alt('握った形のまま、こぶしにかぶせて道具を持つカバーなら作れます'),
+                alt('握った形のまま、手の甲にかぶせて道具を持つカバーなら作れます'),
                 const SizedBox(height: 10),
                 alt('作業療法士に相談して、装具を作ってもらう'),
               ],
