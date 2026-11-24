@@ -13,7 +13,7 @@
 
 ## デモ動画
 
-[![デモ動画：聞く・撮る・形を作る・確かめて刷る（YouTube）](docs/images/demo-thumbnail.jpg)](https://www.youtube.com/watch?v=sXcZP1J1Qmw)
+[![デモ動画：聞く・撮る・形を作る・確かめて刷る（YouTube）](docs/images/demo-thumbnail.jpg)](https://www.youtube.com/shorts/jrfmyF-ucRo)
 
 スマホ 1 台で、聞き取りから印刷用データのダウンロードまでを通した 75 秒の動画です（画像を押すと YouTube で開きます）。
 
